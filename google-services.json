@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "636972185577",
+    "project_id": "odds-passport",
+    "storage_bucket": "odds-passport.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:636972185577:android:0653d13196b245aade3d78",
+        "android_client_info": {
+          "package_name": "teampassport.oddsfitness.com"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDsWphsi74nZSfR4RP2wJ7boTWQ9PDq84Y"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
