@@ -2,13 +2,13 @@
   "expo": {
     "name": "Odds Passport",
     "slug": "odds-app",
-    "version": "2.8",
+    "version": "2.9",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "android": {
       "package": "teampassport.oddsfitness.com",
-      "versionCode": 16,
+      "versionCode": 17,
       "adaptiveIcon": {
         "backgroundColor": "#000000",
         "foregroundImage": "./assets/android-icon-foreground.png",
