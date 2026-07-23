@@ -23,6 +23,37 @@ const installedBuild = (): number => {
 
 type Requirement = { min_version_code: number; store_url: string; message: string | null };
 
+/* ---- Play Store live-version check (primary signal) ----
+   Fetches the public Play listing and extracts the published versionName, so
+   EVERY release automatically forces older installs — no per-release SQL.
+   Fail-open: fetch/parse failure (page layout change, offline) → no block. */
+const PLAY_URL = 'https://play.google.com/store/apps/details?id=teampassport.oddsfitness.com';
+
+const installedVersionName = (): string => String((Constants.expoConfig as any)?.version ?? '0');
+
+/* "2.10" vs "2.8" → numeric segment compare (never string compare). */
+const versionLess = (a: string, b: string): boolean => {
+  const pa = a.split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = b.split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] ?? 0, y = pb[i] ?? 0;
+    if (x !== y) return x < y;
+  }
+  return false;
+};
+
+async function fetchPlayVersion(): Promise<string | null> {
+  try {
+    const res = await fetch(`${PLAY_URL}&hl=en`, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    if (!res.ok) return null;
+    const html = await res.text();
+    // Play embeds the versionName in its data payload as [[["2.8"]] — take the
+    // first dotted-number match in that shape.
+    const m = html.match(/\[\[\["(\d+(?:\.\d+)+)"\]\]/);
+    return m ? m[1] : null;
+  } catch { return null; }
+}
+
 export function UpdateGate({ children }: { children: React.ReactNode }) {
   const reqQ = useQuery({
     queryKey: ['app-version-requirement', Platform.OS],
@@ -39,17 +70,31 @@ export function UpdateGate({ children }: { children: React.ReactNode }) {
     },
   });
 
+  // Live Play Store version (Android): a newer published release forces update.
+  const playQ = useQuery({
+    queryKey: ['play-store-version'],
+    enabled: Platform.OS === 'android',
+    staleTime: 30 * 60 * 1000,
+    refetchOnWindowFocus: true,
+    queryFn: fetchPlayVersion,
+  });
+
   // Re-check when the app returns to the foreground (catches new requirements fast).
   React.useEffect(() => {
     const sub = AppState.addEventListener('change', (s: AppStateStatus) => {
-      if (s === 'active') reqQ.refetch();
+      if (s === 'active') { reqQ.refetch(); playQ.refetch(); }
     });
     return () => sub.remove();
   }, []);
 
   const req = reqQ.data;
   const current = installedBuild();
-  const mustUpdate = !!req && current > 0 && current < req.min_version_code;
+  const tableForce = !!req && current > 0 && current < req.min_version_code;
+  const playVersion = playQ.data ?? null;
+  const localVersion = installedVersionName();
+  const playForce = !!playVersion && versionLess(localVersion, playVersion);
+  const mustUpdate = tableForce || playForce;
+  const storeUrl = req?.store_url || PLAY_URL;
 
   if (!mustUpdate) return <>{children}</>;
 
@@ -63,10 +108,10 @@ export function UpdateGate({ children }: { children: React.ReactNode }) {
         {req?.message || 'A new version of Odds is available. Please update to continue.'}
       </Body>
       <Mono style={{ fontSize: 9, letterSpacing: 0.8, color: C.muted3 }}>
-        INSTALLED v{current} · REQUIRED v{req?.min_version_code}
+        {playForce ? `INSTALLED v${localVersion} · LATEST v${playVersion}` : `INSTALLED v${current} · REQUIRED v${req?.min_version_code}`}
       </Mono>
       <Pressable
-        onPress={() => { if (req?.store_url) Linking.openURL(req.store_url).catch(() => {}); }}
+        onPress={() => Linking.openURL(storeUrl).catch(() => {})}
         style={{ width: '100%', maxWidth: 320, alignItems: 'center', paddingVertical: 14, borderRadius: 14, backgroundColor: hexA(C.orange, 0.16), borderWidth: 1, borderColor: hexA(C.orange, 0.5) }}
       >
         <Text style={{ fontFamily: F.bodyBold, fontSize: 14.5, color: C.orange }}>Update Now</Text>

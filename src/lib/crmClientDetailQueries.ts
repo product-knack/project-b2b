@@ -614,7 +614,7 @@ export function useUpcomingRoster(clientId: string | null) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('session_schedule')
-        .select('id, scheduled_datetime, session_type, modality, status, trainer_id')
+        .select('id, scheduled_datetime, session_type, modality, status, trainer_id, notes')
         .eq('client_id', clientId)
         .gte('scheduled_datetime', new Date().toISOString())
         .in('status', ['scheduled', 'confirmed'])

@@ -9,6 +9,7 @@ import { Page, BackLink, Badge, AnimChip, HScroll } from './common';
 import { PdfPreview } from '../components/PdfPreview';
 import { useStore } from '../store';
 import { useAuth } from '../auth';
+import { trackClientTab } from '../lib/amplitude';
 import {
   HEAD_DOCTOR_ID, formatDoctorSessionType,
   useDoctorIdentity, useDoctorClientHeader, useDoctorClientSessionCounts,
@@ -637,7 +638,7 @@ const MED_INITIAL = {
   is_ongoing: false, problem_description: '', diagnosis: '', treatment_given: '', medicines_taken: '',
   hospital_name: '', treating_doctor: '',
 };
-function MedicalEntrySheet({ visible, onClose, clientId, doctorId }: { visible: boolean; onClose: () => void; clientId: string; doctorId: string }) {
+export function MedicalEntrySheet({ visible, onClose, clientId, doctorId }: { visible: boolean; onClose: () => void; clientId: string; doctorId: string }) {
   const addM = useAddMedicalHistory();
   const aiM = useAiUploadMedicalDocs();
   const [mode, setMode] = React.useState<'choose' | 'manual' | 'ai'>('choose');
@@ -951,6 +952,7 @@ export function DoctorClientDetail() {
   const [months, setMonths] = React.useState('1');
   const countsQ = useDoctorClientSessionCounts(clientId ? [clientId] : [], months, !!clientId);
   const [tab, setTab] = React.useState<'sessions' | 'medical' | 'reports' | 'notes'>('sessions');
+  React.useEffect(() => { trackClientTab('doctor-client-detail', tab, { id: clientId, name: selectedClientName }); }, [tab]);
   const [assignOpen, setAssignOpen] = React.useState(false);
   const [logOpen, setLogOpen] = React.useState(false);
   const [infoOpen, setInfoOpen] = React.useState(false);

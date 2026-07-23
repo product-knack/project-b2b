@@ -199,7 +199,14 @@ const categorize = (sessionType: string | null, status: string): SessionCategory
   if (sessionType === 'personal_training' || sessionType === 'workout') return 'workout';
   return 'other';
 };
-export type CrmSessionRow = { id: string; when: string; type: string; category: SessionCategory; status: string; trainerName: string; notes: string | null; cancelled: boolean };
+export type CrmSessionRow = {
+  id: string; when: string; type: string; category: SessionCategory; status: string;
+  trainerName: string; notes: string | null; cancelled: boolean;
+  /* Paid-cancellation labels (web CancelTypePicker semantics): paidCancel=true →
+     the cancel deducts from the package; adminApproval tracks the admin queue
+     (pending/approved/rejected) on session_schedule rows. */
+  paidCancel: boolean; adminApproval: string | null; canceledBy: string | null;
+};
 export function useCrmClientSessions(clientId: string | null) {
   return useQuery({
     queryKey: ['crm-client-sessions', clientId],
@@ -207,8 +214,8 @@ export function useCrmClientSessions(clientId: string | null) {
     staleTime: 30_000,
     queryFn: async (): Promise<CrmSessionRow[]> => {
       const [tsR, ssR] = await Promise.all([
-        supabase.from('training_sessions').select('id, scheduled_at, session_type, status, trainer_id, notes').eq('client_id', clientId).neq('status', 'parked').order('scheduled_at', { ascending: false }),
-        supabase.from('session_schedule').select('id, scheduled_datetime, session_type, modality, status, trainer_id, cancellation_remark').eq('client_id', clientId).eq('status', 'cancelled').order('scheduled_datetime', { ascending: false }),
+        supabase.from('training_sessions').select('id, scheduled_at, session_type, status, trainer_id, notes, paid_cancellation').eq('client_id', clientId).neq('status', 'parked').order('scheduled_at', { ascending: false }),
+        supabase.from('session_schedule').select('id, scheduled_datetime, session_type, modality, status, trainer_id, cancellation_remark, paid_cancellation, admin_approval, canceled_by').eq('client_id', clientId).eq('status', 'cancelled').order('scheduled_datetime', { ascending: false }),
       ]);
       if (tsR.error) throw new Error(tsR.error.message);
       const tIds = [...new Set([...(tsR.data ?? []), ...(ssR.data ?? [])].map((r: any) => r.trainer_id).filter(Boolean))];
@@ -223,6 +230,8 @@ export function useCrmClientSessions(clientId: string | null) {
         category: categorize(r.session_type, r.status ?? 'scheduled'), status: r.status ?? 'scheduled',
         trainerName: r.trainer_id ? names.get(r.trainer_id) ?? 'Trainer' : 'N/A', notes: r.notes ?? null,
         cancelled: r.status === 'cancelled',
+        // A paid training_sessions row only exists AFTER admin approval.
+        paidCancel: !!r.paid_cancellation, adminApproval: r.paid_cancellation ? 'approved' : null, canceledBy: null,
       }));
       // Dedupe: cancelled schedule rows matching a training_sessions cancellation by trainer + minute.
       const tsCancelledKeys = new Set(a.filter((s) => s.cancelled).map((s) => `${s.trainerName}|${(s.when ?? '').slice(0, 16)}`));
@@ -233,6 +242,7 @@ export function useCrmClientSessions(clientId: string | null) {
           return {
             id: `ss-${r.id}`, when: r.scheduled_datetime, type: pretty(r.session_type || r.modality),
             category: 'cancelled', status: 'cancelled', trainerName, notes: r.cancellation_remark ?? null, cancelled: true,
+            paidCancel: !!r.paid_cancellation, adminApproval: r.admin_approval ?? null, canceledBy: r.canceled_by ?? null,
           };
         })
         .filter((x): x is CrmSessionRow => x !== null);

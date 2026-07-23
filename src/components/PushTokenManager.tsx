@@ -39,6 +39,17 @@ export function PushTokenManager() {
       vibrationPattern: [0, 250, 250, 250],
       lightColor: '#F97316',
     }).catch(() => {});
+    // Longevity Team alerts — the B2C 2-minute reply commitment. The LONG
+    // vibration lives on the NOTIFICATION CHANNEL, so it fires even with the
+    // app killed / phone locked (~30s of buzz-pause cycles). The server's
+    // longevity push targets this channel via channel_id.
+    Notifications.setNotificationChannelAsync('longevity-alerts', {
+      name: 'Longevity Team messages',
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, ...Array.from({ length: 18 }, (_, i) => (i % 2 === 0 ? 1000 : 700))],
+      lightColor: '#E11D48',
+      sound: 'default',
+    }).catch(() => {});
   }, []);
 
   React.useEffect(() => {

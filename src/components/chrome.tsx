@@ -151,6 +151,7 @@ export function Drawer() {
     if (it.route === 'b2c-reports') return session?.user?.id === '196ec824-a093-4944-ae3d-3c4919ebf0df';
     if (it.route === 'mgr-dash' || it.label === 'Managers Overview' || it.label === 'QHP Overview') return caps.data.isManager;
     if (it.label === 'Trainers Tracker') return caps.data.isTrainerManager;
+    if (it.route === 'crm-esc') return caps.data.isCrmManager; // web: crm_manager spec only
     if (it.label === 'Trainer Roster') return caps.data.canViewAllTrainers;
     if (it.route === 'workout-analyst') return caps.data.workoutAnalyst;
     if (it.route === 'plans-analyst') return caps.data.workoutComplianceAnalyst;

@@ -5,6 +5,7 @@ import { Icon } from '../icons';
 import { Serif, Body, Mono, Card, Avatar, ProgressBar } from '../components/primitives';
 import { Page, Badge, BackLink, HScroll } from './common';
 import { useStore } from '../store';
+import { trackClientTab } from '../lib/amplitude';
 import { useAuth } from '../auth';
 import {
   useClientDetail, useActivePause, useClientRemarks, useAddClientRemark,
@@ -283,6 +284,7 @@ export function AdminClientDetail() {
   const q = useClientDetail(selectedClientId);
   const pauseQ = useActivePause(selectedClientId);
   const [tab, setTab] = React.useState<'overview' | 'sessions' | 'remarks' | 'goals' | 'circle'>('overview');
+  React.useEffect(() => { trackClientTab('admin-client-detail', tab, { id: selectedClientId }); }, [tab]);
   const setMonthly = useSetMonthly();
   const endPause = useEndPause();
   const [pauseOpen, setPauseOpen] = React.useState(false);

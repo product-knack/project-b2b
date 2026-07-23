@@ -31,6 +31,8 @@ export type Capabilities = {
   isManager: boolean;
   /* Trainers Tracker page (web: role_specialization includes 'trainer-manager') */
   isTrainerManager: boolean;
+  /* CRM Escalations page (web: role_specialization includes 'crm_manager') */
+  isCrmManager: boolean;
 };
 
 const EMPTY: Capabilities = {
@@ -45,6 +47,7 @@ const EMPTY: Capabilities = {
   isHod: false,
   isManager: false,
   isTrainerManager: false,
+  isCrmManager: false,
 };
 
 export function useMyCapabilities(): { data: Capabilities; isLoading: boolean } {
@@ -74,6 +77,7 @@ export function useMyCapabilities(): { data: Capabilities; isLoading: boolean } 
         isHod: Array.isArray(spec) ? spec.includes('hod') : typeof spec === 'string' && spec.includes('hod'),
         isManager: (data as any)?.managers === true,
         isTrainerManager: Array.isArray(spec) ? spec.includes('trainer-manager') : typeof spec === 'string' && spec.includes('trainer-manager'),
+        isCrmManager: Array.isArray(spec) ? spec.includes('crm_manager') : typeof spec === 'string' && spec.includes('crm_manager'),
       };
     },
   });

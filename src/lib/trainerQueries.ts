@@ -512,10 +512,14 @@ export function useRosterDistance(clientId: string | null, enabled: boolean, ori
    a fire-and-forget notify-roster-request edge call that pushes to the client's
    assigned CRM(s). 'single' carries requested_datetime; 'full' leaves it null —
    the CRM builds the slots from the remark. */
+/* Session modalities — web CreateSessionDialog MODALITIES verbatim. Shared by the
+   trainer's request sheet and the CRM's schedule-on-approve sheet. */
+export const SESSION_MODALITIES = ['Strength', 'Yoga', 'Boxing', 'HIIT', 'Cardio', 'Pilates', 'Functional', 'CrossFit', 'Physiotherapy'] as const;
+
 export function useRequestRoster() {
   return useMutation({
-    mutationFn: async ({ clientId, rosterType, date, time, remark }: {
-      clientId: string; rosterType: 'single' | 'full'; date?: string | null; time?: string | null; remark: string;
+    mutationFn: async ({ clientId, rosterType, date, time, remark, modality }: {
+      clientId: string; rosterType: 'single' | 'full'; date?: string | null; time?: string | null; remark: string; modality?: string | null;
     }) => {
       const { data: userData } = await supabase.auth.getUser();
       const uid = userData.user?.id;
@@ -532,19 +536,23 @@ export function useRequestRoster() {
         requestedDatetime = dt.toISOString();
       }
 
-      const { data: inserted, error } = await supabase
-        .from('all_requests')
-        .insert({
-          request_type: 'roster_request',
-          requested_by: uid,
-          client_id: clientId,
-          requested_datetime: requestedDatetime,
-          remark: remark.trim(),
-          status: 'pending',
-          roster_type: rosterType,
-        })
-        .select('id')
-        .maybeSingle();
+      const basePayload: any = {
+        request_type: 'roster_request',
+        requested_by: uid,
+        client_id: clientId,
+        requested_datetime: requestedDatetime,
+        remark: remark.trim(),
+        status: 'pending',
+        roster_type: rosterType,
+      };
+      // Trainer's chosen modality rides on the request so the CRM's approve
+      // dialog prefills it. Falls back gracefully if the all_requests.modality
+      // column migration hasn't been run yet.
+      let ins = await supabase.from('all_requests').insert({ ...basePayload, modality: modality ?? null }).select('id').maybeSingle();
+      if (ins.error && /modality/.test(ins.error.message)) {
+        ins = await supabase.from('all_requests').insert(basePayload).select('id').maybeSingle();
+      }
+      const { data: inserted, error } = ins;
       if (error) throw new Error(error.message);
 
       // Non-blocking CRM push — insert success is what matters.
@@ -979,6 +987,53 @@ export function useManagerTeam(managerId: string) {
    SECURITY DEFINER, authorized server-side; verified live. Fetched lazily —
    only when a row is expanded. */
 export type SessionBreakdownRow = { clientId: string; clientName: string; total: number; completed: number; cancelled: number; parked: number; pending: number; complimentary: number; lastAt: string | null };
+
+/* SELF month breakdown — direct queries on the trainer's OWN sessions (RLS-safe
+   for every trainer). The manager RPC (get_manager_trainer_session_breakdown)
+   is guarded to managers and raises "unauthorized" for regular trainers, so the
+   dashboard's own-sessions card must NOT use it. */
+export function useMyMonthSessionBreakdown(trainerId: string, enabled: boolean) {
+  const month = istMonthBounds();
+  return useQuery({
+    queryKey: ['my-month-session-breakdown', trainerId, month.start],
+    enabled: enabled && !!trainerId,
+    staleTime: 120_000,
+    queryFn: async (): Promise<SessionBreakdownRow[]> => {
+      const { data, error } = await supabase
+        .from('training_sessions')
+        .select('client_id, status, cancelled, complimentary_session, scheduled_at')
+        .eq('trainer_id', trainerId)
+        .neq('status', 'parked')
+        .gte('scheduled_at', month.startUtc)
+        .lte('scheduled_at', month.endUtc)
+        .limit(2000);
+      if (error) throw new Error(error.message);
+      const rows = (data ?? []) as any[];
+      const byClient = new Map<string, SessionBreakdownRow>();
+      rows.forEach((r) => {
+        const id = r.client_id ?? 'unknown';
+        let g = byClient.get(id);
+        if (!g) { g = { clientId: id, clientName: '—', total: 0, completed: 0, cancelled: 0, parked: 0, pending: 0, complimentary: 0, lastAt: null }; byClient.set(id, g); }
+        g.total += 1;
+        const cancelled = r.cancelled || r.status === 'cancelled';
+        if (cancelled) g.cancelled += 1;
+        else if (r.status === 'completed') g.completed += 1;
+        else g.pending += 1;
+        if (r.complimentary_session) g.complimentary += 1;
+        if (!g.lastAt || r.scheduled_at > g.lastAt) g.lastAt = r.scheduled_at;
+      });
+      const ids = [...byClient.keys()].filter((k) => k !== 'unknown');
+      if (ids.length) {
+        const { data: cls } = await supabase.from('clients').select('id, first_name, last_name').in('id', ids);
+        (cls ?? []).forEach((c: any) => {
+          const g = byClient.get(c.id);
+          if (g) g.clientName = `${c.first_name ?? ''} ${c.last_name ?? ''}`.replace(/\s+/g, ' ').trim() || '—';
+        });
+      }
+      return [...byClient.values()];
+    },
+  });
+}
 export function useTrainerSessionBreakdown(trainerId: string, periodStart: string | null, periodEnd: string | null, enabled: boolean) {
   return useQuery({
     queryKey: ['trainer-session-breakdown', trainerId, periodStart, periodEnd],

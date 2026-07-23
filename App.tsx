@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, ActivityIndicator, Image, Dimensions } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import * as ScreenCapture from 'expo-screen-capture';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -44,6 +45,13 @@ const cachePersister = createAsyncStoragePersister({ storage: Storage, key: 'rq-
 initOffline(queryClient);
 
 export default function App() {
+  // Screen-capture lockdown: screenshots are blocked and screen recordings show
+  // a black screen (Android FLAG_SECURE; iOS secure-view equivalent). Applied
+  // app-wide for the life of the process.
+  React.useEffect(() => {
+    ScreenCapture.preventScreenCaptureAsync().catch(() => {});
+    return () => { ScreenCapture.allowScreenCaptureAsync().catch(() => {}); };
+  }, []);
   // Brand type: Geogrotesque (Emtype) for all UI/body text; Gradvis-Regular for
   // display/hero headlines. These are TRIAL cuts — license Geogrotesque from
   // Emtype and Gradvis from its foundry before any commercial release.

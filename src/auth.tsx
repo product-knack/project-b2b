@@ -56,7 +56,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let cancelled = false;
     fetchRole(uid).then((r) => {
       if (cancelled) return;
-      if (!r.app) { supabase.auth.signOut(); return; }
+      if (!r.app) { supabase.auth.signOut({ scope: 'local' }); return; }
       if (expectedRoleRef.current && r.app !== expectedRoleRef.current) return; // signIn() is rejecting this session
       setRole(r.app);
       setDbRole(r.db);
@@ -72,13 +72,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const r = await fetchRole(data.user.id);
       if (!r.app) {
         // Not a staff account (client / no profile) — this app is staff-only.
-        await supabase.auth.signOut();
+        await supabase.auth.signOut({ scope: 'local' });
         return { error: 'This app is for Odds staff. Please use the client app to sign in.', role: null };
       }
       // Role-picker enforcement: the selected role must match the ACCOUNT's real
       // role. Mismatch → sign the session straight back out, never publish state.
       if (expectedRole && r.app !== expectedRole) {
-        await supabase.auth.signOut();
+        await supabase.auth.signOut({ scope: 'local' });
         return { error: 'wrong-role:' + r.app, role: null };
       }
       setRole(r.app);
@@ -90,7 +90,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
-    await supabase.auth.signOut();
+    await supabase.auth.signOut({ scope: 'local' });
     setRole(null);
     setDbRole(null);
   }, []);

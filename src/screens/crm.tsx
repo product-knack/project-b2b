@@ -5,6 +5,9 @@ import * as Haptics from 'expo-haptics';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { useRescheduleRequests, useApproveReschedule, useRejectReschedule, useRosterRequests, useReviewRosterRequest, RescheduleReq, RosterReq } from '../lib/approvalQueries';
+import { SESSION_MODALITIES } from '../lib/trainerQueries';
+import { useChatOverview } from '../lib/chatQueries';
+import { FeatureTour, CRM_TOUR, TourLauncher } from '../components/featureTour';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { C, F, hexA, ORANGE_GRAD, tones } from '../theme';
 import { Icon } from '../icons';
@@ -224,6 +227,60 @@ function PauseEndedBanner({ crmId }: { crmId: string | null }) {
 }
 
 /* ============ CRM DASHBOARD ============ */
+/* ============ Longevity unread alert (CRM home) ============
+   Animated banner shown whenever ANY client's "My Longevity Team" group has
+   unread messages — the 2-minute-reply commitment surfaced on the default page.
+   Tap → jumps straight into the exact chat (most recent unread group). Live:
+   the chat-overview query is invalidated by realtime on every incoming message. */
+function LongevityUnreadAlert({ crmId }: { crmId: string | null }) {
+  const { go, setOpenChat } = useStore();
+  const overview = useChatOverview(crmId ?? '');
+  const groups = (overview.data ?? [])
+    .filter((c) => c.type === 'group' && !c.isAnnouncements && c.unreadCount > 0)
+    .sort((a, b) => (b.lastMessageAt ?? '').localeCompare(a.lastMessageAt ?? ''));
+  // Pulsing glow + ping ring — always mounted so hooks stay stable.
+  const pulse = React.useRef(new Animated.Value(0)).current;
+  React.useEffect(() => {
+    const loop = Animated.loop(Animated.sequence([
+      Animated.timing(pulse, { toValue: 1, duration: 900, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+      Animated.timing(pulse, { toValue: 0, duration: 900, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+    ]));
+    loop.start();
+    return () => loop.stop();
+  }, []);
+  if (!groups.length) return null;
+  const total = groups.reduce((n, g) => n + g.unreadCount, 0);
+  const target = groups[0]; // most recent unread group → "that exact chat"
+  const open = () => { setOpenChat(target.conversationId); go('messenger'); };
+  return (
+    <Pressable onPress={open}>
+      <Animated.View style={{ borderRadius: 16, overflow: 'hidden', borderWidth: 1.5, borderColor: hexA(C.red, 0.55), transform: [{ scale: pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.012] }) }] }}>
+        <LinearGradient colors={[hexA(C.red, 0.16), hexA(C.purple, 0.08)]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 13 }}>
+          <View style={{ width: 42, height: 42, alignItems: 'center', justifyContent: 'center' }}>
+            {/* ping ring */}
+            <Animated.View style={{ position: 'absolute', width: 42, height: 42, borderRadius: 21, borderWidth: 1.5, borderColor: C.red, opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.55, 0] }), transform: [{ scale: pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.55] }) }] }} />
+            <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: hexA(C.red, 0.16), borderWidth: 1, borderColor: hexA(C.red, 0.45), alignItems: 'center', justifyContent: 'center' }}>
+              <Icon name="msgAlert" size={18} color={C.red} strokeWidth={2.1} />
+            </View>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Body style={{ fontSize: 13.5, fontFamily: F.bodyBold, color: '#FFB4A8' }}>
+              {total} unread in Longevity Team{groups.length > 1 ? ` · ${groups.length} clients` : ''}
+            </Body>
+            <Body numberOfLines={1} style={{ fontSize: 11.5, color: C.muted2, marginTop: 2 }}>
+              {target.lastMessage ? target.lastMessage : 'Clients expect a reply within 2 minutes'} — tap to open
+            </Body>
+          </View>
+          <View style={{ minWidth: 26, height: 26, paddingHorizontal: 8, borderRadius: 13, backgroundColor: C.red, alignItems: 'center', justifyContent: 'center' }}>
+            <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: '#fff' }}>{total > 99 ? '99+' : total}</Text>
+          </View>
+          <Icon name="chevRight" size={15} color={C.red} strokeWidth={2.4} />
+        </LinearGradient>
+      </Animated.View>
+    </Pressable>
+  );
+}
+
 export function CrmDashboard() {
   const { set, go } = useStore();
   const { session } = useAuth();
@@ -238,6 +295,7 @@ export function CrmDashboard() {
   const firstName = profileQ.data?.firstName ?? 'there';
   const sideProf = useSidebarProfile();
   const [retentionOpen, setRetentionOpen] = React.useState(false);
+  const [tourOpen, setTourOpen] = React.useState(false);
   // Referral + package-upsell cards (counts shared with the incentives panel via react-query).
   const incentQ = useCrmIncentives(crmId);
   const inc = incentQ.data;
@@ -256,7 +314,11 @@ export function CrmDashboard() {
         sub="Your client success overview"
         initial={(firstName[0] || 'C').toUpperCase()}
         avatarUrl={sideProf.avatarUrl}
+        rightAction={<TourLauncher onPress={() => setTourOpen(true)} />}
       />
+      <FeatureTour visible={tourOpen} steps={CRM_TOUR} tourName='crm' onClose={() => setTourOpen(false)} />
+      {/* Longevity unread — the 2-minute reply commitment, front and centre */}
+      <LongevityUnreadAlert crmId={crmId} />
       {/* Birthday alert — shows only when a client's birthday is today */}
       <BirthdayBanner crmId={crmId} />
       {/* Pause-ended alert — clients whose pause lapsed and are active again */}
@@ -994,10 +1056,14 @@ export function CrmApprovals() {
         .finally(() => setBusyId(null));
       return;
     }
-    const msg = req.rosterType === 'single'
-      ? `This creates the session${req.slotAt ? ` on ${istSlot(req.slotAt)}` : ''} for ${req.clientName} and marks the request approved.`
-      : 'Full-roster requests are approved here; build the actual roster in Roster Management afterwards.';
-    Alert.alert('Approve request?', msg, [
+    if (req.rosterType === 'single') {
+      // Single-day approve = the Schedule Session sheet (web CreateSessionDialog):
+      // client + trainer prefilled from the request, trainer's modality prefilled
+      // but editable, CRM confirms time/notes — modality is REQUIRED.
+      setSchedFor(req);
+      return;
+    }
+    Alert.alert('Approve request?', 'Full-roster requests are approved here; build the actual roster in Roster Management afterwards.', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Approve', onPress: async () => {
         setBusyId(req.id);
@@ -1006,6 +1072,36 @@ export function CrmApprovals() {
         finally { setBusyId(null); }
       } },
     ]);
+  };
+
+  /* ---- Schedule Session sheet state (single-day roster approve) ---- */
+  const [schedFor, setSchedFor] = React.useState<RosterReq | null>(null);
+  const [schedTime, setSchedTime] = React.useState('');       // HH:mm (IST)
+  const [schedModality, setSchedModality] = React.useState<string | null>(null);
+  const [schedNotes, setSchedNotes] = React.useState('');
+  const [schedErr, setSchedErr] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    if (!schedFor) return;
+    const iso = schedFor.slotAt;
+    setSchedTime(iso ? new Date(iso).toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false }) : '');
+    setSchedModality(schedFor.modality ?? null);
+    setSchedNotes(schedFor.remark ?? '');
+    setSchedErr(null);
+  }, [schedFor?.id]);
+  const schedDateYmd = schedFor?.slotAt
+    ? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(schedFor.slotAt))
+    : null;
+  const schedTimeValid = /^([01]\d|2[0-3]):[0-5]\d$/.test(schedTime.trim());
+  const canSchedule = !!schedFor && !!schedDateYmd && schedTimeValid && !!schedModality && !reviewM.isPending;
+  const doSchedule = async () => {
+    if (!canSchedule || !schedFor) return;
+    setSchedErr(null);
+    const datetimeIso = new Date(`${schedDateYmd}T${schedTime.trim()}:00+05:30`).toISOString();
+    try {
+      await reviewM.mutateAsync({ req: schedFor, crmId: crmId!, action: 'approve', schedule: { datetimeIso, modality: schedModality!, notes: schedNotes } });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      setSchedFor(null);
+    } catch (e: any) { setSchedErr(e?.message ?? 'Could not schedule. Try again.'); }
   };
 
   const rejectBox = (onConfirm: () => void, optional = false) => (
@@ -1046,6 +1142,89 @@ export function CrmApprovals() {
 
   return (
     <Page gap={14} pt={6}>
+      {/* Schedule Session sheet — single-day roster approve (web CreateSessionDialog port) */}
+      <Modal visible={!!schedFor} transparent animationType="slide" onRequestClose={() => !reviewM.isPending && setSchedFor(null)}>
+        <Pressable onPress={() => !reviewM.isPending && setSchedFor(null)} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' }}>
+          <Pressable onPress={() => {}} style={{ backgroundColor: C.sheetBg, borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 10, paddingBottom: 26, maxHeight: '88%' }}>
+            <View style={{ alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.14)', marginBottom: 14 }} />
+            <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 11, marginBottom: 14 }}>
+                <View style={{ width: 38, height: 38, borderRadius: 13, backgroundColor: hexA(C.green, 0.13), borderWidth: 1, borderColor: hexA(C.green, 0.35), alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon name="calendar" size={16} color={C.green} strokeWidth={2} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Serif style={{ fontSize: 19 }}>Schedule Session</Serif>
+                  <Body style={{ fontSize: 11.5, color: C.muted2, marginTop: 1 }}>
+                    {schedFor?.slotAt ? new Date(schedFor.slotAt).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) : ''}
+                  </Body>
+                </View>
+                <Pressable onPress={() => !reviewM.isPending && setSchedFor(null)} style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon name="close" size={14} color="#B8B2AC" strokeWidth={2.3} />
+                </Pressable>
+              </View>
+
+              {/* Client + Trainer (from the request — display only) */}
+              <View style={{ gap: 8, marginBottom: 14 }}>
+                {([['user', 'CLIENT', schedFor?.clientName ?? '—'], ['users', 'TRAINER', schedFor?.trainerName ?? '—']] as const).map(([ic, lab, val]) => (
+                  <View key={lab} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 13, backgroundColor: 'rgba(255,255,255,0.03)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' }}>
+                    <Icon name={ic as any} size={14} color={C.orange} strokeWidth={2} />
+                    <Mono style={{ fontSize: 8.5, letterSpacing: 0.8, color: C.muted3, width: 58 }}>{lab}</Mono>
+                    <Body style={{ flex: 1, fontSize: 13.5, fontFamily: F.bodySemi, color: '#fff' }} numberOfLines={1}>{val}</Body>
+                  </View>
+                ))}
+              </View>
+
+              <Mono style={{ fontSize: 10, letterSpacing: 1.2, color: C.mono2, marginBottom: 7 }}>MODALITY *</Mono>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginBottom: 14 }}>
+                {SESSION_MODALITIES.map((m) => {
+                  const sel = schedModality === m;
+                  return (
+                    <Pressable key={m} onPress={() => setSchedModality(m)} style={{ paddingVertical: 8, paddingHorizontal: 13, borderRadius: 999, backgroundColor: sel ? hexA(C.blue, 0.14) : 'rgba(255,255,255,0.03)', borderWidth: 1, borderColor: sel ? hexA(C.blue, 0.5) : 'rgba(255,255,255,0.08)' }}>
+                      <Text style={{ fontFamily: sel ? F.bodyBold : F.bodySemi, fontSize: 12, color: sel ? C.blue : C.ink3 }}>{m}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              {schedFor?.modality ? (
+                <Body style={{ fontSize: 10.5, color: C.muted3, marginTop: -8, marginBottom: 12 }}>Trainer requested {schedFor.modality} — you can change it.</Body>
+              ) : null}
+
+              <Mono style={{ fontSize: 10, letterSpacing: 1.2, color: C.mono2, marginBottom: 7 }}>TIME (IST, 24H) *</Mono>
+              <TextInput
+                value={schedTime} onChangeText={setSchedTime} placeholder="12:15" placeholderTextColor={C.muted3}
+                autoCorrect={false} keyboardType="numbers-and-punctuation" maxLength={5}
+                style={{ paddingVertical: 12, paddingHorizontal: 14, borderRadius: 13, borderWidth: 1, borderColor: schedTime && !schedTimeValid ? hexA(C.red, 0.5) : 'rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.04)', color: '#fff', fontFamily: F.bodySemi, fontSize: 15, marginBottom: 14 }}
+              />
+
+              <Mono style={{ fontSize: 10, letterSpacing: 1.2, color: C.mono2, marginBottom: 7 }}>NOTES (OPTIONAL)</Mono>
+              <TextInput
+                value={schedNotes} onChangeText={setSchedNotes} placeholder="Notes for the session…" placeholderTextColor={C.muted3} multiline
+                style={{ minHeight: 60, textAlignVertical: 'top', paddingVertical: 11, paddingHorizontal: 14, borderRadius: 13, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.04)', color: '#fff', fontFamily: F.body, fontSize: 13.5, marginBottom: 12 }}
+              />
+
+              {schedErr ? (
+                <View style={{ flexDirection: 'row', gap: 8, padding: 11, borderRadius: 12, backgroundColor: hexA(C.red, 0.08), borderWidth: 1, borderColor: hexA(C.red, 0.3), marginBottom: 12 }}>
+                  <Icon name="alert" size={14} color={C.red} strokeWidth={2.2} />
+                  <Body style={{ flex: 1, fontSize: 11.5, color: '#F0A9A0' }}>{schedErr}</Body>
+                </View>
+              ) : null}
+
+              <View style={{ flexDirection: 'row', gap: 9 }}>
+                <Pressable onPress={() => !reviewM.isPending && setSchedFor(null)} style={{ flex: 1, alignItems: 'center', paddingVertical: 14, borderRadius: 13, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }}>
+                  <Text style={{ fontFamily: F.bodySemi, fontSize: 13.5, color: C.ink3 }}>Cancel</Text>
+                </Pressable>
+                <Pressable onPress={doSchedule} disabled={!canSchedule} style={{ flex: 1.5, borderRadius: 13, overflow: 'hidden', opacity: canSchedule ? 1 : 0.5 }}>
+                  <LinearGradient colors={['#3FBF77', '#2E9A5D']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 14 }}>
+                    <Icon path="M20 6 9 17l-5-5" size={14} color="#fff" strokeWidth={2.8} />
+                    <Text style={{ fontFamily: F.bodyBold, fontSize: 13.5, color: '#fff' }}>{reviewM.isPending ? 'Scheduling…' : 'Schedule Session'}</Text>
+                  </LinearGradient>
+                </Pressable>
+              </View>
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       {/* Header — urgent, live */}
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
         <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: hexA(C.red, 0.12), borderWidth: 1, borderColor: hexA(C.red, 0.3), alignItems: 'center', justifyContent: 'center' }}>
@@ -1187,7 +1366,12 @@ export function CrmApprovals() {
                     {r.slotAt ? (
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, borderRadius: 11, backgroundColor: 'rgba(0,0,0,0.28)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)' }}>
                         <Icon name="clock" size={13} color={C.green} strokeWidth={2} />
-                        <Body style={{ fontSize: 12.5, color: C.ink3 }}>Requested slot: <Text style={{ fontFamily: F.bodySemi, color: '#fff' }}>{istSlot(r.slotAt)}</Text></Body>
+                        <Body style={{ flex: 1, fontSize: 12.5, color: C.ink3 }}>Requested slot: <Text style={{ fontFamily: F.bodySemi, color: '#fff' }}>{istSlot(r.slotAt)}</Text></Body>
+                        {r.modality ? (
+                          <View style={{ paddingVertical: 3, paddingHorizontal: 9, borderRadius: 999, backgroundColor: hexA(C.blue, 0.12), borderWidth: 1, borderColor: hexA(C.blue, 0.35) }}>
+                            <Text style={{ fontFamily: F.bodySemi, fontSize: 10, color: C.blue }}>{r.modality}</Text>
+                          </View>
+                        ) : null}
                       </View>
                     ) : null}
                     {r.remark ? (

@@ -5,6 +5,7 @@ import { C, F, hexA } from '../theme';
 import { Icon, IconName } from '../icons';
 import { Serif, Body, Mono, Card, CountUp, Avatar, ProgressBar } from '../components/primitives';
 import { Page, GreetingHeader, Badge } from './common';
+import { FeatureTour, ADMIN_TOUR, TourLauncher } from '../components/featureTour';
 import { useSidebarProfile } from '../lib/navQueries';
 import { useStore } from '../store';
 import { RequestsSummaryCard } from './adminRequests';
@@ -315,6 +316,7 @@ function RevenueSheet({ total, prevTotal, deltaPct, onClose }: { total: number; 
 }
 
 export function AdminDashboard() {
+  const [tourOpen, setTourOpen] = React.useState(false);
   const prof = useSidebarProfile();
   const acQ = useActiveClientsBreakdown();
   const revQ = useAdminRevenue();
@@ -367,7 +369,9 @@ export function AdminDashboard() {
         sub="Admin control center"
         initial={prof.initial}
         avatarUrl={prof.avatarUrl}
+        rightAction={<TourLauncher onPress={() => setTourOpen(true)} />}
       />
+      <FeatureTour visible={tourOpen} steps={ADMIN_TOUR} tourName='admin' onClose={() => setTourOpen(false)} />
 
       {/* Revenue — the headline metric, first thing on the page, rises in on entry */}
       <RiseIn delay={0}>

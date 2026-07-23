@@ -2,6 +2,8 @@ import React from 'react';
 import { View, Text, Pressable, ScrollView, Image, Modal, TextInput, Keyboard, Platform, PanResponder, Animated, Easing, Alert, ActivityIndicator, useWindowDimensions, Linking } from 'react-native';
 import { backSwipeLock } from '../gestureLock';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { trackClientTab } from '../lib/amplitude';
+import { FeatureTour, TRAINER_TOUR, TourLauncher } from '../components/featureTour';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { C, F, hexA, ORANGE_GRAD } from '../theme';
@@ -20,7 +22,7 @@ import { useAuth } from '../auth';
 import { supabase, DEV_TRAINER_ID } from '../lib/supabase';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { QhpAssessmentForm, CoachPresenceModal, fetchHasPriorCompletedQHP } from './qhpAssessmentForm';
-import { useTodayRoster, useTrainerStats, useTrainerProfile, useTrainerMonthSessions, useTrainerLeaderboard, useManagerLeaderboard, useManagerTeam, useManagerTeamLeaves, useManagerTeamIncidents, useManagerTeamRetention, useManagerTeamLateLogs, useManagerTeamRoster, useManagerTeamPlanOverview, useManagerTeamAcks, useManagerTeamAppAdoption, useTrainerSessionBreakdown, useTrainerReferralBreakdown, useFirstSessionAlert, istTimeParts, istDayLabel, istDate, useCancelScheduledSession, useRequestReschedule, useAddMissedRemark, lbMonthBounds, lbMonthLabel, LbBounds, RosterRow, ManagerTeamMember, MgrMonthFilter, usePlanExpiryMap, PlanExpiry, useTrainerAckSummary, useRequestRoster, useRosterDistance } from '../lib/trainerQueries';
+import { useTodayRoster, useTrainerStats, useTrainerProfile, useTrainerMonthSessions, useTrainerLeaderboard, useManagerLeaderboard, useManagerTeam, useManagerTeamLeaves, useManagerTeamIncidents, useManagerTeamRetention, useManagerTeamLateLogs, useManagerTeamRoster, useManagerTeamPlanOverview, useManagerTeamAcks, useManagerTeamAppAdoption, useTrainerSessionBreakdown, useTrainerReferralBreakdown, useFirstSessionAlert, istTimeParts, istDayLabel, istDate, useCancelScheduledSession, useRequestReschedule, useAddMissedRemark, lbMonthBounds, lbMonthLabel, LbBounds, RosterRow, ManagerTeamMember, MgrMonthFilter, usePlanExpiryMap, PlanExpiry, useTrainerAckSummary, useRequestRoster, useRosterDistance, SESSION_MODALITIES, useMyMonthSessionBreakdown } from '../lib/trainerQueries';
 import { useMyClients, useClientDetail, useClientSessions, useClientPlans, useClientGoals, useClientReports, useClientBioAge, useClientProgression, useCreateWorkoutSession, useModalityGate, useWorkoutTemplates, useSaveWorkoutTemplate, useDeleteWorkoutTemplate, useClientHealthCheck, useSaveHealthData, useExerciseDb, useSessionExercises, uuidv4, HealthDataInput, useWeeklyProgressionAll, ackWeeklyReport, WeeklyProgressionRow, useApprovedPlansForLogging, usePartnerInfo, usePreviousExerciseData, checkDuplicateWorkoutToday, PlanExerciseRow, useClientDailyStats, useSaveClientHomeLocation } from '../lib/clientQueries';
 import * as Location from 'expo-location';
 import KvStorage from 'expo-sqlite/kv-store';
@@ -513,6 +515,7 @@ function RequestRosterSheet({ visible, onClose, trainerId }: { visible: boolean;
   const [clientQ, setClientQ] = React.useState('');
   const [date, setDate] = React.useState<string | null>(null);
   const [slot, setSlot] = React.useState<string | null>(null);
+  const [modality, setModality] = React.useState<string | null>(null);
   const [remark, setRemark] = React.useState('');
   const busy = reqM.isPending;
   const err = reqM.error as Error | null;
@@ -527,7 +530,7 @@ function RequestRosterSheet({ visible, onClose, trainerId }: { visible: boolean;
   }, []);
 
   React.useEffect(() => {
-    if (visible) { setRosterType('single'); setClientId(null); setClientQ(''); setDate(null); setSlot(null); setRemark(''); reqM.reset(); }
+    if (visible) { setRosterType('single'); setClientId(null); setClientQ(''); setDate(null); setSlot(null); setModality(null); setRemark(''); reqM.reset(); }
   }, [visible]);
 
   // useMyClients already returns only actively_training assignments (web parity).
@@ -553,12 +556,12 @@ function RequestRosterSheet({ visible, onClose, trainerId }: { visible: boolean;
   );
 
   const isFull = rosterType === 'full';
-  const canSend = !!clientId && !!remark.trim() && (isFull || (!!date && !!slot)) && !busy;
+  const canSend = !!clientId && !!remark.trim() && (isFull || (!!date && !!slot && !!modality)) && !busy;
 
   const send = async () => {
     if (!canSend) return;
     try {
-      await reqM.mutateAsync({ clientId: clientId!, rosterType, date, time: slot, remark });
+      await reqM.mutateAsync({ clientId: clientId!, rosterType, date, time: slot, remark, modality });
       onClose();
       Alert.alert('Request sent', 'Roster request sent to CRM.');
     } catch { /* error surfaced below */ }
@@ -670,6 +673,18 @@ function RequestRosterSheet({ visible, onClose, trainerId }: { visible: boolean;
                     ))}
                   </View>
                 )}
+
+                {label('MODALITY *')}
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginBottom: 16 }}>
+                  {SESSION_MODALITIES.map((m) => {
+                    const sel = modality === m;
+                    return (
+                      <Pressable key={m} onPress={() => setModality(sel ? null : m)} style={{ paddingVertical: 8, paddingHorizontal: 13, borderRadius: 999, backgroundColor: sel ? hexA(C.blue, 0.14) : 'rgba(255,255,255,0.03)', borderWidth: 1, borderColor: sel ? hexA(C.blue, 0.5) : 'rgba(255,255,255,0.08)' }}>
+                        <Text style={{ fontFamily: sel ? F.bodyBold : F.bodySemi, fontSize: 12, color: sel ? C.blue : C.ink3 }}>{m}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
               </>
             ) : null}
 
@@ -1298,6 +1313,9 @@ export function Dashboard() {
   // One silent device fix for the roster cards' inline distance estimates
   // (permission is guaranteed for trainers by the LocationGate — never prompts).
   const [devPos, setDevPos] = React.useState<{ lat: number; lng: number } | null>(null);
+  const [tourOpen, setTourOpen] = React.useState(false);
+  const [monthCardOpen, setMonthCardOpen] = React.useState(false);
+  const monthBreakQ = useMyMonthSessionBreakdown(trainerId, monthCardOpen);
   React.useEffect(() => {
     let alive = true;
     (async () => {
@@ -1421,7 +1439,9 @@ export function Dashboard() {
         sub="Here's your training overview"
         initial={(displayName[0] || 'T').toUpperCase()}
         avatarUrl={sideProf.avatarUrl}
+        rightAction={<TourLauncher onPress={() => setTourOpen(true)} />}
       />
+      <FeatureTour visible={tourOpen} steps={TRAINER_TOUR} tourName='trainer' onClose={() => setTourOpen(false)} />
 
       {/* Linked-account toggle (coach ⇄ Sagar) — renders only for those two accounts */}
       <AccountSwitch />
@@ -1457,6 +1477,113 @@ export function Dashboard() {
           </View>
         );
       })}
+
+      {/* ---- Sessions This Month — tap for the per-client breakdown ---- */}
+      {(() => {
+        const count = s?.monthSessionsCount ?? 0;
+        const now = new Date();
+        const dayOfMonth = Number(now.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric' }));
+        const pace = dayOfMonth > 0 ? (count / dayOfMonth).toFixed(1) : '0.0';
+        const monthName = now.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', month: 'long' });
+        return (
+          <Pressable onPress={() => setMonthCardOpen(true)}>
+            <View style={{ borderRadius: 19, overflow: 'hidden', borderWidth: 1, borderColor: hexA(C.orange, 0.24) }}>
+              <LinearGradient colors={['rgba(58,34,20,0.6)', 'rgba(20,15,14,0.65)']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+                <LinearGradient colors={[hexA(C.orange, 0.55), 'rgba(255,255,255,0.02)']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ height: 3 }} />
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 13, padding: 15 }}>
+                  <View style={{ width: 52, height: 52, alignItems: 'center', justifyContent: 'center' }}>
+                    <MapPing color={C.orange} />
+                    <View style={{ width: 48, height: 48, borderRadius: 17, backgroundColor: hexA(C.orange, 0.13), borderWidth: 1, borderColor: hexA(C.orange, 0.4), alignItems: 'center', justifyContent: 'center' }}>
+                      <Icon name="dumbbell" size={21} color={C.orange} strokeWidth={2} />
+                    </View>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Mono style={{ fontSize: 8.5, letterSpacing: 1.2, color: C.mono2 }}>SESSIONS THIS MONTH</Mono>
+                    <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8, marginTop: 2 }}>
+                      <Serif style={{ fontSize: 32, color: '#fff' }}>{statsQ.isLoading ? '…' : count}</Serif>
+                      <View style={{ paddingVertical: 3, paddingHorizontal: 9, borderRadius: 999, backgroundColor: hexA(C.green, 0.1), borderWidth: 1, borderColor: hexA(C.green, 0.32), marginBottom: 7 }}>
+                        <Text style={{ fontFamily: F.bodySemi, fontSize: 9.5, color: C.green }}>≈ {pace}/day pace</Text>
+                      </View>
+                    </View>
+                    <Body style={{ fontSize: 10.5, color: C.muted3 }}>{monthName} · tap for the per-client breakdown</Body>
+                  </View>
+                  <Icon name="chevRight" size={17} color={C.orange} strokeWidth={2.3} />
+                </View>
+              </LinearGradient>
+            </View>
+          </Pressable>
+        );
+      })()}
+
+      {/* Breakdown modal — per-client sessions this month */}
+      <Modal visible={monthCardOpen} transparent animationType="slide" onRequestClose={() => setMonthCardOpen(false)}>
+        <View style={{ flex: 1, justifyContent: 'flex-end' }}>
+          <Pressable onPress={() => setMonthCardOpen(false)} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)' }} />
+          <View style={{ maxHeight: '84%', backgroundColor: C.sheetBg, borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 10, paddingBottom: 26 }}>
+            <View style={{ alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.14)', marginBottom: 12 }} />
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 11, marginBottom: 6 }}>
+              <View style={{ width: 38, height: 38, borderRadius: 13, backgroundColor: hexA(C.orange, 0.13), borderWidth: 1, borderColor: hexA(C.orange, 0.35), alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name="dumbbell" size={16} color={C.orange} strokeWidth={2.1} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Serif style={{ fontSize: 19 }}>This Month's Sessions</Serif>
+                <Body style={{ fontSize: 11, color: C.muted2, marginTop: 1 }}>Per client · {new Date().toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', month: 'long', year: 'numeric' })}</Body>
+              </View>
+              <Pressable onPress={() => setMonthCardOpen(false)} style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name="close" size={14} color="#B8B2AC" strokeWidth={2.3} />
+              </Pressable>
+            </View>
+            {(() => {
+              const rows = monthBreakQ.data ?? [];
+              const tot = (k: 'completed' | 'cancelled' | 'complimentary') => rows.reduce((n, r) => n + (r as any)[k], 0);
+              return (
+                <>
+                  {/* Totals strip */}
+                  <View style={{ flexDirection: 'row', gap: 7, marginBottom: 10 }}>
+                    {([['COMPLETED', tot('completed'), C.green], ['CANCELLED', tot('cancelled'), C.red], ['COMP', tot('complimentary'), C.purple], ['CLIENTS', rows.length, C.blue]] as const).map(([lab, n, col]) => (
+                      <View key={lab} style={{ flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: 12, backgroundColor: hexA(col, 0.07), borderWidth: 1, borderColor: hexA(col, 0.25) }}>
+                        <Text style={{ fontFamily: F.bodyBold, fontSize: 16, color: col }}>{n}</Text>
+                        <Mono style={{ fontSize: 6.5, letterSpacing: 0.5, color: C.muted3, marginTop: 1 }}>{lab}</Mono>
+                      </View>
+                    ))}
+                  </View>
+                  {monthBreakQ.isLoading ? (
+                    <View style={{ paddingVertical: 28, alignItems: 'center' }}><ActivityIndicator color={C.orange} /></View>
+                  ) : monthBreakQ.isError ? (
+                    <Body style={{ fontSize: 12, color: C.red, textAlign: 'center', paddingVertical: 18 }}>{(monthBreakQ.error as Error).message}</Body>
+                  ) : rows.length === 0 ? (
+                    <Body style={{ fontSize: 12, color: C.muted3, textAlign: 'center', paddingVertical: 22 }}>No sessions logged this month yet.</Body>
+                  ) : (
+                    <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 12 }}>
+                      {[...rows].sort((a, b) => b.total - a.total).map((r) => {
+                        const max = Math.max(1, ...rows.map((x) => x.total));
+                        return (
+                          <View key={r.clientId} style={{ padding: 12, borderRadius: 13, backgroundColor: 'rgba(0,0,0,0.24)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)', gap: 7 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
+                              <Body numberOfLines={1} style={{ flex: 1, fontSize: 13.5, fontFamily: F.bodySemi, color: '#fff' }}>{r.clientName}</Body>
+                              <Text style={{ fontFamily: F.bodyBold, fontSize: 16, color: C.orange }}>{r.total}</Text>
+                            </View>
+                            <View style={{ height: 5, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
+                              <View style={{ width: `${(r.total / max) * 100}%`, height: 5, borderRadius: 999, backgroundColor: hexA(C.orange, 0.8) }} />
+                            </View>
+                            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 5 }}>
+                              {r.completed ? <Badge text={`${r.completed} completed`} color={C.green} /> : null}
+                              {r.cancelled ? <Badge text={`${r.cancelled} cancelled`} color={C.red} /> : null}
+                              {r.complimentary ? <Badge text={`${r.complimentary} comp`} color={C.purple} /> : null}
+                              {r.pending ? <Badge text={`${r.pending} pending`} color={C.gold} /> : null}
+                              {r.lastAt ? <Mono style={{ fontSize: 8, color: C.muted3, alignSelf: 'center' }}>LAST {istDayLabel(r.lastAt).toUpperCase()}</Mono> : null}
+                            </View>
+                          </View>
+                        );
+                      })}
+                    </ScrollView>
+                  )}
+                </>
+              );
+            })()}
+          </View>
+        </View>
+      </Modal>
 
       {/* Pending-sync outbox chip */}
       {outbox.length ? (
@@ -2495,14 +2622,19 @@ export function AreaLine({ points, color, labels, id }: { points: number[]; colo
   const area = `${PL},${H - PB} ${poly} ${x(points.length - 1)},${H - PB}`;
   const li = points.length - 1;
 
-  // Touch scrubbing: map finger x → nearest data point.
+  // Touch scrubbing: map finger x → nearest data point. The PanResponder is
+  // created ONCE, so locate() must read the CURRENT point count through a ref —
+  // a captured points.length goes stale when the range chip (3M ↔ All) changes
+  // the series size, leaving part of the chart unreachable.
   const [active, setActive] = React.useState<number | null>(null);
   const widthPx = React.useRef(1);
+  const lenRef = React.useRef(points.length);
+  lenRef.current = points.length;
   React.useEffect(() => { setActive(null); }, [id, points.length]);
   const locate = (lx: number) => {
     const frac = lx / (widthPx.current || 1);
     const t = Math.min(1, Math.max(0, (frac - PL / W) / ((W - PL - PR) / W)));
-    return Math.round(t * (points.length - 1));
+    return Math.min(lenRef.current - 1, Math.max(0, Math.round(t * (lenRef.current - 1))));
   };
   const pan = React.useRef(
     PanResponder.create({
@@ -3430,6 +3562,8 @@ export function ClientDetail() {
 
   const [showInfo, setShowInfo] = React.useState(false);
   const [clientTab, setClientTab] = React.useState<'sessions' | 'plan' | 'goals' | 'reports' | 'progression' | 'trends' | 'weekly'>((clientInitialTab as any) || 'progression');
+  // Analytics: which tab of which client is being viewed (fires on open + every switch).
+  React.useEffect(() => { trackClientTab('client', clientTab, { id: selectedClientId, name: selectedClientName }); }, [clientTab]);
   const [cmpRange, setCmpRange] = React.useState('1W');
   const [reportsTab, setReportsTab] = React.useState<'qhp' | 'blood' | 'medical'>('qhp');
   const [bloodDetail, setBloodDetail] = React.useState<any | null>(null);

@@ -5,6 +5,7 @@ import { C, F, hexA, ORANGE_GRAD } from '../theme';
 import { Icon, IconName } from '../icons';
 import { Serif, Body, Mono, Card, Avatar, CountUp, ProgressBar } from '../components/primitives';
 import { Page, TitleBlock, GreetingHeader, Badge, HScroll, BackLink } from './common';
+import { FeatureTour, OPS_TOUR, TourLauncher } from '../components/featureTour';
 import { useStore } from '../store';
 import { useSidebarProfile } from '../lib/navQueries';
 import { useLeadStats, useColdLeads, useOpsFollowUpReminders, useMyOpsProfile } from '../lib/opsLeadQueries';
@@ -159,6 +160,7 @@ function AttentionRow({ icon, color, title, sub, count, onPress }: { icon: IconN
 const istYmdOf = (iso: string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso));
 
 export function OpsDashboard() {
+  const [tourOpen, setTourOpen] = React.useState(false);
   const prof = useSidebarProfile();
   const { go, set } = useStore();
   const statsQ = useLeadStats();
@@ -200,7 +202,9 @@ export function OpsDashboard() {
         sub="Leads, sales & escalations"
         initial={prof.initial}
         avatarUrl={prof.avatarUrl}
+        rightAction={<TourLauncher onPress={() => setTourOpen(true)} />}
       />
+      <FeatureTour visible={tourOpen} steps={OPS_TOUR} tourName='ops' onClose={() => setTourOpen(false)} />
 
       {/* Urgent banners — animated, with previews */}
       {overdueFollowUps.length > 0 ? (

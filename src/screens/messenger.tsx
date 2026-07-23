@@ -1,7 +1,32 @@
 import React from 'react';
-import { View, Text, Pressable, TextInput, ActivityIndicator, FlatList, ScrollView, Alert, Keyboard, Platform, Animated, Image, Linking, Vibration } from 'react-native';
+import { View, Text, Pressable, TextInput, ActivityIndicator, FlatList, ScrollView, Alert, Keyboard, Platform, Animated, Image, Linking, Vibration, Modal } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
+import { Audio, Video, ResizeMode } from 'expo-av';
+import { WebView } from 'react-native-webview';
+
+/* Short recording cues (WhatsApp-style blips) — tiny bundled WAVs. Resolves when
+   the blip finishes so the START cue can complete BEFORE the recorder claims the
+   audio route (an active Android recording session silences playback — the
+   original cause of "no tone"). */
+const REC_CUES = {
+  start: require('../../assets/sounds/rec-start.wav'),
+  end: require('../../assets/sounds/rec-end.wav'),
+} as const;
+async function playCue(kind: keyof typeof REC_CUES): Promise<void> {
+  try {
+    // Ensure PLAYBACK mode — if the last action was a recording, the mode may
+    // still be capture-oriented and the blip would be inaudible.
+    await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
+    const { sound } = await Audio.Sound.createAsync(REC_CUES[kind], { shouldPlay: true, volume: 1.0 });
+    await new Promise<void>((resolve) => {
+      const t = setTimeout(() => resolve(), 700); // never hang on a missed callback
+      sound.setOnPlaybackStatusUpdate((st: any) => {
+        if (st?.didJustFinish || st?.error) { clearTimeout(t); sound.unloadAsync().catch(() => {}); resolve(); }
+      });
+    });
+  } catch { /* cue is cosmetic — never block recording */ }
+}
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
@@ -147,6 +172,8 @@ function MessageThread({ meId, conv, onBack, subtabs }: { meId: string; conv: Ch
   const readsQ = useConversationReads(conv.conversationId, showMembers);
   const [seenMsg, setSeenMsg] = React.useState<(ChatMessage & { _pending?: boolean }) | null>(null);
   React.useEffect(() => { setSeenMsg(null); }, [conv.conversationId]);
+  // In-app media viewer (image / video / document) — never leaves the app.
+  const [viewer, setViewer] = React.useState<{ kind: string; url: string } | null>(null);
   const memberNames = React.useMemo(() => (membersQ.data ?? []).map((m) => m.name.split(' ')[0]).join(', '), [membersQ.data]);
   const mentionNames = React.useMemo(() => (membersQ.data ?? []).map((m) => m.name), [membersQ.data]);
 
@@ -228,6 +255,119 @@ function MessageThread({ meId, conv, onBack, subtabs }: { meId: string; conv: Ch
     setReplyTo(null);
   };
 
+  /* ---- Voice notes (B2C interop): WhatsApp-style hold-to-record. Hold the mic →
+     start cue + the button swells; slide LEFT past the threshold → cancel; release
+     → end cue + send through the same chat-media pipeline the client app uses
+     (<conv>/<msgId>-voice-<ts>.m4a, message_type='voice', 1-year signed URL). */
+  const recRef = React.useRef<Audio.Recording | null>(null);
+  const [recording, setRecording] = React.useState(false);
+  const recordingRef = React.useRef(false);
+  const [recMs, setRecMs] = React.useState(0);
+  const recMsRef = React.useRef(0);
+  const recTimer = React.useRef<any>(null);
+  const micScale = React.useRef(new Animated.Value(1)).current;
+  const micDrag = React.useRef(new Animated.Value(0)).current;
+  const CANCEL_PX = 90;
+  // Cancel feedback: a transient "Recording deleted" flash (trash icon drops in,
+  // fades out) where the recording strip was — WhatsApp-style confirmation.
+  const [showDeleted, setShowDeleted] = React.useState(false);
+  const delAnim = React.useRef(new Animated.Value(0)).current;
+  const flashDeleted = () => {
+    setShowDeleted(true);
+    delAnim.setValue(0);
+    Animated.timing(delAnim, { toValue: 1, duration: 900, useNativeDriver: true }).start(() => setShowDeleted(false));
+  };
+  React.useEffect(() => () => { clearTimeout(recTimer.current); recRef.current?.stopAndUnloadAsync().catch(() => {}); }, []);
+  const tickRec = (startedAt: number) => {
+    recMsRef.current = Date.now() - startedAt;
+    setRecMs(recMsRef.current);
+    recTimer.current = setTimeout(() => tickRec(startedAt), 250);
+  };
+  const micRest = () => {
+    Animated.parallel([
+      Animated.spring(micScale, { toValue: 1, useNativeDriver: true, speed: 20, bounciness: 6 }),
+      Animated.timing(micDrag, { toValue: 0, duration: 160, useNativeDriver: true }),
+    ]).start();
+  };
+  const startRecording = async () => {
+    try {
+      const perm = await Audio.requestPermissionsAsync();
+      if (!perm.granted) { recordingRef.current = false; micRest(); Alert.alert('Microphone needed', 'Allow microphone access to record voice messages.'); return; }
+      // START blip plays FIRST and fully — recording only begins after, so the
+      // tone is audible (and never captured into the note). WhatsApp order.
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+      await playCue('start');
+      if (!recordingRef.current) return; // finger lifted during the blip
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+      const { recording: rec } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      if (!recordingRef.current) { rec.stopAndUnloadAsync().catch(() => {}); Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true }).catch(() => {}); return; }
+      recRef.current = rec;
+      setRecording(true);
+      tickRec(Date.now());
+    } catch (e: any) { recordingRef.current = false; micRest(); Alert.alert('Could not start recording', e?.message ?? 'Unknown error'); }
+  };
+  const stopRecording = async (sendIt: boolean) => {
+    const rec = recRef.current;
+    recRef.current = null;
+    clearTimeout(recTimer.current);
+    setRecording(false);
+    const elapsed = recMsRef.current;
+    recMsRef.current = 0;
+    setRecMs(0);
+    if (!rec) return;
+    try {
+      await rec.stopAndUnloadAsync();
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
+      const uri = rec.getURI();
+      if (!sendIt || !uri) return;
+      if (elapsed < 800) { Alert.alert('Too short', 'Hold the mic a moment longer to record a voice message.'); return; }
+      playCue('end');
+      mediaM.mutate(
+        { uri, name: `voice-${Date.now()}.m4a`, mime: 'audio/m4a', size: null },
+        { onError: (e: any) => Alert.alert('Send failed', e?.message || 'Please try again.') }
+      );
+    } catch (e: any) { if (sendIt) Alert.alert('Recording failed', e?.message ?? 'Unknown error'); }
+  };
+  // Hold gesture — the PanResponder is created once; latest handlers via refs.
+  const beginHoldRef = React.useRef(() => {});
+  const moveHoldRef = React.useRef((_dx: number) => {});
+  const endHoldRef = React.useRef(() => {});
+  beginHoldRef.current = () => {
+    if (recordingRef.current || draft.trim()) return;
+    recordingRef.current = true;
+    Animated.spring(micScale, { toValue: 1.45, useNativeDriver: true, speed: 24, bounciness: 8 }).start();
+    startRecording();
+  };
+  moveHoldRef.current = (dx: number) => {
+    if (!recordingRef.current) return;
+    const x = Math.min(0, dx);
+    micDrag.setValue(x);
+    if (x < -CANCEL_PX) {
+      // Slid past the threshold → cancel (WhatsApp behaviour) + deleted flash.
+      recordingRef.current = false;
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+      stopRecording(false);
+      flashDeleted();
+      micRest();
+    }
+  };
+  endHoldRef.current = () => {
+    if (!recordingRef.current) { micRest(); return; }
+    recordingRef.current = false;
+    stopRecording(true);
+    micRest();
+  };
+  const micPan = React.useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: () => true,
+    onPanResponderTerminationRequest: () => false,
+    onShouldBlockNativeResponder: () => true,
+    onPanResponderGrant: () => beginHoldRef.current(),
+    onPanResponderMove: (_e, g) => moveHoldRef.current(g.dx),
+    onPanResponderRelease: () => endHoldRef.current(),
+    onPanResponderTerminate: () => endHoldRef.current(),
+  })).current;
+
   const pickImageVideo = async () => {
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) { Alert.alert('Permission needed', 'Allow photo access to send photos and videos.'); return; }
@@ -263,7 +403,7 @@ function MessageThread({ meId, conv, onBack, subtabs }: { meId: string; conv: Ch
       ? ({ image: '📷 Photo', video: '🎥 Video', voice: '🎤 Voice message', document: '📄 Document' }[item.message_type] ?? item.message)
       : item.message;
     const isMedia = item.message_type !== 'text' && !!item.attachment_url;
-    const openMedia = () => { if (item.attachment_url && !item._pending) Linking.openURL(item.attachment_url).catch(() => {}); };
+    const openMedia = () => { if (item.attachment_url && !item._pending) setViewer({ kind: item.message_type ?? 'document', url: item.attachment_url }); };
     const timeText = item._pending ? (isMedia ? 'uploading…' : 'sending…') : `${tp.time} ${tp.ampm}`;
     // Long-press a bubble in a group → "seen by" sheet.
     const onBubbleLongPress = () => { if (showMembers && !item._pending) setSeenMsg(item); };
@@ -294,7 +434,9 @@ function MessageThread({ meId, conv, onBack, subtabs }: { meId: string; conv: Ch
         <SwipeReplyRow enabled={!item._pending} onReply={() => setReplyTo(item)}>
         <View style={{ alignItems: mine ? 'flex-end' : 'flex-start', marginVertical: 2, paddingHorizontal: 2 }}>
           {senderName ? <Mono style={{ fontSize: 9, color: C.muted3, marginBottom: 2, marginLeft: 6 }}>{senderName}</Mono> : null}
-          {isMedia ? (
+          {isMedia && item.message_type === 'voice' ? (
+            <VoiceBubble url={item.attachment_url!} mine={mine} pending={item._pending} timeText={timeText} onLongPress={onBubbleLongPress} />
+          ) : isMedia ? (
             <Pressable onPress={openMedia} onLongPress={onBubbleLongPress} delayLongPress={300} style={{ maxWidth: '80%' }}>
               {item.message_type === 'image' ? (
                 <View style={{ borderRadius: 16, overflow: 'hidden', borderWidth: 1, borderColor: mine ? hexA(C.orange, 0.4) : 'rgba(255,255,255,0.08)' }}>
@@ -344,16 +486,20 @@ function MessageThread({ meId, conv, onBack, subtabs }: { meId: string; conv: Ch
 
   return (
     <View style={{ flex: 1 }}>
-      {/* Header */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 11, paddingTop: insets.top + 6, paddingBottom: 11, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.07)', backgroundColor: 'rgba(8,6,6,0.96)' }}>
-        <Pressable onPress={onBack} hitSlop={10} style={{ width: 34, height: 34, alignItems: 'center', justifyContent: 'center' }}>
-          <Icon name="arrowLeft" size={18} color={C.ink2} strokeWidth={2.2} />
+      {/* Header — sits directly under the global app bar (which already owns the
+          safe-area inset), so NO insets.top here: that double inset was rendering
+          as a tall black band above the chat. */}
+      <LinearGradient colors={['#241812', '#120E0D']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', gap: 11, paddingTop: 10, paddingBottom: 11, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: hexA(C.orange, 0.18), borderTopWidth: 1, borderTopColor: 'rgba(255,150,90,0.08)' }}>
+        <Pressable onPress={onBack} hitSlop={10} style={{ width: 34, height: 34, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)' }}>
+          <Icon name="arrowLeft" size={17} color={C.ink2} strokeWidth={2.2} />
         </Pressable>
         {conv.type === 'direct' ? (
-          <Avatar initial={chatInitials(conv.title)} size={36} colors={avatarColors(conv.title)} fontSize={13} />
+          <View style={{ padding: 2, borderRadius: 999, borderWidth: 1.5, borderColor: hexA(avatarColors(conv.title)[0], 0.5) }}>
+            <Avatar initial={chatInitials(conv.title)} size={36} colors={avatarColors(conv.title)} fontSize={13} />
+          </View>
         ) : (
-          <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: hexA(conv.isAnnouncements ? C.gold : C.purple, 0.14), borderWidth: 1, borderColor: hexA(conv.isAnnouncements ? C.gold : C.purple, 0.32), alignItems: 'center', justifyContent: 'center' }}>
-            <Icon name="users" size={16} color={conv.isAnnouncements ? C.gold : C.purple} strokeWidth={2} />
+          <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: hexA(conv.isAnnouncements ? C.gold : C.purple, 0.14), borderWidth: 1.5, borderColor: hexA(conv.isAnnouncements ? C.gold : C.purple, 0.4), alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="users" size={17} color={conv.isAnnouncements ? C.gold : C.purple} strokeWidth={2} />
           </View>
         )}
         <Pressable onPress={() => showMembers && setMembersOpen((o) => !o)} disabled={!showMembers} style={{ flex: 1 }}>
@@ -372,7 +518,7 @@ function MessageThread({ meId, conv, onBack, subtabs }: { meId: string; conv: Ch
             <Text style={{ fontFamily: F.bodyBold, fontSize: 12, color: C.purple }}>Members</Text>
           </Pressable>
         ) : null}
-      </View>
+      </LinearGradient>
 
       {/* Client Direct / Group sub-tabs (Clients tab) */}
       {subtabs ? (
@@ -473,31 +619,195 @@ function MessageThread({ meId, conv, onBack, subtabs }: { meId: string; conv: Ch
           <Body style={{ fontSize: 12, color: C.muted3 }}>📢 Announcements — only admins can post here.</Body>
         </View>
       ) : (
-        <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 9, paddingHorizontal: 14, paddingTop: 12, paddingBottom: composerPadBottom, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.08)', backgroundColor: '#0B0908' }}>
-            <Pressable onPress={attach} disabled={mediaM.isPending} style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center', opacity: mediaM.isPending ? 0.5 : 1, marginBottom: 1 }}>
-              {mediaM.isPending ? <ActivityIndicator size="small" color={C.muted2} /> : <Icon name="plus" size={20} color={C.ink2} strokeWidth={2.4} />}
-            </Pressable>
-            <View style={{ flex: 1, borderRadius: 21, backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', paddingHorizontal: 16, paddingVertical: Platform.OS === 'ios' ? 11 : 6, minHeight: 42, justifyContent: 'center', maxHeight: 120 }}>
-              <TextInput
-                value={draft}
-                onChangeText={setDraft}
-                placeholder="Message…"
-                placeholderTextColor={C.muted3}
-                multiline
-                style={{ fontFamily: F.body, fontSize: 15, lineHeight: 20, color: '#fff', padding: 0, maxHeight: 98 }}
-              />
+        <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 9, paddingHorizontal: 14, paddingTop: 12, paddingBottom: composerPadBottom, borderTopWidth: 1, borderTopColor: recording ? hexA(C.red, 0.3) : 'rgba(255,255,255,0.08)', backgroundColor: '#0B0908' }}>
+            {/* Left area swaps (input ↔ recording strip) inside ONE stable view so the
+                mic on the right keeps gesture ownership across the state change. */}
+            <View style={{ flex: 1, flexDirection: 'row', alignItems: 'flex-end', gap: 9 }}>
+              {recording ? (
+                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, height: 42, borderRadius: 21, backgroundColor: hexA(C.red, 0.08), borderWidth: 1, borderColor: hexA(C.red, 0.3) }}>
+                  <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: C.red, opacity: Math.floor(recMs / 500) % 2 ? 0.35 : 1 }} />
+                  <Text style={{ fontFamily: F.bodyBold, fontSize: 14, color: '#fff' }}>{fmtClock(recMs)}</Text>
+                  <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>
+                    <Icon name="chevLeft" size={13} color={C.muted3} strokeWidth={2.2} />
+                    <Body style={{ fontSize: 12, color: C.muted2 }}>Slide to cancel</Body>
+                  </View>
+                </View>
+              ) : showDeleted ? (
+                /* Transient cancel confirmation — trash drops in and the strip fades out */
+                <Animated.View style={{
+                  flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 42, borderRadius: 21,
+                  backgroundColor: hexA(C.red, 0.1), borderWidth: 1, borderColor: hexA(C.red, 0.35),
+                  opacity: delAnim.interpolate({ inputRange: [0, 0.12, 0.7, 1], outputRange: [0, 1, 1, 0] }),
+                  transform: [{ translateY: delAnim.interpolate({ inputRange: [0, 0.15, 1], outputRange: [-8, 0, 6] }) }],
+                }}>
+                  <Animated.View style={{ transform: [{ rotate: delAnim.interpolate({ inputRange: [0, 0.2, 0.4], outputRange: ['-18deg', '8deg', '0deg'], extrapolate: 'clamp' }) }] }}>
+                    <Icon path="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14ZM10 11v6M14 11v6" size={16} color={C.red} strokeWidth={2.1} />
+                  </Animated.View>
+                  <Text style={{ fontFamily: F.bodyBold, fontSize: 13, color: C.red }}>Recording deleted</Text>
+                </Animated.View>
+              ) : (
+                <>
+                  <Pressable onPress={attach} disabled={mediaM.isPending} style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center', opacity: mediaM.isPending ? 0.5 : 1, marginBottom: 1 }}>
+                    {mediaM.isPending ? <ActivityIndicator size="small" color={C.muted2} /> : <Icon name="plus" size={20} color={C.ink2} strokeWidth={2.4} />}
+                  </Pressable>
+                  <View style={{ flex: 1, borderRadius: 21, backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', paddingHorizontal: 16, paddingVertical: Platform.OS === 'ios' ? 11 : 6, minHeight: 42, justifyContent: 'center', maxHeight: 120 }}>
+                    <TextInput
+                      value={draft}
+                      onChangeText={setDraft}
+                      placeholder="Message…"
+                      placeholderTextColor={C.muted3}
+                      multiline
+                      style={{ fontFamily: F.body, fontSize: 15, lineHeight: 20, color: '#fff', padding: 0, maxHeight: 98 }}
+                    />
+                  </View>
+                </>
+              )}
             </View>
-            <Pressable onPress={send} disabled={!draft.trim()} style={{ opacity: draft.trim() ? 1 : 0.45, marginBottom: 1 }}>
-              <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' }}>
-                <Icon path="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z" size={17} color="#fff" strokeWidth={2.2} />
-              </LinearGradient>
-            </Pressable>
+            {draft.trim() ? (
+              <Pressable onPress={send} style={{ marginBottom: 1 }}>
+                <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon path="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z" size={17} color="#fff" strokeWidth={2.2} />
+                </LinearGradient>
+              </Pressable>
+            ) : (
+              /* Mic — HOLD to record (button swells + start blip), slide LEFT to
+                 cancel, release to send (end blip). WhatsApp behaviour. */
+              <Animated.View
+                {...micPan.panHandlers}
+                style={{ marginBottom: 1, transform: [{ translateX: micDrag }, { scale: micScale }], opacity: mediaM.isPending ? 0.5 : 1 }}
+              >
+                <LinearGradient colors={recording ? ['#F0564A', '#C93A30'] : ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon path="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3ZM19 11a7 7 0 0 1-14 0M12 18v3M8 21h8" size={18} color="#fff" strokeWidth={2.1} />
+                </LinearGradient>
+              </Animated.View>
+            )}
         </View>
       )}
 
       {/* "Seen by" — long-press a bubble in a group to see who has read it */}
       <SeenBySheet msg={seenMsg} reads={readsQ.data ?? []} meId={meId} onClose={() => setSeenMsg(null)} />
+      <MediaViewer media={viewer} onClose={() => setViewer(null)} />
     </View>
+  );
+}
+
+/* ============ Voice message bubble (B2C interop) ============
+   Streams the signed chat-media URL via expo-av — play/pause, live progress and
+   duration, WhatsApp-style. Each bubble owns its sound and unloads on unmount. */
+const fmtClock = (ms: number) => {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+};
+function VoiceBubble({ url, mine, pending, timeText, onLongPress }: { url: string; mine: boolean; pending?: boolean; timeText: string; onLongPress?: () => void }) {
+  const soundRef = React.useRef<Audio.Sound | null>(null);
+  const [playing, setPlaying] = React.useState(false);
+  const [loading, setLoading] = React.useState(false);
+  const [posMs, setPosMs] = React.useState(0);
+  const [durMs, setDurMs] = React.useState(0);
+
+  React.useEffect(() => () => { soundRef.current?.unloadAsync().catch(() => {}); }, []);
+
+  const onStatus = (st: any) => {
+    if (!st?.isLoaded) return;
+    setPosMs(st.positionMillis ?? 0);
+    if (st.durationMillis) setDurMs(st.durationMillis);
+    setPlaying(!!st.isPlaying);
+    if (st.didJustFinish) { setPlaying(false); setPosMs(0); soundRef.current?.setPositionAsync(0).catch(() => {}); }
+  };
+
+  const toggle = async () => {
+    if (pending) return;
+    try {
+      if (!soundRef.current) {
+        setLoading(true);
+        await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
+        const { sound } = await Audio.Sound.createAsync({ uri: url }, { shouldPlay: true, progressUpdateIntervalMillis: 250 }, onStatus);
+        soundRef.current = sound;
+        setLoading(false);
+        return;
+      }
+      const st: any = await soundRef.current.getStatusAsync();
+      if (st?.isLoaded && st.isPlaying) await soundRef.current.pauseAsync();
+      else await soundRef.current.playAsync();
+    } catch (e: any) {
+      setLoading(false);
+      Alert.alert('Playback failed', e?.message ?? 'Could not play this voice message.');
+    }
+  };
+
+  const pct = durMs > 0 ? Math.min(1, posMs / durMs) : 0;
+  const accent = mine ? '#fff' : C.orange;
+  return (
+    <Pressable onLongPress={onLongPress} delayLongPress={300} style={{ maxWidth: '80%' }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 11, padding: 11, borderRadius: 16, minWidth: 210, backgroundColor: mine ? hexA(C.orange, 0.92) : 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: mine ? hexA(C.orange, 0.4) : 'rgba(255,255,255,0.08)', borderBottomRightRadius: mine ? 5 : 16, borderBottomLeftRadius: mine ? 16 : 5 }}>
+        <Pressable onPress={toggle} hitSlop={6} style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: mine ? 'rgba(255,255,255,0.22)' : hexA(C.orange, 0.15), borderWidth: 1, borderColor: mine ? 'rgba(255,255,255,0.35)' : hexA(C.orange, 0.4), alignItems: 'center', justifyContent: 'center' }}>
+          {pending || loading ? (
+            <ActivityIndicator size="small" color={accent} />
+          ) : playing ? (
+            <Icon path="M8 5h3v14H8zM13 5h3v14h-3z" size={16} color={accent} strokeWidth={0} fill={accent} />
+          ) : (
+            <Icon path="M8 5v14l11-7z" size={16} color={accent} strokeWidth={0} fill={accent} />
+          )}
+        </Pressable>
+        <View style={{ flex: 1, gap: 5 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Icon path="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3ZM19 11a7 7 0 0 1-14 0M12 18v3" size={12} color={mine ? 'rgba(255,255,255,0.85)' : C.muted2} strokeWidth={2} />
+            <Text style={{ fontFamily: F.bodySemi, fontSize: 12, color: mine ? '#fff' : C.ink2 }}>{pending ? 'Sending…' : 'Voice message'}</Text>
+          </View>
+          <View style={{ height: 4, borderRadius: 999, backgroundColor: mine ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)', overflow: 'hidden' }}>
+            <View style={{ width: `${pct * 100}%`, height: 4, backgroundColor: accent }} />
+          </View>
+          <Text style={{ fontFamily: F.mono, fontSize: 9, color: mine ? 'rgba(255,255,255,0.8)' : C.muted3 }}>
+            {durMs ? `${fmtClock(posMs)} / ${fmtClock(durMs)}` : '· · ·'}
+          </Text>
+        </View>
+      </View>
+      <Text style={{ fontFamily: F.mono, fontSize: 8.5, color: C.muted3, alignSelf: mine ? 'flex-end' : 'flex-start', marginTop: 3 }}>{timeText}</Text>
+    </Pressable>
+  );
+}
+
+/* ============ In-app media viewer ============
+   Photos, videos and documents open INSIDE the app (fullscreen, no browser, the
+   signed URL is never shown): image → native viewer, video → expo-av player with
+   controls, document/PDF → WebView (iOS renders PDFs natively; Android goes
+   through the Docs viewer, still embedded). */
+function MediaViewer({ media, onClose }: { media: { kind: string; url: string } | null; onClose: () => void }) {
+  const insets = useSafeAreaInsets();
+  if (!media) return null;
+  const docUri = Platform.OS === 'android'
+    ? `https://docs.google.com/gview?embedded=true&url=${encodeURIComponent(media.url)}`
+    : media.url;
+  return (
+    <Modal visible transparent={false} animationType="fade" onRequestClose={onClose}>
+      <View style={{ flex: 1, backgroundColor: '#000' }}>
+        {media.kind === 'image' ? (
+          <Image source={{ uri: media.url }} style={{ flex: 1 }} resizeMode="contain" />
+        ) : media.kind === 'video' ? (
+          <Video
+            source={{ uri: media.url }}
+            style={{ flex: 1 }}
+            useNativeControls
+            resizeMode={ResizeMode.CONTAIN}
+            shouldPlay
+          />
+        ) : (
+          <WebView
+            source={{ uri: docUri }}
+            style={{ flex: 1, backgroundColor: '#000' }}
+            startInLoadingState
+            renderLoading={() => (
+              <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#000' }}>
+                <ActivityIndicator color={C.orange} size="large" />
+              </View>
+            )}
+          />
+        )}
+        <Pressable onPress={onClose} style={{ position: 'absolute', top: insets.top + 10, right: 14, width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(0,0,0,0.55)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)', alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name="close" size={17} color="#fff" strokeWidth={2.4} />
+        </Pressable>
+      </View>
+    </Modal>
   );
 }
 
@@ -806,8 +1116,19 @@ function ClientChat({ meId, client, onBack }: { meId: string; client: MessengerC
     });
   };
 
-  // ----- GROUP CHAT (a card was tapped) -----
-  if (openGroup) return <MessageThread meId={meId} conv={openGroup} onBack={() => setOpenGroup(null)} />;
+  // Exactly ONE group (the usual case — "My Longevity Team") → skip the group-list
+  // page and open the chat directly. Back then exits to the clients list, never
+  // the redundant single-card list.
+  const soloGroup = (groupsQ.data ?? []).length === 1;
+  const autoOpenedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (autoOpenedRef.current || openGroup) return;
+    const gs = groupsQ.data ?? [];
+    if (gs.length === 1) { autoOpenedRef.current = true; openGroupCard(gs[0]); }
+  }, [groupsQ.data]);
+
+  // ----- GROUP CHAT (a card was tapped, or the single group auto-opened) -----
+  if (openGroup) return <MessageThread meId={meId} conv={openGroup} onBack={() => (soloGroup ? onBack() : setOpenGroup(null))} />;
 
   // ----- GROUPS LIST -----
   const groups = groupsQ.data ?? [];
@@ -869,13 +1190,16 @@ function ClientChatShell({ name, onBack, subtabs, children }: { name: string; on
   const insets = useSafeAreaInsets();
   return (
     <View style={{ flex: 1 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 11, paddingTop: insets.top + 6, paddingBottom: 11, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.07)', backgroundColor: 'rgba(8,6,6,0.96)' }}>
-        <Pressable onPress={onBack} hitSlop={10} style={{ width: 34, height: 34, alignItems: 'center', justifyContent: 'center' }}>
-          <Icon name="arrowLeft" size={18} color={C.ink2} strokeWidth={2.2} />
+      {/* No insets.top — the global app bar above already owns the safe area. */}
+      <LinearGradient colors={['#241812', '#120E0D']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', gap: 11, paddingTop: 10, paddingBottom: 11, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: hexA(C.orange, 0.18), borderTopWidth: 1, borderTopColor: 'rgba(255,150,90,0.08)' }}>
+        <Pressable onPress={onBack} hitSlop={10} style={{ width: 34, height: 34, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)' }}>
+          <Icon name="arrowLeft" size={17} color={C.ink2} strokeWidth={2.2} />
         </Pressable>
-        <Avatar initial={chatInitials(name)} size={36} colors={avatarColors(name)} fontSize={13} />
+        <View style={{ padding: 2, borderRadius: 999, borderWidth: 1.5, borderColor: hexA(avatarColors(name)[0], 0.5) }}>
+          <Avatar initial={chatInitials(name)} size={36} colors={avatarColors(name)} fontSize={13} />
+        </View>
         <Body numberOfLines={1} style={{ flex: 1, fontSize: 15.5, fontFamily: F.bodySemi, color: '#fff' }}>{name}</Body>
-      </View>
+      </LinearGradient>
       {subtabs ? (
         <View style={{ flexDirection: 'row', gap: 6, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: 'rgba(8,6,6,0.96)', borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.07)' }}>
           {([['direct', 'Direct'], ['group', 'Groups']] as const).map(([v, label]) => {
@@ -961,22 +1285,34 @@ export function ChatNotifications() {
     Animated.timing(anim, { toValue: -160, duration: 220, useNativeDriver: true }).start(() => setBanner(null));
   }, [anim]);
   // Haptic/vibration feedback for an incoming message. `emphatic` = a Longevity
-  // Team message for a CRM → a long, distinctive triple-buzz so it's unmistakable
-  // versus a normal short tap. Called on EVERY relevant message (even while the
-  // messenger is open), independent of whether the slide-in banner is shown.
+  // Team message for a CRM → a PERSISTENT alarm-style vibration (B2C promises a
+  // reply within 2 minutes, so this keeps buzzing for ~60s or until the CRM
+  // reacts — tapping the banner or opening the messenger stops it). Normal
+  // messages keep the short tap.
+  const longBuzzTimer = React.useRef<any>(null);
+  const longBuzzOn = React.useRef(false);
+  const stopLongBuzz = React.useCallback(() => {
+    if (!longBuzzOn.current) return;
+    longBuzzOn.current = false;
+    clearTimeout(longBuzzTimer.current);
+    Vibration.cancel();
+  }, []);
+  React.useEffect(() => () => stopLongBuzz(), [stopLongBuzz]); // never outlive the component
+  // Opening the messenger (any path — banner, drawer, tab) counts as "seen": stop.
+  React.useEffect(() => { if (route === 'messenger') stopLongBuzz(); }, [route, stopLongBuzz]);
   const buzz = React.useCallback((emphatic: boolean) => {
     if (emphatic) {
-      if (Platform.OS === 'android') Vibration.vibrate([0, 650, 200, 650, 200, 450], false); // [wait,buzz,gap,buzz,gap,buzz] ms
-      else {
-        // iOS can't play arbitrary durations — approximate with heavy Taptic pulses.
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
-        setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {}), 280);
-        setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {}), 560);
-      }
+      stopLongBuzz(); // restart cleanly if another Longevity message lands mid-alarm
+      longBuzzOn.current = true;
+      // Repeating buzz-pause pattern (Android honours durations; iOS repeats its
+      // fixed pulse on the same cadence). Auto-stops after 60s.
+      Vibration.vibrate([600, 1000, 800], true);
+      longBuzzTimer.current = setTimeout(stopLongBuzz, 60_000);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
     } else {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     }
-  }, []);
+  }, [stopLongBuzz]);
   const show = React.useCallback((b: { convId: string; title: string; text: string }) => {
     setBanner(b);
     Animated.spring(anim, { toValue: 0, useNativeDriver: true, speed: 16, bounciness: 6 }).start();

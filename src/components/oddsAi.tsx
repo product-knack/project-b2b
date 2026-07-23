@@ -15,6 +15,61 @@ const MARK = require('../../assets/odds-mark.png');
 export const WORDMARK = require('../../assets/odds-wordmark.png');
 const WORDMARK_RATIO = 1920 / 750; // trimmed lockup aspect ratio
 
+/* Odds AI gate — the assistant ships in the NEXT update. While false, opening
+   the AI (any dashboard) shows the animated coming-soon card instead of the
+   chat. Flip to true to re-enable the full chat untouched. */
+const AI_ENABLED = false;
+
+/* Animated "coming in the next update" card: backdrop fade, springy card
+   entrance, breathing glow + ping ring around the mark. */
+function AiComingSoon({ onClose }: { onClose: () => void }) {
+  const enter = useRef(new Animated.Value(0)).current;
+  const pulse = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.spring(enter, { toValue: 1, useNativeDriver: true, speed: 14, bounciness: 9 }).start();
+    const loop = Animated.loop(Animated.sequence([
+      Animated.timing(pulse, { toValue: 1, duration: 1100, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+      Animated.timing(pulse, { toValue: 0, duration: 1100, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+    ]));
+    loop.start();
+    return () => loop.stop();
+  }, []);
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable onPress={onClose} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.72)', alignItems: 'center', justifyContent: 'center', padding: 28 }}>
+        <Animated.View style={{ width: '100%', maxWidth: 340, opacity: enter, transform: [{ scale: enter.interpolate({ inputRange: [0, 1], outputRange: [0.82, 1] }) }, { translateY: enter.interpolate({ inputRange: [0, 1], outputRange: [26, 0] }) }] }}>
+          <Pressable onPress={() => {}} style={{ borderRadius: 26, overflow: 'hidden', borderWidth: 1, borderColor: hexA(C.orange, 0.35) }}>
+            <LinearGradient colors={['#2A1C14', '#131010']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ alignItems: 'center', paddingVertical: 28, paddingHorizontal: 24 }}>
+              {/* single ember accent */}
+              <LinearGradient colors={[hexA(C.orange, 0.8), 'rgba(255,255,255,0.02)']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 4 }} />
+              {/* breathing mark with ping ring */}
+              <View style={{ width: 84, height: 84, alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
+                <Animated.View style={{ position: 'absolute', width: 76, height: 76, borderRadius: 38, borderWidth: 1.5, borderColor: C.orange, opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.5, 0] }), transform: [{ scale: pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.45] }) }] }} />
+                <Animated.View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: hexA(C.orange, 0.12), borderWidth: 1, borderColor: hexA(C.orange, 0.4), alignItems: 'center', justifyContent: 'center', transform: [{ scale: pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.06] }) }] }}>
+                  <Image source={MARK} style={{ width: 40, height: 40 }} resizeMode="contain" />
+                </Animated.View>
+              </View>
+              <Text style={{ fontFamily: F.serif, fontSize: 22, color: '#fff', textAlign: 'center' }}>Odds AI is almost here</Text>
+              <Text style={{ fontFamily: F.body, fontSize: 13, color: C.muted, textAlign: 'center', lineHeight: 19, marginTop: 8 }}>
+                Your AI assistant arrives in the next update — smarter answers about clients, sessions and schedules, right from here.
+              </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 12, paddingVertical: 5, paddingHorizontal: 12, borderRadius: 999, backgroundColor: hexA(C.gold, 0.1), borderWidth: 1, borderColor: hexA(C.gold, 0.32) }}>
+                <Icon name="sparkle" size={12} color={C.gold} strokeWidth={2.1} />
+                <Text style={{ fontFamily: F.bodySemi, fontSize: 11, color: C.gold }}>COMING IN THE NEXT UPDATE</Text>
+              </View>
+              <Pressable onPress={onClose} style={{ alignSelf: 'stretch', marginTop: 20, borderRadius: 14, overflow: 'hidden' }}>
+                <LinearGradient colors={[C.orangeGradA, C.orangeGradB]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ alignItems: 'center', paddingVertical: 13 }}>
+                  <Text style={{ fontFamily: F.bodyBold, fontSize: 14, color: '#fff' }}>Got it</Text>
+                </LinearGradient>
+              </Pressable>
+            </LinearGradient>
+          </Pressable>
+        </Animated.View>
+      </Pressable>
+    </Modal>
+  );
+}
+
 /* Brand lockup image (white "Odds" + orange mark). `height` sets the size; width follows. */
 export function OddsWordmark({ height = 24 }: { height?: number }) {
   return <Image source={WORDMARK} style={{ height, width: height * WORDMARK_RATIO }} resizeMode="contain" />;
@@ -153,6 +208,12 @@ export function OddsAiChat() {
 
   const reset = () => setMsgs([]);
   const empty = msgs.length === 0;
+
+  // Pre-launch gate: until AI_ENABLED flips, opening the AI (any dashboard)
+  // shows the animated coming-soon card instead of the chat.
+  if (!AI_ENABLED) {
+    return aiOpen ? <AiComingSoon onClose={closeAi} /> : null;
+  }
 
   return (
     <Modal visible={aiOpen} animationType="none" onRequestClose={() => dismiss()} transparent>

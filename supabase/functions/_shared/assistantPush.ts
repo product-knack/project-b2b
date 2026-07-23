@@ -57,8 +57,9 @@ async function sendToTokens(opts: {
   body: string;
   data: Record<string, string>;
   invalidTable: "device_tokens" | "odds_device_tokens";
+  channelId?: string; // Android notification channel (custom vibration/sound)
 }): Promise<{ success: number; failure: number; errors?: string[] }> {
-  const { supabase, tokens, title, body, data, invalidTable } = opts;
+  const { supabase, tokens, title, body, data, invalidTable, channelId } = opts;
   const errors: string[] = [];
 
   if (!tokens || tokens.length === 0) {
@@ -93,6 +94,7 @@ async function sendToTokens(opts: {
             data: { ...data, type: data.type || "assistant" },
             sound: "default",
             priority: "high",
+            channelId: channelId || undefined,
           })),
         ),
       });
@@ -135,7 +137,7 @@ async function sendToTokens(opts: {
                 android: {
                   priority: "high",
                   notification: {
-                    channel_id: "assistant",
+                    channel_id: channelId || "assistant",
                     click_action: "FCM_PLUGIN_ACTIVITY",
                     sound: "default",
                   },
@@ -224,8 +226,9 @@ export async function pushToStaff(opts: {
   title: string;
   body: string;
   data?: Record<string, string>;
+  channelId?: string;
 }): Promise<{ success: number; failure: number; errors?: string[] }> {
-  const { supabase, userId, title, body, data = {} } = opts;
+  const { supabase, userId, title, body, data = {}, channelId } = opts;
 
   // Staff (B2B) push tokens live in `odds_device_tokens` keyed by user_id.
   const { data: tokens, error } = await supabase
@@ -243,6 +246,7 @@ export async function pushToStaff(opts: {
     title,
     body,
     data,
+    channelId,
     invalidTable: "odds_device_tokens",
   });
 }

@@ -7,6 +7,11 @@ import { Serif, Body, Mono, Card, ProgressBar } from '../components/primitives';
 import { Page, BackLink, Badge, MiniAvatar, HScroll, AnimChip } from './common';
 import { useStore } from '../store';
 import { useAuth } from '../auth';
+import { trackClientTab } from '../lib/amplitude';
+import { MedicalEntrySheet } from './doctorClientDetail';
+import { ScheduleQhpSheet } from './crmQhp';
+import { SessionActionSheet } from './crmRoster';
+import { RosterSession } from '../lib/rosterQueries';
 import {
   useCrmClientDetail, usePackageCycle, useCrmClientSessions, useTrainingFrequency, useClientWorkoutLog,
   useClientComms, useLogCommunication, useMarkCommDone, useSetClientStatus,
@@ -170,6 +175,8 @@ export function CrmClientDetail() {
   // Deep-link: workspace rows (e.g. "No Comms 7d+") can land directly on a tab.
   const initialTab = TABS.some(([id]) => id === clientInitialTab) ? (clientInitialTab as TabId) : 'sessions';
   const [tab, setTab] = React.useState<TabId>(initialTab);
+  // Analytics: which tab of which client (fires on open + every switch).
+  React.useEffect(() => { trackClientTab('crm-client', tab, { id: clientId, name: selectedClientName }); }, [tab]);
   React.useEffect(() => { if (clientInitialTab) set({ clientInitialTab: null }); }, []);
   const pageRef = React.useRef<any>(null);
   const recordY = React.useRef(0); // Y of the tab bar + content section within the page
@@ -185,6 +192,7 @@ export function CrmClientDetail() {
   const [journeyOpen, setJourneyOpen] = React.useState(false);
   const journeyToggleM = useToggleJourneyStep();
   const [detailsOpen, setDetailsOpen] = React.useState(false);
+  const [pkgOpen, setPkgOpen] = React.useState(false);
 
   const d = detailQ.data;
   const client = d?.client;
@@ -393,22 +401,41 @@ export function CrmClientDetail() {
             ) : null}
           </TabCard>
 
+          {/* Package & Cycle — accordion: compact one-line summary, tap to expand */}
           <TabCard accent={C.orange}>
-            <SectionHead icon="layers" color={C.orange} title="Package & Cycle" meta={pkg?.monthly ? 'MONTHLY' : null} />
-            {pkgQ.isLoading ? <Empty text="Computing…" /> : pkg ? (
-              <>
-                <View style={{ flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' }}>
-                  <Body style={{ fontSize: 12.5, color: C.ink3 }}>Sessions used</Body>
-                  <Text style={{ fontFamily: F.bodyBold, fontSize: 20, color: pkg.renewalPending ? C.red : C.green }}>{pkg.completed}<Text style={{ fontSize: 13, color: C.muted2 }}> / {pkg.totalSessions || '—'}</Text></Text>
-                </View>
-                <ProgressBar pct={pkg.totalSessions ? Math.min(100, Math.round((pkg.completed / pkg.totalSessions) * 100)) : 0} height={7} fill={pkg.renewalPending ? C.red : C.green} />
-                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 2 }}>
-                  <Metric label="Package start" value={istD(pkg.packageStart)} color={C.gold} />
-                  <Metric label="Current cycle" value={`Cycle ${pkg.currentCycle}`} color={C.blue} />
-                  <Metric label="In this cycle" value={pkg.sessionsPerCycle ? `${pkg.inCycle} / ${pkg.sessionsPerCycle}` : String(pkg.inCycle)} color={C.orange} />
-                  <Metric label="Left in cycle" value={pkg.sessionsPerCycle ? String(pkg.remainingInCycle) : null} color={C.green} />
-                </View>
-              </>
+            <Pressable onPress={() => setPkgOpen(!pkgOpen)} style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
+              <View style={{ width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: hexA(C.orange, 0.12), borderWidth: 1, borderColor: hexA(C.orange, 0.28) }}>
+                <Icon name="layers" size={15} color={C.orange} strokeWidth={2.1} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Body style={{ fontSize: 13.5, fontFamily: F.bodySemi, color: '#fff' }}>Package & Cycle</Body>
+                {pkg?.monthly ? <Mono style={{ fontSize: 7.5, letterSpacing: 0.6, color: C.muted3, marginTop: 1 }}>MONTHLY</Mono> : null}
+              </View>
+              {pkg ? (
+                <Text style={{ fontFamily: F.bodyBold, fontSize: 15, color: pkg.renewalPending ? C.red : C.green }}>
+                  {pkg.completed}<Text style={{ fontSize: 11, color: C.muted2 }}> / {pkg.totalSessions || '—'}</Text>
+                </Text>
+              ) : pkgQ.isLoading ? <ActivityIndicator size="small" color={C.orange} /> : null}
+              <Mono style={{ fontSize: 8.5, color: C.muted3 }}>{pkgOpen ? 'HIDE' : 'SHOW'}</Mono>
+              <Icon name={pkgOpen ? 'chevUp' : 'chevDown'} size={14} color={C.muted2} strokeWidth={2.2} />
+            </Pressable>
+            {/* slim progress strip always visible — expand for the details */}
+            {pkg ? <ProgressBar pct={pkg.totalSessions ? Math.min(100, Math.round((pkg.completed / pkg.totalSessions) * 100)) : 0} height={5} fill={pkg.renewalPending ? C.red : C.green} /> : null}
+            {pkgOpen ? (
+              pkgQ.isLoading ? <Empty text="Computing…" /> : pkg ? (
+                <>
+                  <View style={{ flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' }}>
+                    <Body style={{ fontSize: 12.5, color: C.ink3 }}>Sessions used</Body>
+                    <Text style={{ fontFamily: F.bodyBold, fontSize: 20, color: pkg.renewalPending ? C.red : C.green }}>{pkg.completed}<Text style={{ fontSize: 13, color: C.muted2 }}> / {pkg.totalSessions || '—'}</Text></Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 2 }}>
+                    <Metric label="Package start" value={istD(pkg.packageStart)} color={C.gold} />
+                    <Metric label="Current cycle" value={`Cycle ${pkg.currentCycle}`} color={C.blue} />
+                    <Metric label="In this cycle" value={pkg.sessionsPerCycle ? `${pkg.inCycle} / ${pkg.sessionsPerCycle}` : String(pkg.inCycle)} color={C.orange} />
+                    <Metric label="Left in cycle" value={pkg.sessionsPerCycle ? String(pkg.remainingInCycle) : null} color={C.green} />
+                  </View>
+                </>
+              ) : <Empty text="No package data." />
             ) : null}
           </TabCard>
 
@@ -600,7 +627,14 @@ function SessionsTab({ clientId }: { clientId: string }) {
 
   const all = sessionsQ.data ?? [];
   const byCat = (c: SessionCategory) => all.filter((s) => s.category === c).length;
-  const filtered = filter === 'all' ? all : all.filter((s) => s.category === filter);
+  // Cancelled sub-filter: Paid cancellations deduct from the package; unpaid don't.
+  const [cancelKind, setCancelKind] = React.useState<'all' | 'paid' | 'unpaid'>('all');
+  const baseFiltered = filter === 'all' ? all : all.filter((s) => s.category === filter);
+  const filtered = filter === 'cancelled' && cancelKind !== 'all'
+    ? baseFiltered.filter((s: any) => (cancelKind === 'paid' ? s.paidCancel : !s.paidCancel))
+    : baseFiltered;
+  const paidCount = all.filter((s: any) => s.cancelled && s.paidCancel).length;
+  const unpaidCount = byCat('cancelled') - paidCount;
   const visible = filtered.slice(0, count);
   const freq = freqQ.data;
   const maxCount = Math.max(1, ...(freq?.frequencies ?? []).map((f) => f.count));
@@ -614,13 +648,25 @@ function SessionsTab({ clientId }: { clientId: string }) {
           {([['all', 'All', all.length, C.orange], ['workout', 'Workout', null, C.blue], ['rehab', 'Rehab', byCat('rehab'), C.purple], ['cancelled', 'Cancelled', byCat('cancelled'), C.red]] as const).map(([id, label, n, col]) => {
             const active = filter === id;
             return (
-              <AnimChip key={id} active={active} onPress={() => { setFilter(id as any); setCount(PAGE); }} style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 999, backgroundColor: active ? hexA(col, 0.15) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: active ? hexA(col, 0.5) : 'rgba(255,255,255,0.09)' }}>
+              <AnimChip key={id} active={active} onPress={() => { setFilter(id as any); setCancelKind('all'); setCount(PAGE); }} style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 999, backgroundColor: active ? hexA(col, 0.15) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: active ? hexA(col, 0.5) : 'rgba(255,255,255,0.09)' }}>
                 <Text style={{ fontFamily: active ? F.bodyBold : F.bodySemi, fontSize: 11.5, color: active ? col : C.muted }}>{label}</Text>
                 {sessionsQ.data && n != null ? <Text style={{ fontFamily: F.mono, fontSize: 9.5, color: active ? col : C.muted3 }}>{n}</Text> : null}
               </AnimChip>
             );
           })}
         </View>
+        {filter === 'cancelled' ? (
+          <View style={{ flexDirection: 'row', gap: 6 }}>
+            {([['all', `All ${byCat('cancelled')}`, C.red], ['paid', `Paid ${paidCount}`, C.gold], ['unpaid', `Unpaid ${unpaidCount}`, C.muted2]] as const).map(([id, label, col]) => {
+              const active = cancelKind === id;
+              return (
+                <Pressable key={id} onPress={() => { setCancelKind(id as any); setCount(PAGE); }} style={{ paddingVertical: 6, paddingHorizontal: 11, borderRadius: 999, backgroundColor: active ? hexA(col, 0.14) : 'rgba(255,255,255,0.03)', borderWidth: 1, borderColor: active ? hexA(col, 0.45) : 'rgba(255,255,255,0.07)' }}>
+                  <Text style={{ fontFamily: active ? F.bodyBold : F.bodySemi, fontSize: 10.5, color: active ? col : C.muted3 }}>{label}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : null}
         {filter === 'workout' ? <WorkoutLogList clientId={clientId} />
           : sessionsQ.isLoading ? <Empty text="Loading…" />
           : filtered.length === 0 ? <Empty text={filter === 'all' ? 'No sessions recorded yet.' : `No ${filter} sessions.`} />
@@ -635,6 +681,19 @@ function SessionsTab({ clientId }: { clientId: string }) {
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                       <Badge text={cat.label} color={cat.color} />
                       <Badge text={s.cancelled ? 'Cancelled' : pretty(s.status)} color={stCol} />
+                      {/* Paid vs unpaid cancellation (web CancelTypePicker semantics):
+                          paid deducts from the package; the admin queue state rides along. */}
+                      {s.cancelled ? (
+                        (s as any).paidCancel ? (
+                          <Badge
+                            text={(s as any).adminApproval === 'pending' ? 'Paid Cancel · Pending Admin' : (s as any).adminApproval === 'rejected' ? 'Paid Cancel · Rejected' : 'Paid Cancel · Deducted'}
+                            color={(s as any).adminApproval === 'pending' ? C.gold : (s as any).adminApproval === 'rejected' ? C.red : C.green}
+                          />
+                        ) : (
+                          <Badge text="Unpaid Cancel · No Deduction" color={C.muted2} />
+                        )
+                      ) : null}
+                      {s.cancelled && (s as any).canceledBy ? <Badge text={`By ${(s as any).canceledBy}`} color={C.blue} /> : null}
                       <View style={{ paddingVertical: 3, paddingHorizontal: 9, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }}>
                         <Text style={{ fontFamily: F.bodySemi, fontSize: 10, color: C.ink3 }}>{s.type}</Text>
                       </View>
@@ -914,6 +973,11 @@ function ReportsTab({ clientId, kind }: { clientId: string; kind: 'reports' | 'q
   const assessQ = useClientAssessments(kind === 'qhp' ? clientId : null);
   const [bloodDetail, setBloodDetail] = React.useState<any | null>(null);
   const [qhpDetail, setQhpDetail] = React.useState<{ row: any; label: string } | null>(null);
+  // Schedule QHP straight from the client page (same sheet as the QHP page,
+  // with THIS client preset — no picker step).
+  const { session } = useAuth();
+  const { selectedClientName } = useStore();
+  const [scheduleOpen, setScheduleOpen] = React.useState(false);
   const classify = (type: string): 'blood' | 'medical' => {
     const t = (type || '').toLowerCase();
     if (/mri|cect|dexa|ultrasound|imaging|x-?ray|\bct\b|ct |scan|angiograph|coronary|spine|neck|echo|medical/.test(t)) return 'medical';
@@ -932,6 +996,22 @@ function ReportsTab({ clientId, kind }: { clientId: string; kind: 'reports' | 'q
   return (
     <TabCard accent={accent}>
       <SectionHead icon={kind === 'qhp' ? 'heart' : 'file'} color={accent} title={kind === 'qhp' ? 'QHP Assessments' : 'Health Reports'} meta={kind === 'qhp' ? (assessQ.data ? `${assessQ.data.length} ON FILE` : null) : (reportsQ.data ? `${healthReports.length} ON FILE` : null)} />
+      {kind === 'qhp' ? (
+        <>
+          <Pressable onPress={() => setScheduleOpen(true)}>
+            <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 12, borderRadius: 12 }}>
+              <Icon name="calPlus" size={14} color="#fff" strokeWidth={2.2} />
+              <Text style={{ fontFamily: F.bodyBold, fontSize: 13.5, color: '#fff' }}>Schedule QHP</Text>
+            </LinearGradient>
+          </Pressable>
+          <ScheduleQhpSheet
+            visible={scheduleOpen}
+            onClose={() => { setScheduleOpen(false); assessQ.refetch(); }}
+            crmId={session?.user?.id ?? null}
+            presetClient={{ id: clientId, name: selectedClientName ?? 'Client' }}
+          />
+        </>
+      ) : null}
       {kind === 'qhp' ? (
         assessQ.isLoading ? <Empty text="Loading assessments…" /> :
         (assessQ.data ?? []).length === 0 ? <Empty text="No QHP assessments yet." /> :
@@ -1112,11 +1192,27 @@ function ProgressionTab({ clientId }: { clientId: string }) {
 
 /* ---------- Medical History ---------- */
 function MedicalTab({ clientId }: { clientId: string }) {
+  const { session } = useAuth();
+  const crmUid = session?.user?.id ?? '';
   const medQ = useClientMedicalHistory(clientId);
+  // Upload Reports → the doctor's Add Medical Entry sheet (manual form + AI
+  // document upload), reused verbatim; doctor_id records the CRM as the author.
+  // Requires the crm_medical_history RLS migration — without it inserts fail
+  // with a clear RLS error.
+  const [uploadOpen, setUploadOpen] = React.useState(false);
   const sevCol = (s: string | null) => (/high|severe|critical/i.test(s ?? '') ? C.red : /med|moderate/i.test(s ?? '') ? C.orange : C.green);
   return (
     <TabCard accent={C.red}>
       <SectionHead icon="clipboard" color={C.red} title="Medical History" meta={medQ.data ? `${medQ.data.length} ENTRIES` : null} />
+      <Pressable onPress={() => setUploadOpen(true)}>
+        <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 12, borderRadius: 12 }}>
+          <Icon name="plus" size={14} color="#fff" strokeWidth={2.6} />
+          <Text style={{ fontFamily: F.bodyBold, fontSize: 13.5, color: '#fff' }}>Upload Reports</Text>
+        </LinearGradient>
+      </Pressable>
+      {uploadOpen ? (
+        <MedicalEntrySheet visible onClose={() => { setUploadOpen(false); medQ.refetch(); }} clientId={clientId} doctorId={crmUid} />
+      ) : null}
       {medQ.isLoading ? <Empty text="Loading…" /> : (medQ.data ?? []).length === 0 ? <Empty text="No medical history recorded." /> : (medQ.data ?? []).map((m: any) => (
         <View key={m.id} style={{ padding: 11, borderRadius: 13, backgroundColor: 'rgba(0,0,0,0.25)', borderWidth: 1, borderColor: hexA(sevCol(m.severity), 0.2), borderLeftWidth: 3, borderLeftColor: sevCol(m.severity), gap: 6 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
@@ -1261,6 +1357,18 @@ function NotesTab({ clientId, crmId }: { clientId: string; crmId: string | null 
 /* ============================== SHEETS ============================== */
 function RosterSheet({ visible, onClose, clientId, onCreate }: { visible: boolean; onClose: () => void; clientId: string; onCreate: () => void }) {
   const rosterQ = useUpcomingRoster(visible ? clientId : null);
+  const { session } = useAuth();
+  const { selectedClientName } = useStore();
+  // Tap a session → the roster-management action sheet (reschedule / cancel /
+  // wipe future) — same component, same backend contracts.
+  const [selected, setSelected] = React.useState<RosterSession | null>(null);
+  const openActions = (s: any) => setSelected({
+    id: s.id, clientId, clientName: selectedClientName ?? 'Client',
+    trainerId: s.trainer_id ?? null, trainerName: s.trainerName ?? 'Trainer',
+    when: s.scheduled_datetime, modality: s.modality ?? s.session_type ?? null,
+    status: s.status ?? 'scheduled', notes: s.notes ?? null,
+    cancelled: (s.status ?? '') === 'cancelled', completed: false, hasRescheduleReq: false,
+  });
   return (
     <SheetShell visible={visible} onClose={onClose} accent={C.gold} icon="calendar" title="Upcoming Roster" subtitle="SCHEDULED SESSIONS">
       <Pressable onPress={onCreate}>
@@ -1270,14 +1378,16 @@ function RosterSheet({ visible, onClose, clientId, onCreate }: { visible: boolea
         </LinearGradient>
       </Pressable>
       {rosterQ.isLoading ? <Empty text="Loading…" /> : (rosterQ.data ?? []).length === 0 ? <Empty text="No upcoming sessions scheduled." /> : (rosterQ.data ?? []).map((s: any) => (
-        <View key={s.id} style={{ padding: 12, borderRadius: 13, backgroundColor: 'rgba(0,0,0,0.25)', borderWidth: 1, borderColor: hexA(C.gold, 0.2), borderLeftWidth: 3, borderLeftColor: C.gold, gap: 5 }}>
+        <Pressable key={s.id} onPress={() => openActions(s)} style={{ padding: 12, borderRadius: 13, backgroundColor: 'rgba(0,0,0,0.25)', borderWidth: 1, borderColor: hexA(C.gold, 0.2), borderLeftWidth: 3, borderLeftColor: C.gold, gap: 5 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <Body style={{ flex: 1, fontSize: 13.5, fontFamily: F.bodySemi, color: '#fff' }}>{pretty(s.modality || s.session_type)}</Body>
             <Badge text={pretty(s.status)} color={C.gold} />
+            <Icon name="chevRight" size={13} color={C.muted3} strokeWidth={2.2} />
           </View>
           <Body style={{ fontSize: 12, color: C.muted2 }}>{istDT(s.scheduled_datetime)} · {s.trainerName}</Body>
-        </View>
+        </Pressable>
       ))}
+      <SessionActionSheet session={selected} crmId={session?.user?.id ?? null} onClose={() => { setSelected(null); rosterQ.refetch(); }} />
     </SheetShell>
   );
 }

@@ -8,6 +8,7 @@ import { Page, Badge, AnimChip, HScroll } from './common';
 import { useAuth } from '../auth';
 import { useEscalations, ESC_META, ESC_TYPES, TIER_META, EscalationType, EscalationRow } from '../lib/escalationQueries';
 import { SheetShell } from './reportDetail';
+import { useMyCapabilities } from '../lib/capabilities';
 
 /* ============ CRM: Escalations — read-only monitor over the escalations
    ladder (T1 CRM → T2 Ops → T3 Super Admin). Rows are opened, bumped and
@@ -44,6 +45,26 @@ function detailLine(r: EscalationRow): string | null {
 }
 
 export function CrmEsc() {
+  // CRM Manager only (web: role_specialization includes crm_manager) — regular
+  // CRMs never see the sidebar entry, and direct navigation is blocked here too.
+  const caps = useMyCapabilities();
+  if (!caps.isLoading && !caps.data.isCrmManager) {
+    return (
+      <Page gap={14} pt={6}>
+        <View style={{ alignItems: 'center', gap: 12, paddingVertical: 60 }}>
+          <View style={{ width: 64, height: 64, borderRadius: 22, backgroundColor: hexA(C.red, 0.1), borderWidth: 1, borderColor: hexA(C.red, 0.3), alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name='shield' size={26} color={C.red} strokeWidth={1.9} />
+          </View>
+          <Serif style={{ fontSize: 20 }}>CRM Manager Only</Serif>
+          <Body style={{ fontSize: 12.5, color: C.muted2, textAlign: 'center', paddingHorizontal: 30 }}>Escalations are visible to the CRM head only.</Body>
+        </View>
+      </Page>
+    );
+  }
+  return <CrmEscInner />;
+}
+
+function CrmEscInner() {
   const { session } = useAuth();
   const crmId = session?.user?.id ?? null;
   const [status, setStatus] = React.useState<'open' | 'completed'>('open');

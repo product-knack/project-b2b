@@ -5,6 +5,7 @@ import { C, F, hexA, ORANGE_GRAD } from '../theme';
 import { Icon, IconName } from '../icons';
 import { Serif, Body, Mono, Card, Avatar, ProgressBar } from '../components/primitives';
 import { Page, TitleBlock, GreetingHeader, Badge, HScroll, BackLink } from './common';
+import { FeatureTour, COACH_TOUR, TourLauncher } from '../components/featureTour';
 import { useStore } from '../store';
 import { useAuth } from '../auth';
 import { useSidebarProfile } from '../lib/navQueries';
@@ -133,11 +134,13 @@ export function CoachDashboard() {
   const pendingPlans = useCoachPendingPlanCount(uid);
   const d = q.data;
   const first = (prof.fullName || 'Coach').split(' ')[0];
+  const [tourOpen, setTourOpen] = React.useState(false);
   const [perfVisible, setPerfVisible] = React.useState(12);
 
   return (
     <Page gap={16}>
-      <GreetingHeader date={todayLabel()} name={`Hi, ${first}`} sub="Your trainers & clients at a glance" initial={prof.initial} avatarUrl={prof.avatarUrl} />
+      <GreetingHeader date={todayLabel()} name={`Hi, ${first}`} sub="Your trainers & clients at a glance" initial={prof.initial} avatarUrl={prof.avatarUrl} rightAction={<TourLauncher onPress={() => setTourOpen(true)} />} />
+      <FeatureTour visible={tourOpen} steps={COACH_TOUR} tourName='coach' onClose={() => setTourOpen(false)} />
       <AccountSwitch />
       {(pendingPlans.data ?? 0) > 0 ? <PendingPlansAlert count={pendingPlans.data!} onPress={() => go('coach-programs')} /> : null}
       <ErrorState q={q} />
@@ -749,11 +752,32 @@ type ViewerPlan = { id: string; title: string; clientName: string; trainerName: 
 function PlanViewerSheet({ plan, onClose }: { plan: ViewerPlan; onClose: () => void }) {
   const q = usePlanExercises(plan.id);
   const exs = q.data ?? [];
-  const groups = React.useMemo(() => {
-    const map = new Map<string, typeof exs>();
-    exs.forEach((e) => { const arr = map.get(e.bodyPart) ?? []; arr.push(e); map.set(e.bodyPart, arr); });
-    return [...map.entries()];
+  // Plans store ONE ROW PER SET (set_number 1..N per exercise) — rendering raw
+  // rows duplicated every exercise ("Lateral Raises · 1 sets" + "· 2 sets").
+  // Group the set-rows into one card per exercise; per-set targets that differ
+  // are listed set by set, identical ones collapse into single chips.
+  type ExGroup = { key: string; name: string; bodyPart: string; superSet: string | null; activityType: string | null; subActivity: string | null; notes: string | null; rows: typeof exs };
+  const grouped = React.useMemo(() => {
+    const out: ExGroup[] = [];
+    const idx = new Map<string, ExGroup>();
+    exs.forEach((e) => {
+      const k = `${e.bodyPart}|${e.name.toLowerCase().trim()}|${e.superSet ?? ''}`;
+      let g = idx.get(k);
+      if (!g) {
+        g = { key: k, name: e.name, bodyPart: e.bodyPart, superSet: e.superSet ?? null, activityType: e.activityType ?? null, subActivity: e.subActivity ?? null, notes: e.notes ?? null, rows: [] as typeof exs };
+        idx.set(k, g); out.push(g);
+      }
+      g.rows.push(e);
+      if (!g.notes && e.notes) g.notes = e.notes;
+    });
+    return out;
   }, [exs]);
+  const groups = React.useMemo(() => {
+    const map = new Map<string, ExGroup[]>();
+    grouped.forEach((g) => { const arr = map.get(g.bodyPart) ?? []; arr.push(g); map.set(g.bodyPart, arr); });
+    return [...map.entries()];
+  }, [grouped]);
+  const uniform = (rows: typeof exs, f: (r: any) => any) => rows.every((r) => String(f(r) ?? '') === String(f(rows[0]) ?? ''));
   const mc = modalityCol(plan.modality);
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
@@ -771,7 +795,7 @@ function PlanViewerSheet({ plan, onClose }: { plan: ViewerPlan; onClose: () => v
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
             {plan.modality ? <MetaChip text={plan.modality} color={mc} /> : null}
             {plan.weeks ? <MetaChip icon="clock" text={`${plan.weeks} weeks`} color={C.green} /> : null}
-            <MetaChip icon="list" text={`${exs.length} exercise${exs.length === 1 ? '' : 's'}`} color={C.blue} />
+            <MetaChip icon="list" text={`${grouped.length} exercise${grouped.length === 1 ? '' : 's'}`} color={C.blue} />
           </View>
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 34, gap: 12 }}>
             {plan.description ? <Body style={{ fontSize: 12, color: C.muted2, lineHeight: 17 }}>{plan.description}</Body> : null}
@@ -782,29 +806,53 @@ function PlanViewerSheet({ plan, onClose }: { plan: ViewerPlan; onClose: () => v
                   <View style={{ flex: 1, height: 1, backgroundColor: 'rgba(255,255,255,0.06)' }} />
                   <Mono style={{ fontSize: 9, color: C.muted3 }}>{list.length}</Mono>
                 </View>
-                {list.map((e, i) => (
-                  <View key={e.id} style={{ padding: 12, borderRadius: 13, backgroundColor: 'rgba(0,0,0,0.22)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)', gap: 8 }}>
+                {list.map((g, i) => {
+                  const first: any = g.rows[0];
+                  const allSame = uniform(g.rows, (r: any) => `${r.reps}|${r.load}|${r.rmPct}|${r.tempo}|${r.rest}|${r.rir}|${r.duration}`);
+                  return (
+                  <View key={g.key} style={{ padding: 12, borderRadius: 13, backgroundColor: 'rgba(0,0,0,0.22)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)', gap: 8 }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
                       <View style={{ width: 24, height: 24, borderRadius: 8, backgroundColor: hexA(C.orange, 0.14), alignItems: 'center', justifyContent: 'center' }}>
                         <Text style={{ fontFamily: F.mono, fontSize: 10.5, color: C.orange }}>{i + 1}</Text>
                       </View>
-                      <Body numberOfLines={2} style={{ flex: 1, fontSize: 13, fontFamily: F.bodySemi, color: '#fff' }}>{e.name}</Body>
-                      {e.superSet ? <MetaChip text={`SS ${e.superSet}`} color={C.purple} /> : null}
+                      <Body numberOfLines={2} style={{ flex: 1, fontSize: 13, fontFamily: F.bodySemi, color: '#fff' }}>{g.name}</Body>
+                      {g.superSet ? <MetaChip text={`SS ${g.superSet}`} color={C.purple} /> : null}
                     </View>
-                    {(e.subActivity || e.activityType) ? <Body style={{ fontSize: 11, color: C.muted2 }}>{[e.activityType, e.subActivity].filter(Boolean).join(' · ')}</Body> : null}
-                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                      {e.sets ? <MetaChip text={`${e.sets} sets`} color={C.orange} /> : null}
-                      {e.reps != null ? <MetaChip text={`${e.reps} reps`} color={C.blue} /> : null}
-                      {e.rmPct != null ? <MetaChip text={`${e.rmPct}% RM`} color={C.green} /> : null}
-                      {e.load != null ? <MetaChip text={`${e.load} kg`} color={C.green} /> : null}
-                      {e.tempo ? <MetaChip text={`Tempo ${e.tempo}`} color={C.gold} /> : null}
-                      {e.rest != null ? <MetaChip text={`Rest ${e.rest}s`} color={C.muted2} /> : null}
-                      {e.rir != null ? <MetaChip text={`RIR ${e.rir}`} color={C.purple} /> : null}
-                      {e.duration != null ? <MetaChip icon="clock" text={`${e.duration} min`} color={C.blue} /> : null}
-                    </View>
-                    {e.notes ? <Body style={{ fontSize: 11, color: C.muted3, fontStyle: 'italic' }}>{e.notes}</Body> : null}
+                    {(g.subActivity || g.activityType) ? <Body style={{ fontSize: 11, color: C.muted2 }}>{[g.activityType, g.subActivity].filter(Boolean).join(' · ')}</Body> : null}
+                    {allSame ? (
+                      /* Every set shares the same targets → one compact chip row */
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                        <MetaChip text={`${g.rows.length} set${g.rows.length === 1 ? '' : 's'}`} color={C.orange} />
+                        {first.reps != null ? <MetaChip text={`${first.reps} reps`} color={C.blue} /> : null}
+                        {first.rmPct != null ? <MetaChip text={`${first.rmPct}% RM`} color={C.green} /> : null}
+                        {first.load != null ? <MetaChip text={`${first.load} kg`} color={C.green} /> : null}
+                        {first.tempo ? <MetaChip text={`Tempo ${first.tempo}`} color={C.gold} /> : null}
+                        {first.rest != null ? <MetaChip text={`Rest ${first.rest}s`} color={C.muted2} /> : null}
+                        {first.rir != null ? <MetaChip text={`RIR ${first.rir}`} color={C.purple} /> : null}
+                        {first.duration != null ? <MetaChip icon="clock" text={`${first.duration} min`} color={C.blue} /> : null}
+                      </View>
+                    ) : (
+                      /* Sets differ → one line per set */
+                      <View style={{ gap: 5 }}>
+                        <MetaChip text={`${g.rows.length} sets`} color={C.orange} />
+                        {g.rows.map((r: any, si: number) => (
+                          <View key={r.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', paddingLeft: 2 }}>
+                            <Mono style={{ fontSize: 8.5, color: C.muted3, width: 34 }}>SET {r.sets ?? si + 1}</Mono>
+                            {r.reps != null ? <MetaChip text={`${r.reps} reps`} color={C.blue} /> : null}
+                            {r.rmPct != null ? <MetaChip text={`${r.rmPct}% RM`} color={C.green} /> : null}
+                            {r.load != null ? <MetaChip text={`${r.load} kg`} color={C.green} /> : null}
+                            {r.tempo ? <MetaChip text={`Tempo ${r.tempo}`} color={C.gold} /> : null}
+                            {r.rest != null ? <MetaChip text={`Rest ${r.rest}s`} color={C.muted2} /> : null}
+                            {r.rir != null ? <MetaChip text={`RIR ${r.rir}`} color={C.purple} /> : null}
+                            {r.duration != null ? <MetaChip icon="clock" text={`${r.duration} min`} color={C.blue} /> : null}
+                          </View>
+                        ))}
+                      </View>
+                    )}
+                    {g.notes ? <Body style={{ fontSize: 11, color: C.muted3, fontStyle: 'italic' }}>{g.notes}</Body> : null}
                   </View>
-                ))}
+                  );
+                })}
               </View>
             ))}
           </ScrollView>

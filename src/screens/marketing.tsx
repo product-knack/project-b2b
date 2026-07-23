@@ -5,6 +5,8 @@ import Svg, { Polyline, Line as SvgLine, Text as SvgText, Circle } from 'react-n
 import { C, F, hexA, ORANGE_GRAD } from '../theme';
 import { Icon, IconName } from '../icons';
 import { useAuth } from '../auth';
+import { trackClientTab } from '../lib/amplitude';
+import { FeatureTour, MARKETING_TOUR, TourLauncher } from '../components/featureTour';
 import { useStore } from '../store';
 import { Serif, Body, Mono, Card, Avatar } from '../components/primitives';
 import { Page, TitleBlock, Badge, GreetingHeader } from './common';
@@ -90,6 +92,7 @@ function StatChip({ icon, value, label, color }: { icon: IconName; value: string
 
 /* ---------------- /marketing — dashboard ---------------- */
 export function MarketingDashboard() {
+  const [tourOpen, setTourOpen] = React.useState(false);
   const { go, set } = useStore();
   const infQ = useInfluencers();
   const sideProf = useSidebarProfile();
@@ -140,7 +143,9 @@ export function MarketingDashboard() {
         sub="Influencer performance"
         initial="M"
         avatarUrl={sideProf.avatarUrl}
+        rightAction={<TourLauncher onPress={() => setTourOpen(true)} />}
       />
+      <FeatureTour visible={tourOpen} steps={MARKETING_TOUR} tourName='marketing' onClose={() => setTourOpen(false)} />
       {infQ.isLoading ? (
         <View style={{ paddingVertical: 40, alignItems: 'center' }}><ActivityIndicator color={C.orange} /></View>
       ) : infQ.isError ? (
@@ -378,6 +383,7 @@ export function MarketingClientDetail() {
   const c = infQ.data;
   const name = c?.name ?? selectedClientName ?? 'Influencer';
   const [tab, setTab] = React.useState<MTab>('content');
+  React.useEffect(() => { trackClientTab('marketing-client-detail', tab, { id: clientId, name }); }, [tab]);
   const tickets = useInfluencerOpenTickets(clientId ?? null, 'marketing');
   const allInf = useInfluencers().data ?? [];
 

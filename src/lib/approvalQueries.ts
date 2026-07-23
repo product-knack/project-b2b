@@ -134,7 +134,7 @@ export function useRejectReschedule() {
 export type RosterReq = {
   id: string; type: string; rosterType: 'single' | 'full' | null;
   clientId: string | null; clientName: string; trainerId: string; trainerName: string;
-  requestedAt: string; slotAt: string | null; remark: string | null;
+  requestedAt: string; slotAt: string | null; remark: string | null; modality: string | null;
   status: string; reviewNote: string | null; reviewedAt: string | null;
 };
 export function useRosterRequests(crmId: string | null) {
@@ -148,12 +148,13 @@ export function useRosterRequests(crmId: string | null) {
       if (!ids.length) return [];
       // No FK from all_requests.requested_by → profiles in the live DB: fetch plain,
       // enrich names separately (the web app's fallback path does the same).
-      const { data, error } = await supabase
-        .from('all_requests')
-        .select('id, request_type, requested_by, client_id, requested_datetime, remark, status, review_note, reviewed_at, created_at, roster_type')
-        .in('client_id', ids)
-        .order('created_at', { ascending: false })
-        .limit(100);
+      // `modality` (trainer's pick) falls back gracefully pre-migration.
+      const SEL_BASE = 'id, request_type, requested_by, client_id, requested_datetime, remark, status, review_note, reviewed_at, created_at, roster_type';
+      let res: any = await supabase.from('all_requests').select(`${SEL_BASE}, modality`).in('client_id', ids).order('created_at', { ascending: false }).limit(100);
+      if (res.error && /modality/.test(res.error.message)) {
+        res = await supabase.from('all_requests').select(SEL_BASE).in('client_id', ids).order('created_at', { ascending: false }).limit(100);
+      }
+      const { data, error } = res;
       if (error) throw new Error(error.message);
       const rows = (data ?? []) as any[];
       const maps = await nameMaps([...new Set(rows.map((r) => r.client_id).filter(Boolean))], [...new Set(rows.map((r) => r.requested_by).filter(Boolean))]);
@@ -163,6 +164,7 @@ export function useRosterRequests(crmId: string | null) {
         clientId: r.client_id ?? null, clientName: (r.client_id && maps.client.get(r.client_id)) || 'Client',
         trainerId: r.requested_by, trainerName: maps.profile.get(r.requested_by) ?? 'Trainer',
         requestedAt: r.created_at, slotAt: r.requested_datetime ?? null, remark: r.remark ?? null,
+        modality: r.modality ?? null,
         status: r.status ?? 'pending', reviewNote: r.review_note ?? null, reviewedAt: r.reviewed_at ?? null,
       }));
     },
@@ -172,18 +174,49 @@ export function useRosterRequests(crmId: string | null) {
 export function useReviewRosterRequest() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { req: RosterReq; crmId: string; action: 'approve' | 'reject'; note?: string }) => {
-      const { req, crmId, action, note } = input;
+    mutationFn: async (input: {
+      req: RosterReq; crmId: string; action: 'approve' | 'reject'; note?: string;
+      /* Single-day approve comes from the Schedule Session sheet (web
+         CreateSessionDialog port): CRM-confirmed slot, REQUIRED modality, notes. */
+      schedule?: { datetimeIso: string; modality: string; notes: string | null };
+    }) => {
+      const { req, crmId, action, note, schedule } = input;
       if (action === 'approve' && req.rosterType === 'single') {
-        // Single-day roster: create the actual session first (mirrors the web's
-        // CreateSessionDialog essence), then mark the request approved.
-        if (!req.slotAt || !req.clientId) throw new Error('This request has no client/slot to schedule.');
+        if (!req.clientId) throw new Error('This request has no client to schedule.');
+        if (!schedule?.modality?.trim()) throw new Error('Pick a modality before scheduling.');
+        const when = schedule.datetimeIso;
+        // Guards (web CreateSessionDialog rules):
+        // 1. Past-date block.
+        if (new Date(when).getTime() < Date.now() - 60_000) throw new Error('That slot is in the past — pick a future time.');
+        const winMs = (min: number) => min * 60_000;
+        const t = new Date(when).getTime();
+        // 2. Trainer conflict ±90 min — hard block.
+        const { data: tClash } = await supabase
+          .from('session_schedule')
+          .select('id, scheduled_datetime')
+          .eq('trainer_id', req.trainerId)
+          .gte('scheduled_datetime', new Date(t - winMs(90)).toISOString())
+          .lte('scheduled_datetime', new Date(t + winMs(90)).toISOString())
+          .neq('status', 'cancelled')
+          .limit(1);
+        if ((tClash?.length ?? 0) > 0) throw new Error('The trainer already has a session within 90 minutes of this slot.');
+        // 3. Client double-booking ±60 min — hard block.
+        const { data: cClash } = await supabase
+          .from('session_schedule')
+          .select('id')
+          .eq('client_id', req.clientId)
+          .gte('scheduled_datetime', new Date(t - winMs(60)).toISOString())
+          .lte('scheduled_datetime', new Date(t + winMs(60)).toISOString())
+          .neq('status', 'cancelled')
+          .limit(1);
+        if ((cClash?.length ?? 0) > 0) throw new Error('The client already has a session around this slot.');
         const { error: insErr } = await supabase.from('session_schedule').insert({
           client_id: req.clientId,
           trainer_id: req.trainerId,
-          scheduled_datetime: req.slotAt,
+          scheduled_datetime: when,
+          modality: schedule.modality.trim(),
           status: 'scheduled',
-          notes: req.remark ?? null,
+          notes: schedule.notes?.trim() || null,
         });
         if (insErr) throw new Error(insErr.message);
       }

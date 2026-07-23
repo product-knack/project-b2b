@@ -15,13 +15,14 @@ import {
   useHeadDoctorDoctors, useBulkCreateRoster, useCancelRosterSession, useRescheduleRosterSession,
   useDeleteFutureRoster, formatDoctorSessionType, personName, DOCTOR_ROSTER_CREATE_MODALITIES,
   ProtocolExerciseInput, usePhysioDialogClients, useHeadDoctorClients, fetchRosterReplicatePrefill,
-  useDoctorsRunRate, useDoctorTodayRoster, DoctorRosterRow,
+  useDoctorsRunRate, useDoctorTodayRoster, DoctorRosterRow, usePhysioSessionExercises,
 } from '../lib/doctorQueries';
 
 export { HEAD_DOCTOR_ID };
 export { DoctorSessionsPage as DoctorSessions } from './doctorSessions';
 import { LeaderboardPreview, DistanceSheet, MapPing, approxTravel } from './trainer';
 import { PhysioSessionSheet } from './doctorSessions';
+import { FeatureTour, DOCTOR_TOUR, TourLauncher } from '../components/featureTour';
 import * as Location from 'expo-location';
 import { useTrainerLeaderboard, istTimeParts } from '../lib/trainerQueries';
 
@@ -110,6 +111,137 @@ function HodGate({ children }: { children: React.ReactNode }) {
 }
 
 /* ============ DASHBOARD ============ */
+/* ============ Full session detail sheet (HOD breakdown → tap a session) ============
+   Parses the structured physio notes ("Category: X", "--- Modality ---" sections,
+   "Key: value" lines) into styled cards, and loads the session's
+   physio_session_exercises (grouped per exercise with set chips). */
+function parseSessionNotes(notes: string | null): { title: string; rows: { k: string | null; v: string }[] }[] {
+  if (!notes?.trim()) return [];
+  const sections: { title: string; rows: { k: string | null; v: string }[] }[] = [{ title: 'Session', rows: [] }];
+  notes.split(/\r?\n/).forEach((raw) => {
+    const line = raw.trim();
+    if (!line) return;
+    const sec = line.match(/^-{2,}\s*(.+?)\s*-{2,}$/);
+    if (sec) { sections.push({ title: sec[1], rows: [] }); return; }
+    const kv = line.match(/^([A-Za-z][A-Za-z0-9 /()%&+-]{1,40}):\s*(.*)$/);
+    const target = sections[sections.length - 1];
+    if (kv && kv[2]) target.rows.push({ k: kv[1], v: kv[2] });
+    else target.rows.push({ k: null, v: line });
+  });
+  return sections.filter((s) => s.rows.length);
+}
+
+function DoctorSessionDetailSheet({ session, onClose }: { session: any | null; onClose: () => void }) {
+  const exQ = usePhysioSessionExercises(session?.id ?? null, !!session);
+  if (!session) return null;
+  const sections = parseSessionNotes(session.notes);
+  const rows = (exQ.data ?? []) as any[];
+  // Group per-set rows into exercises.
+  const exGroups: { name: string; sets: any[] }[] = [];
+  const idx = new Map<string, { name: string; sets: any[] }>();
+  rows.forEach((r) => {
+    const key = (r.exercise_name || 'Exercise').trim();
+    let g = idx.get(key);
+    if (!g) { g = { name: key, sets: [] }; idx.set(key, g); exGroups.push(g); }
+    g.sets.push(r);
+  });
+  const typeCol = /rehab/i.test(session.session_type ?? '') ? C.purple : C.blue;
+  const when = new Date(session.scheduled_at);
+  return (
+    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+      <View style={{ flex: 1, justifyContent: 'flex-end' }}>
+        <Pressable onPress={onClose} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.65)' }} />
+        <View style={{ maxHeight: '88%', backgroundColor: C.sheetBg, borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', overflow: 'hidden' }}>
+          {/* Gradient header */}
+          <LinearGradient colors={['#241812', '#131010']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ paddingHorizontal: 18, paddingTop: 10, paddingBottom: 13, borderBottomWidth: 1, borderBottomColor: hexA(typeCol, 0.25) }}>
+            <View style={{ alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.16)', marginBottom: 12 }} />
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 11 }}>
+              <View style={{ width: 40, height: 40, borderRadius: 14, backgroundColor: hexA(typeCol, 0.14), borderWidth: 1, borderColor: hexA(typeCol, 0.4), alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name="activity" size={17} color={typeCol} strokeWidth={2} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Serif numberOfLines={1} style={{ fontSize: 19 }}>{session.client_name ?? session.session_name ?? 'Session'}</Serif>
+                <Mono style={{ fontSize: 8.5, letterSpacing: 0.6, color: C.muted3, marginTop: 2 }}>
+                  {when.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'short', day: '2-digit', month: 'short' }).toUpperCase()} · {when.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: 'numeric', minute: '2-digit', hour12: true }).toUpperCase()}
+                </Mono>
+              </View>
+              <Pressable onPress={onClose} style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name="close" size={14} color="#B8B2AC" strokeWidth={2.3} />
+              </Pressable>
+            </View>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
+              <Badge text={formatDoctorSessionType(session.session_type)} color={typeCol} />
+              {session.cancelled ? <Badge text="Cancelled" color={C.red} /> : session.attendance_marked ? <Badge text="Attended" color={C.green} /> : <Badge text="Scheduled" color={C.gold} />}
+              <Badge text={session.session_acknowledged_at ? 'Client Acknowledged' : 'Not Acknowledged'} color={session.session_acknowledged_at ? C.green : C.muted2} />
+              {session.location ? <Badge text={session.location} color={C.muted2} /> : null}
+            </View>
+          </LinearGradient>
+
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, gap: 11, paddingBottom: 30 }}>
+            {/* Parsed structured notes */}
+            {sections.length === 0 && !rows.length && !exQ.isLoading ? (
+              <Body style={{ fontSize: 12, color: C.muted3, textAlign: 'center', paddingVertical: 18 }}>No detailed notes recorded for this session.</Body>
+            ) : null}
+            {sections.map((sec, si) => (
+              <View key={si} style={{ borderRadius: 15, backgroundColor: 'rgba(0,0,0,0.25)', borderWidth: 1, borderColor: hexA(typeCol, 0.16), overflow: 'hidden' }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 9, paddingHorizontal: 13, backgroundColor: hexA(typeCol, 0.07), borderBottomWidth: 1, borderBottomColor: hexA(typeCol, 0.14) }}>
+                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: typeCol }} />
+                  <Mono style={{ fontSize: 9.5, letterSpacing: 1, color: typeCol }}>{sec.title.toUpperCase()}</Mono>
+                </View>
+                <View style={{ padding: 12, gap: 7 }}>
+                  {sec.rows.map((r, ri) => r.k ? (
+                    <View key={ri} style={{ flexDirection: 'row', gap: 10 }}>
+                      <Body style={{ width: 118, fontSize: 11, color: C.muted3 }}>{r.k}</Body>
+                      <Body style={{ flex: 1, fontSize: 12.5, color: '#fff', lineHeight: 18 }}>{r.v}</Body>
+                    </View>
+                  ) : (
+                    <Body key={ri} style={{ fontSize: 12, color: C.ink3, lineHeight: 18 }}>{r.v}</Body>
+                  ))}
+                </View>
+              </View>
+            ))}
+
+            {/* Exercises performed */}
+            {exQ.isLoading ? (
+              <View style={{ paddingVertical: 14, alignItems: 'center' }}><ActivityIndicator color={typeCol} /></View>
+            ) : exGroups.length ? (
+              <View style={{ borderRadius: 15, backgroundColor: 'rgba(0,0,0,0.25)', borderWidth: 1, borderColor: hexA(C.green, 0.18), overflow: 'hidden' }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 9, paddingHorizontal: 13, backgroundColor: hexA(C.green, 0.07), borderBottomWidth: 1, borderBottomColor: hexA(C.green, 0.14) }}>
+                  <Icon name="dumbbell" size={12} color={C.green} strokeWidth={2.2} />
+                  <Mono style={{ flex: 1, fontSize: 9.5, letterSpacing: 1, color: C.green }}>EXERCISES · {exGroups.length}</Mono>
+                </View>
+                <View style={{ padding: 12, gap: 10 }}>
+                  {exGroups.map((g) => (
+                    <View key={g.name} style={{ gap: 6 }}>
+                      <Body style={{ fontSize: 13, fontFamily: F.bodySemi, color: '#fff' }}>{g.name}</Body>
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                        {g.sets.map((st: any, i: number) => {
+                          const bits = [
+                            st.reps != null ? `${st.reps} reps` : null,
+                            st.load != null && st.load !== '' ? `${st.load} kg` : null,
+                            st.modality_duration ? `${st.modality_duration}` : null,
+                            st.modality_frequency ? `${st.modality_frequency}` : null,
+                          ].filter(Boolean).join(' · ');
+                          return (
+                            <View key={i} style={{ paddingVertical: 4, paddingHorizontal: 9, borderRadius: 999, backgroundColor: hexA(C.green, 0.08), borderWidth: 1, borderColor: hexA(C.green, 0.28) }}>
+                              <Text style={{ fontFamily: F.bodySemi, fontSize: 10, color: C.ink3 }}>S{st.set_number ?? i + 1}{bits ? ` · ${bits}` : ''}</Text>
+                            </View>
+                          );
+                        })}
+                      </View>
+                      {g.sets[0]?.notes ? <Body style={{ fontSize: 10.5, color: C.muted3, fontStyle: 'italic' }}>{g.sets[0].notes}</Body> : null}
+                    </View>
+                  ))}
+                </View>
+              </View>
+            ) : null}
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 /* ---------- Today's Roster (doctor's own — HOD-created) ----------
    Timeline-styled section: gradient summary header with day progress, staggered
    session cards with a status rail + NEXT highlight, the trainer-style distance
@@ -353,6 +485,7 @@ function DoctorTodayRoster() {
 }
 
 export function DoctorDashboard() {
+  const [tourOpen, setTourOpen] = React.useState(false);
   const { session } = useAuth();
   const { go } = useStore();
   const uid = session?.user?.id ?? null;
@@ -379,6 +512,7 @@ export function DoctorDashboard() {
   const [runRateOpen, setRunRateOpen] = React.useState(false);
   const runRateQ = useDoctorsRunRate();
   const [detailFor, setDetailFor] = React.useState<{ id: string; name: string } | null>(null);
+  const [sessOpen, setSessOpen] = React.useState<any | null>(null);
   const detailQ = useDoctorSessionDetails(detailFor?.id ?? null, selectedMonth, !!detailFor, rangeMode === 'day' ? selectedDay : null);
 
   const leaderboard = teamQ.data?.leaderboard ?? [];
@@ -389,7 +523,13 @@ export function DoctorDashboard() {
 
   return (
     <Page gap={14} pt={6}>
-      <TitleBlock title="Doctor Dashboard" sub={identity.data.isPhysio ? 'Physiotherapy overview' : identity.data.isNutritionist ? 'Nutrition overview' : 'Doctor overview'} />
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+        <View style={{ flex: 1 }}>
+          <TitleBlock title="Doctor Dashboard" sub={identity.data.isPhysio ? 'Physiotherapy overview' : identity.data.isNutritionist ? 'Nutrition overview' : 'Doctor overview'} />
+        </View>
+        <TourLauncher onPress={() => setTourOpen(true)} />
+      </View>
+      <FeatureTour visible={tourOpen} steps={DOCTOR_TOUR} tourName='doctor' onClose={() => setTourOpen(false)} />
 
       {/* Pending protocol approvals banner (HOD) */}
       {isHead && pendingCount > 0 ? (
@@ -754,7 +894,7 @@ export function DoctorDashboard() {
             ) : (
               <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 26 }}>
                 {(detailQ.data ?? []).map((s: any) => (
-                  <View key={s.id} style={{ padding: 11, borderRadius: 13, backgroundColor: 'rgba(0,0,0,0.22)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)', gap: 5 }}>
+                  <Pressable key={s.id} onPress={() => setSessOpen(s)} style={{ padding: 11, borderRadius: 13, backgroundColor: 'rgba(0,0,0,0.22)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)', gap: 5 }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
                       <Body style={{ flex: 1, fontSize: 12.5, fontFamily: F.bodySemi, color: '#fff' }} numberOfLines={1}>{s.client_name ?? s.session_name ?? 'Session'}</Body>
                       <Badge text={formatDoctorSessionType(s.session_type)} color={C.blue} />
@@ -765,12 +905,19 @@ export function DoctorDashboard() {
                       <Badge text={s.session_acknowledged_at ? 'Client Acknowledged' : 'Not Acknowledged'} color={s.session_acknowledged_at ? C.green : C.muted} />
                     </View>
                     {s.notes ? <Body style={{ fontSize: 10.5, color: C.muted2, fontStyle: 'italic' }} numberOfLines={3}>{s.notes}</Body> : null}
-                  </View>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-end' }}>
+                      <Mono style={{ fontSize: 7.5, letterSpacing: 0.6, color: C.orange }}>FULL DETAILS</Mono>
+                      <Icon name='chevRight' size={11} color={C.orange} strokeWidth={2.4} />
+                    </View>
+                  </Pressable>
                 ))}
               </ScrollView>
             )}
           </View>
         </View>
+        {/* NESTED inside this Modal's tree — a sibling Modal mounted while this
+            one is visible renders blank + touch-blocked on Android. */}
+        {sessOpen ? <DoctorSessionDetailSheet session={sessOpen} onClose={() => setSessOpen(null)} /> : null}
       </Modal>
     </Page>
   );

@@ -63,6 +63,8 @@ import { AdminCertifications } from './screens/adminCertifications';
 import { AdminTools, AdminTrainerFees, AdminManageTeams } from './screens/adminTools';
 import { AdminChurn } from './screens/adminChurn';
 import { AdminRevenueTracker, AdminRevenueSummary } from './screens/adminRevenue';
+import { AnalyticsTracker } from './components/Analytics';
+import { ReplayShield } from './components/ReplayShield';
 import { MarketingDashboard, MarketingClients, MarketingClientDetail, MarketingLeads, MarketingLeadAnalytics } from './screens/marketing';
 
 const SCREENS: Record<string, React.ComponentType> = {
@@ -160,13 +162,34 @@ const SCREENS: Record<string, React.ComponentType> = {
   'marketing-lead-analytics': MarketingLeadAnalytics,
 };
 
+/* Screens showing client MEDICAL / HEALTH data — Session Replay records these as
+   a fully blank region (AmpMaskView amp-block): the pixels never leave the
+   device. Screen Viewed events still fire, so usage insight is unaffected.
+   Everything NOT listed here is replayed normally at 100% sampling. */
+const SENSITIVE_ROUTES = new Set([
+  // Trainer — client detail (age scores, QHP, reports, medical), workout form
+  // (sleep/nutrition/steps check-in), QHP surfaces
+  'client', 'workout', 'qhp', 'qhp-manager', 'qhp-stats', 'qhp-assessment-detail', 'qhp-review',
+  // CRM — client detail (medical history, diagnoses, reports), health/QHP/blood pages
+  'crm-client', 'crm-qhp', 'crm-blood', 'crm-health', 'crm-assessment',
+  // Doctor — everything clinical (protocols, physio sessions, counselling, findings)
+  'doctor-client-detail', 'doctor-sessions', 'doctor-protocol-approvals',
+  // Coach — QHP assessments + progression/age metrics
+  'coach-assessments', 'coach-client-overview', 'coach-progression',
+  // Ops / Admin / Marketing surfaces that expose health data
+  'ops-qhp-hold', 'admin-client-detail', 'marketing-client-detail', 'b2c-reports',
+  // Chats — client health details are routinely discussed in messages
+  'messenger', 'client-threads',
+]);
+
 function RouteScreen({ route }: { route: string }) {
   const Screen = SCREENS[route] ?? Dashboard;
-  return (
+  const body = (
     <ScreenErrorBoundary resetKey={route}>
       <Screen />
     </ScreenErrorBoundary>
   );
+  return SENSITIVE_ROUTES.has(route) ? <ReplayShield>{body}</ReplayShield> : body;
 }
 
 const SCREEN_W = Dimensions.get('window').width;
@@ -356,6 +379,7 @@ export function Router() {
         <Overlays />
         <OddsAiChat />
         <ChatNotifications />
+        <AnalyticsTracker />
       </View>
     </LocationGate>
     </UpdateGate>

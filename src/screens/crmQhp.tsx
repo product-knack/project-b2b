@@ -197,8 +197,10 @@ export function CrmQhp() {
 }
 
 /* ---------- Schedule New QHP (web ScheduleQHPDialog → qhp_schedule) ---------- */
-function ScheduleQhpSheet({ visible, onClose, crmId }: { visible: boolean; onClose: () => void; crmId: string | null }) {
-  const clientsQ = useCrmClientList(visible ? crmId : null, 'active');
+/* Exported: also opened from the CRM client-detail QHP tab with `presetClient`
+   (the picker step is skipped and the client is locked). */
+export function ScheduleQhpSheet({ visible, onClose, crmId, presetClient }: { visible: boolean; onClose: () => void; crmId: string | null; presetClient?: { id: string; name: string } | null }) {
+  const clientsQ = useCrmClientList(visible && !presetClient ? crmId : null, 'active');
   const scheduleM = useScheduleQhp();
   const [client, setClient] = React.useState<{ id: string; name: string } | null>(null);
   const [q, setQ] = React.useState('');
@@ -208,7 +210,7 @@ function ScheduleQhpSheet({ visible, onClose, crmId }: { visible: boolean; onClo
   const [notes, setNotes] = React.useState('');
 
   React.useEffect(() => {
-    if (visible) { setClient(null); setQ(''); setDayOffset(1); setTime('10:00'); setAddress(''); setNotes(''); }
+    if (visible) { setClient(presetClient ?? null); setQ(''); setDayOffset(1); setTime('10:00'); setAddress(''); setNotes(''); }
   }, [visible]);
 
   const query = q.trim().toLowerCase();
@@ -246,9 +248,11 @@ function ScheduleQhpSheet({ visible, onClose, crmId }: { visible: boolean; onClo
         </>
       ) : (
         <>
-          <Pressable onPress={() => setClient(null)} style={{ alignSelf: 'flex-start', paddingVertical: 5, paddingHorizontal: 11, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' }}>
-            <Text style={{ fontFamily: F.bodySemi, fontSize: 10.5, color: C.muted }}>Change client</Text>
-          </Pressable>
+          {!presetClient ? (
+            <Pressable onPress={() => setClient(null)} style={{ alignSelf: 'flex-start', paddingVertical: 5, paddingHorizontal: 11, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' }}>
+              <Text style={{ fontFamily: F.bodySemi, fontSize: 10.5, color: C.muted }}>Change client</Text>
+            </Pressable>
+          ) : null}
           <Mono style={{ fontSize: 8.5, letterSpacing: 0.7, color: C.muted3 }}>DATE</Mono>
           <HScroll gap={7}>
             {days.map((d) => {
