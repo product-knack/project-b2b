@@ -100,7 +100,8 @@ export function LocationGate({ children }: { children: React.ReactNode }) {
       </Body>
       <Pressable
         onPress={() => (canAsk ? check(true) : Linking.openSettings())}
-        style={{ alignSelf: 'stretch', maxWidth: 320, alignItems: 'center', paddingVertical: 14, borderRadius: 14, backgroundColor: hexA(C.orange, 0.16), borderWidth: 1, borderColor: hexA(C.orange, 0.5) }}
+        // width:'100%' + maxWidth clamps AND stays centered — alignSelf:'stretch' anchored the clamped button to the left edge on wide screens
+        style={{ width: '100%', maxWidth: 320, alignItems: 'center', paddingVertical: 14, borderRadius: 14, backgroundColor: hexA(C.orange, 0.16), borderWidth: 1, borderColor: hexA(C.orange, 0.5) }}
       >
         <Text style={{ fontFamily: F.bodyBold, fontSize: 14.5, color: C.orange }}>{canAsk ? 'Allow Location' : 'Open Settings'}</Text>
       </Pressable>
