@@ -8,7 +8,7 @@
     "userInterfaceStyle": "light",
     "android": {
       "package": "teampassport.oddsfitness.com",
-      "versionCode": 14,
+      "versionCode": 16,
       "adaptiveIcon": {
         "backgroundColor": "#000000",
         "foregroundImage": "./assets/android-icon-foreground.png",
