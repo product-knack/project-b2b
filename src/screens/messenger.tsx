@@ -712,7 +712,8 @@ function VoiceBubble({ url, mine, pending, timeText, onLongPress }: { url: strin
     setPosMs(st.positionMillis ?? 0);
     if (st.durationMillis) setDurMs(st.durationMillis);
     setPlaying(!!st.isPlaying);
-    if (st.didJustFinish) { setPlaying(false); setPosMs(0); soundRef.current?.setPositionAsync(0).catch(() => {}); }
+    // stopAsync (not setPositionAsync) — a bare seek-to-0 resumes playback while shouldPlay is still true, causing an endless loop
+    if (st.didJustFinish) { setPlaying(false); setPosMs(0); soundRef.current?.stopAsync().catch(() => {}); }
   };
 
   const toggle = async () => {

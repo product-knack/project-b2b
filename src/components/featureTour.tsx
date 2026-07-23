@@ -425,48 +425,6 @@ const PREVIEWS: Record<string, () => React.ReactElement> = {
 };
 
 
-/* Auto-playing demo: the mock plays like a short slow video. A soft spotlight
-   band sweeps top to bottom to walk the eye through the feature, a tap ripple
-   pulses on the action area, and a timeline bar tracks the loop. */
-function DemoPlayer({ color, children }: { color: string; children: React.ReactNode }) {
-  const t = React.useRef(new Animated.Value(0)).current;
-  const [h, setH] = React.useState(160);
-  React.useEffect(() => {
-    const loop = Animated.loop(Animated.sequence([
-      Animated.timing(t, { toValue: 1, duration: 8000, easing: Easing.inOut(Easing.quad), useNativeDriver: false }),
-      Animated.delay(600),
-      Animated.timing(t, { toValue: 0, duration: 0, useNativeDriver: false }),
-    ]));
-    loop.start();
-    return () => loop.stop();
-  }, []);
-  return (
-    <View style={{ gap: 8 }}>
-      <View onLayout={(e) => setH(e.nativeEvent.layout.height)} style={{ overflow: 'hidden', borderRadius: 14 }}>
-        {/* content fades in at the start of every loop */}
-        <Animated.View style={{ opacity: t.interpolate({ inputRange: [0, 0.08, 1], outputRange: [0.25, 1, 1] }), transform: [{ scale: t.interpolate({ inputRange: [0, 0.08, 1], outputRange: [0.97, 1, 1] }) }] }}>
-          {children}
-        </Animated.View>
-        {/* spotlight band sweeping down (slow read-through) */}
-        <Animated.View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, height: 46, opacity: t.interpolate({ inputRange: [0.08, 0.14, 0.62, 0.7, 1], outputRange: [0, 0.9, 0.9, 0, 0] }), transform: [{ translateY: t.interpolate({ inputRange: [0.1, 0.66], outputRange: [-46, h], extrapolate: 'clamp' }) }] }}>
-          <LinearGradient colors={['rgba(255,255,255,0)', hexA(color, 0.14), 'rgba(255,255,255,0)']} style={{ flex: 1 }} />
-        </Animated.View>
-        {/* tap ripple on the action zone near the bottom */}
-        <Animated.View pointerEvents="none" style={{ position: 'absolute', bottom: 18, right: 34, width: 34, height: 34, borderRadius: 17, borderWidth: 2, borderColor: color, opacity: t.interpolate({ inputRange: [0.72, 0.76, 0.9, 1], outputRange: [0, 0.9, 0, 0] }), transform: [{ scale: t.interpolate({ inputRange: [0.72, 0.9], outputRange: [0.5, 1.9], extrapolate: 'clamp' }) }] }} />
-        <Animated.View pointerEvents="none" style={{ position: 'absolute', bottom: 27, right: 43, width: 16, height: 16, borderRadius: 8, backgroundColor: hexA(color, 0.85), opacity: t.interpolate({ inputRange: [0.7, 0.74, 0.8, 0.86, 1], outputRange: [0, 1, 1, 0, 0] }) }} />
-      </View>
-      {/* timeline */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-        <Icon path="M8 5v14l11-7z" size={10} color={color} strokeWidth={0} fill={color} />
-        <View style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
-          <Animated.View style={{ height: 3, borderRadius: 2, backgroundColor: color, width: t.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }) }} />
-        </View>
-        <Mono style={{ fontSize: 7.5, letterSpacing: 0.8, color: hexA(color, 0.85) }}>DEMO</Mono>
-      </View>
-    </View>
-  );
-}
-
 /* Animated tour launcher — gradient core, rotating dashed halo, breathing glow. */
 export function TourLauncher({ onPress }: { onPress: () => void }) {
   const spin = React.useRef(new Animated.Value(0)).current;
@@ -567,10 +525,10 @@ export function FeatureTour({ visible, steps, tourName, onClose }: { visible: bo
             <View style={{ width: '100%', maxWidth: 340, marginBottom: 22, borderRadius: 20, borderWidth: 1.5, borderColor: hexA(step.color, 0.4), backgroundColor: 'rgba(10,7,6,0.92)', padding: 13, gap: 10 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                 <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: step.color }} />
-                <Mono style={{ flex: 1, fontSize: 8, letterSpacing: 1, color: hexA(step.color, 0.9) }}>FEATURE DEMO · SAMPLE DATA</Mono>
+                <Mono style={{ flex: 1, fontSize: 8, letterSpacing: 1, color: hexA(step.color, 0.9) }}>FEATURE PREVIEW · SAMPLE DATA</Mono>
                 <Pressable onPress={() => setPreviewOpen(false)} hitSlop={8}><Icon name='close' size={12} color={C.muted2} strokeWidth={2.4} /></Pressable>
               </View>
-              <DemoPlayer color={step.color}>{PREVIEWS[step.preview]()}</DemoPlayer>
+              {PREVIEWS[step.preview]()}
             </View>
           ) : (<>
           {/* glowing core + orbit ring */}
@@ -597,8 +555,8 @@ export function FeatureTour({ visible, steps, tourName, onClose }: { visible: bo
           ) : null}
           {step.preview && !previewOpen ? (
             <Pressable onPress={() => setPreviewOpen(true)} style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 14, paddingVertical: 9, paddingHorizontal: 18, borderRadius: 999, backgroundColor: hexA(step.color, 0.14), borderWidth: 1.5, borderColor: hexA(step.color, 0.5) }}>
-              <Icon path='M8 5v14l11-7z' size={13} color={step.color} strokeWidth={0} fill={step.color} />
-              <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: step.color }}>Watch demo</Text>
+              <Icon name="eye" size={13} color={step.color} strokeWidth={2} />
+              <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: step.color }}>See preview</Text>
             </Pressable>
           ) : null}
         </Animated.View>

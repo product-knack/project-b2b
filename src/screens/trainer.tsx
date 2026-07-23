@@ -4469,7 +4469,7 @@ export function ClientDetail() {
                     </View>
                   </View>
                   {viewOpen ? (
-                    <View style={{ paddingHorizontal: 14, paddingBottom: 14, gap: 9, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)', paddingTop: 12 }}>
+                    <ScrollView nestedScrollEnabled showsVerticalScrollIndicator style={{ maxHeight: 400, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)' }} contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: 14, gap: 9, paddingTop: 12 }}>
                       {([
                         ['Type', s.type_label],
                         ['Status', s.status.charAt(0).toUpperCase() + s.status.slice(1)],
@@ -4488,10 +4488,10 @@ export function ClientDetail() {
                         </View>
                       ) : null}
                       <SessionExercises sessionId={s.workout_session_id} />
-                    </View>
+                    </ScrollView>
                   ) : null}
                   {aiOpen ? (
-                    <View style={{ paddingHorizontal: 14, paddingBottom: 14, gap: 10, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)', paddingTop: 12 }}>
+                    <ScrollView nestedScrollEnabled showsVerticalScrollIndicator style={{ maxHeight: 400, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)' }} contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: 14, gap: 10, paddingTop: 12 }}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8, paddingHorizontal: 11, borderRadius: 11, backgroundColor: hexA(C.blue, 0.08), borderWidth: 1, borderColor: hexA(C.blue, 0.22) }}>
                         <View style={{ width: 24, height: 24, borderRadius: 8, backgroundColor: hexA(C.blue, 0.16), alignItems: 'center', justifyContent: 'center' }}>
                           <Icon path="M12 3a4 4 0 0 0-4 4 4 4 0 0 0-1 7.9V19a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-4.1A4 4 0 0 0 16 7a4 4 0 0 0-4-4Z" size={14} color={C.blue} strokeWidth={2} />
@@ -4499,7 +4499,7 @@ export function ClientDetail() {
                         <Mono style={{ flex: 1, fontSize: 10.5, letterSpacing: 0.8, color: '#8FB6F0' }}>ODDS AI · SESSION ANALYSIS</Mono>
                       </View>
                       {s.ai_analysis ? <AiAnalysis text={s.ai_analysis} /> : <Body style={{ fontSize: 12.5, color: C.muted3 }}>No analysis available.</Body>}
-                    </View>
+                    </ScrollView>
                   ) : null}
                 </View>
               );
