@@ -1569,62 +1569,89 @@ function ClientSelect({ visible, value, onSelect }: { visible: boolean; value: {
 /* Wheel-style time picker — two snapping columns (hour / 5-min steps). Rendered as
    a Modal NESTED inside the RosterSheet's Modal tree (Android renders sibling
    modals blank + touch-blocking, so it must live inside the open sheet). */
+/* "14:30" → "2:30 PM" for display (storage stays 24h HH:MM). */
+const fmt12h = (hhmm: string) => {
+  const mt = /^(\d{2}):(\d{2})$/.exec(hhmm);
+  if (!mt) return hhmm;
+  const h24 = parseInt(mt[1], 10);
+  return `${h24 % 12 === 0 ? 12 : h24 % 12}:${mt[2]} ${h24 >= 12 ? 'PM' : 'AM'}`;
+};
+
 const WHEEL_ITEM = 40;
-function TimeWheelPicker({ visible, initial, onClose, onPick }: { visible: boolean; initial: string; onClose: () => void; onPick: (hhmm: string) => void }) {
-  const hours = Array.from({ length: 24 }, (_, i) => i);
-  const mins = Array.from({ length: 12 }, (_, i) => i * 5);
-  const [h, setH] = React.useState(9);
-  const [m, setM] = React.useState(0);
-  React.useEffect(() => {
-    if (!visible) return;
-    const mt = /^(\d{2}):(\d{2})$/.exec(initial);
-    setH(mt ? Math.min(23, parseInt(mt[1], 10)) : 9);
-    setM(mt ? Math.min(55, Math.round(parseInt(mt[2], 10) / 5) * 5) : 0);
-  }, [visible]);
-  const p2 = (n: number) => String(n).padStart(2, '0');
-  const wheel = (data: number[], val: number, setVal: (n: number) => void) => (
-    <View style={{ height: WHEEL_ITEM * 3, width: 72 }}>
+/* One snapping column. Android-safe: initial position via ref.scrollTo (the
+   contentOffset prop is iOS-only), and value updates on BOTH drag-end and
+   momentum-end (slow drags never fire onMomentumScrollEnd). */
+function WheelColumn({ data, value, width, onChange }: { data: string[]; value: string; width: number; onChange: (v: string) => void }) {
+  const ref = React.useRef<ScrollView>(null);
+  const settle = (y: number) => {
+    const idx = Math.max(0, Math.min(data.length - 1, Math.round(y / WHEEL_ITEM)));
+    onChange(data[idx]);
+  };
+  return (
+    <View style={{ height: WHEEL_ITEM * 3, width }}>
       <ScrollView
+        ref={ref}
         showsVerticalScrollIndicator={false}
         snapToInterval={WHEEL_ITEM}
         decelerationRate="fast"
         nestedScrollEnabled
-        contentOffset={{ x: 0, y: data.indexOf(val) * WHEEL_ITEM }}
+        onLayout={() => ref.current?.scrollTo({ y: Math.max(0, data.indexOf(value)) * WHEEL_ITEM, animated: false })}
         contentContainerStyle={{ paddingVertical: WHEEL_ITEM }}
-        onMomentumScrollEnd={(e) => {
-          const idx = Math.max(0, Math.min(data.length - 1, Math.round(e.nativeEvent.contentOffset.y / WHEEL_ITEM)));
-          setVal(data[idx]);
-        }}
+        onScrollEndDrag={(e) => settle(e.nativeEvent.contentOffset.y)}
+        onMomentumScrollEnd={(e) => settle(e.nativeEvent.contentOffset.y)}
       >
         {data.map((n) => (
-          <View key={n} style={{ height: WHEEL_ITEM, alignItems: 'center', justifyContent: 'center' }}>
-            <Text style={{ fontFamily: n === val ? F.bodyBold : F.body, fontSize: n === val ? 20 : 15, color: n === val ? C.orange : C.muted2 }}>{p2(n)}</Text>
-          </View>
+          <Pressable key={n} onPress={() => { onChange(n); ref.current?.scrollTo({ y: data.indexOf(n) * WHEEL_ITEM, animated: true }); }} style={{ height: WHEEL_ITEM, alignItems: 'center', justifyContent: 'center' }}>
+            <Text style={{ fontFamily: n === value ? F.bodyBold : F.body, fontSize: n === value ? 19 : 14.5, color: n === value ? C.orange : C.muted2 }}>{n}</Text>
+          </Pressable>
         ))}
       </ScrollView>
-      {/* selection band */}
       <View pointerEvents="none" style={{ position: 'absolute', top: WHEEL_ITEM, left: 0, right: 0, height: WHEEL_ITEM, borderTopWidth: 1, borderBottomWidth: 1, borderColor: hexA(C.orange, 0.35) }} />
     </View>
   );
+}
+
+function TimeWheelPicker({ visible, initial, onClose, onPick }: { visible: boolean; initial: string; onClose: () => void; onPick: (hhmm: string) => void }) {
+  const HOURS = Array.from({ length: 12 }, (_, i) => String(i + 1));       // 1..12
+  const MINS = Array.from({ length: 12 }, (_, i) => String(i * 5).padStart(2, '0'));
+  const AMPM = ['AM', 'PM'];
+  const [h, setH] = React.useState('9');
+  const [m, setM] = React.useState('00');
+  const [ap, setAp] = React.useState('AM');
+  React.useEffect(() => {
+    if (!visible) return;
+    const mt = /^(\d{2}):(\d{2})$/.exec(initial);
+    const h24 = mt ? Math.min(23, parseInt(mt[1], 10)) : 9;
+    const min = mt ? Math.min(55, Math.round(parseInt(mt[2], 10) / 5) * 5) : 0;
+    setH(String(h24 % 12 === 0 ? 12 : h24 % 12));
+    setM(String(min).padStart(2, '0'));
+    setAp(h24 >= 12 ? 'PM' : 'AM');
+  }, [visible]);
+  const to24 = () => {
+    let hr = parseInt(h, 10) % 12;
+    if (ap === 'PM') hr += 12;
+    return `${String(hr).padStart(2, '0')}:${m}`;
+  };
   if (!visible) return null;
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onClose}>
       <Pressable onPress={onClose} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', alignItems: 'center', justifyContent: 'center', padding: 30 }}>
-        <Pressable onPress={() => {}} style={{ width: '100%', maxWidth: 300, borderRadius: 20, backgroundColor: '#171210', borderWidth: 1, borderColor: 'rgba(255,150,90,0.2)', padding: 18, gap: 14 }}>
+        <Pressable onPress={() => {}} style={{ width: '100%', maxWidth: 310, borderRadius: 20, backgroundColor: '#171210', borderWidth: 1, borderColor: 'rgba(255,150,90,0.2)', padding: 18, gap: 14 }}>
           <Text style={{ fontFamily: F.bodyBold, fontSize: 15, color: '#fff', textAlign: 'center' }}>Pick a time</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-            {wheel(hours, h, setH)}
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+            <WheelColumn data={HOURS} value={h} width={62} onChange={setH} />
             <Text style={{ fontFamily: F.bodyBold, fontSize: 20, color: C.muted2 }}>:</Text>
-            {wheel(mins, m, setM)}
+            <WheelColumn data={MINS} value={m} width={62} onChange={setM} />
+            <WheelColumn data={AMPM} value={ap} width={58} onChange={setAp} />
           </View>
-          <Mono style={{ fontSize: 9, letterSpacing: 1, color: C.muted3, textAlign: 'center' }}>IST · 24 HOUR</Mono>
+          <Mono style={{ fontSize: 9, letterSpacing: 1, color: C.muted3, textAlign: 'center' }}>IST</Mono>
           <View style={{ flexDirection: 'row', gap: 9 }}>
             <Pressable onPress={onClose} style={{ flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }}>
               <Text style={{ fontFamily: F.bodySemi, fontSize: 12.5, color: C.ink }}>Cancel</Text>
             </Pressable>
-            <Pressable onPress={() => { onPick(`${p2(h)}:${p2(m)}`); onClose(); }} style={{ flex: 1, borderRadius: 12, overflow: 'hidden' }}>
+            <Pressable onPress={() => { onPick(to24()); onClose(); }} style={{ flex: 1, borderRadius: 12, overflow: 'hidden' }}>
               <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ alignItems: 'center', paddingVertical: 12 }}>
-                <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: '#fff' }}>Set {p2(h)}:{p2(m)}</Text>
+                <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: '#fff' }}>Set {h}:{m} {ap}</Text>
               </LinearGradient>
             </Pressable>
           </View>
@@ -1810,7 +1837,7 @@ function BulkCreateSheet({ visible, onClose, doctors, presetClient }: { visible:
               <Body style={{ width: 40, fontSize: 12, fontFamily: F.bodySemi, color: '#fff' }}>{WEEKDAYS[d][0]}</Body>
               <Pressable onPress={() => setTimePickFor(d)} style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: hexA(C.orange, 0.3) }}>
                 <Icon name="clock" size={13} color={C.orange} strokeWidth={2} />
-                <Text style={{ flex: 1, fontFamily: F.mono, fontSize: 14, color: '#fff' }}>{times[d] ?? '09:00'}</Text>
+                <Text style={{ flex: 1, fontFamily: F.mono, fontSize: 14, color: '#fff' }}>{fmt12h(times[d] ?? '09:00')}</Text>
                 <Icon name="chevDown" size={11} color={C.muted3} strokeWidth={2.4} />
               </Pressable>
             </View>
