@@ -303,6 +303,28 @@ function ScreenHost({ route }: { route: string }) {
 
 export function Router() {
   const { route, go, set, back, canGoBack, drawerOpen, closeDrawer, aiOpen, closeAi, role, threadViewOpen } = useStore();
+
+  // ---- Cold-start notification deep-link (smooth path) ----
+  // If the app was LAUNCHED by tapping a chat push, capture the conversation id
+  // BEFORE the post-login navigation runs, so the very first screen the user
+  // sees is Messenger (which renders a loader → the thread) — no dashboard or
+  // clients-list flash in between. launchChecked gates the session redirect for
+  // the few ms the check takes.
+  const pendingChatRef = useRef<string | null>(null);
+  const [launchChecked, setLaunchChecked] = useState(false);
+  useEffect(() => {
+    (async () => {
+      try {
+        const Notifications = require('expo-notifications');
+        const resp: any = await Notifications.getLastNotificationResponseAsync();
+        const content: any = resp?.notification?.request?.content ?? {};
+        const trigger: any = resp?.notification?.request?.trigger ?? {};
+        const d: any = { ...((trigger?.remoteMessage?.data as any) || {}), ...((content.data as any) || {}) };
+        if (d?.conversation_id) pendingChatRef.current = String(d.conversation_id);
+      } catch { /* no notification module / no launch response */ }
+      setLaunchChecked(true);
+    })();
+  }, []);
   const { session, loading, role: accountRole } = useAuth();
 
   // Android system back: close overlays first, then pop in-app history, then land on
@@ -334,11 +356,19 @@ export function Router() {
   // but only once the ACCOUNT's role (profiles.role) has resolved, so a CRM never
   // lands on the trainer workspace (and vice versa).
   useEffect(() => {
+    if (!launchChecked) return; // wait for the launch-notification check (few ms)
     if (!loading && session && accountRole && route === 'signin') {
       set({ role: accountRole });
+      if (pendingChatRef.current) {
+        // Launched from a chat push → straight into Messenger (thread loader).
+        set({ openChatId: pendingChatRef.current });
+        pendingChatRef.current = null;
+        go('messenger', true);
+        return;
+      }
       go(accountRole === 'crm' ? 'crm-dashboard' : accountRole === 'coach' ? 'coach-dashboard' : accountRole === 'ops' ? 'ops-dashboard' : accountRole === 'admin' ? 'admin-dashboard' : accountRole === 'doctor' ? 'doctor-dashboard' : accountRole === 'marketing' ? 'marketing-dashboard' : 'dashboard', true);
     }
-  }, [loading, session, accountRole]);
+  }, [loading, session, accountRole, launchChecked]);
 
   // REVERSE gate: if the session dies mid-use (refresh-token failure, sign-out
   // elsewhere, revoked session), land back on Sign In. Without this the app kept

@@ -1384,6 +1384,16 @@ export function Messenger() {
   }
   if (activeClient) return <ClientChat meId={meId} client={activeClient} onBack={() => setActiveClient(null)} allowDirect={role === 'crm'} />;
   if (active) return <MessageThread meId={meId} conv={active} onBack={() => setActive(null)} />;
+  // A notification deep-link is resolving — hold a quiet loader instead of
+  // flashing the contacts list before the thread opens.
+  if (openChatId) {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+        <ActivityIndicator color={C.orange} />
+        <Body style={{ fontSize: 12, color: C.muted3 }}>Opening chat…</Body>
+      </View>
+    );
+  }
   return <MessengerHome meId={meId} onOpen={setActive} onOpenClient={setActiveClient} tab={homeTab} setTab={setHomeTab} />;
 }
 
