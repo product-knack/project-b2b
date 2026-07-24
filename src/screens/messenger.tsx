@@ -152,6 +152,22 @@ function MentionText({ text, names, style, highlight }: { text: string; names: s
 }
 
 /* ---------- Thread ---------- */
+/* WhatsApp-style status ticks for own messages. pending=clock, sent=✓,
+   some-read=✓✓ grey, all-read=✓✓ green. */
+const TICK_PATH = 'M20 6 9 17l-5-5';
+function Ticks({ state, dim }: { state: 'pending' | 'sent' | 'some' | 'all'; dim: string }) {
+  if (state === 'pending') {
+    return <Icon path="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM12 8v4l2.5 1.5" size={10} color={dim} strokeWidth={1.9} />;
+  }
+  const col = state === 'all' ? '#3DDC84' : dim;
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+      <Icon path={TICK_PATH} size={11} color={col} strokeWidth={2.6} />
+      {state !== 'sent' ? <View style={{ marginLeft: -7 }}><Icon path={TICK_PATH} size={11} color={col} strokeWidth={2.6} /></View> : null}
+    </View>
+  );
+}
+
 function MessageThread({ meId, conv, onBack, subtabs }: { meId: string; conv: ChatConversation; onBack: () => void; subtabs?: { view: 'direct' | 'group'; hasDirect: boolean; onChange: (v: 'direct' | 'group') => void } }) {
   const insets = useSafeAreaInsets();
   const thread = useMessageThread(conv.conversationId);
@@ -168,8 +184,19 @@ function MessageThread({ meId, conv, onBack, subtabs }: { meId: string; conv: Ch
   // Members power the header AND @mentions (any group chat).
   const membersQ = useThreadMembers(conv.conversationId, isGroup);
   const [membersOpen, setMembersOpen] = React.useState(false);
-  // Read receipts — who has seen a given message (long-press a bubble).
-  const readsQ = useConversationReads(conv.conversationId, showMembers);
+  // Read receipts — power the WhatsApp-style ticks on own bubbles (all chats)
+  // and the long-press "seen by" sheet (groups). Polls every 20s.
+  const readsQ = useConversationReads(conv.conversationId, true);
+  // Tick state for an own message: 'sent' (single grey) → 'some' (double grey,
+  // part of a group has read it) → 'all' (double green, everyone else read it).
+  // True per-device delivery isn't tracked (B2C interop), so there is no
+  // WhatsApp "delivered" state — double grey here means partially seen.
+  const tickStateOf = React.useCallback((createdAt: string): 'sent' | 'some' | 'all' => {
+    const others = (readsQ.data ?? []).filter((r) => r.userId !== meId);
+    if (!others.length) return 'sent';
+    const seen = others.filter((r) => r.lastReadAt && r.lastReadAt >= createdAt).length;
+    return seen === others.length ? 'all' : seen > 0 ? 'some' : 'sent';
+  }, [readsQ.data, meId]);
   const [seenMsg, setSeenMsg] = React.useState<(ChatMessage & { _pending?: boolean }) | null>(null);
   React.useEffect(() => { setSeenMsg(null); }, [conv.conversationId]);
   // In-app media viewer (image / video / document) — never leaves the app.
@@ -405,6 +432,8 @@ function MessageThread({ meId, conv, onBack, subtabs }: { meId: string; conv: Ch
     const isMedia = item.message_type !== 'text' && !!item.attachment_url;
     const openMedia = () => { if (item.attachment_url && !item._pending) setViewer({ kind: item.message_type ?? 'document', url: item.attachment_url }); };
     const timeText = item._pending ? (isMedia ? 'uploading…' : 'sending…') : `${tp.time} ${tp.ampm}`;
+    const tickState: 'pending' | 'sent' | 'some' | 'all' = item._pending ? 'pending' : tickStateOf(item.created_at);
+    const myTicks = (dim: string) => (mine ? <Ticks state={tickState} dim={dim} /> : null);
     // Long-press a bubble in a group → "seen by" sheet.
     const onBubbleLongPress = () => { if (showMembers && !item._pending) setSeenMsg(item); };
     // Quoted message block (rendered inside the bubble when this message is a reply).
@@ -435,7 +464,7 @@ function MessageThread({ meId, conv, onBack, subtabs }: { meId: string; conv: Ch
         <View style={{ alignItems: mine ? 'flex-end' : 'flex-start', marginVertical: 2, paddingHorizontal: 2 }}>
           {senderName ? <Mono style={{ fontSize: 9, color: C.muted3, marginBottom: 2, marginLeft: 6 }}>{senderName}</Mono> : null}
           {isMedia && item.message_type === 'voice' ? (
-            <VoiceBubble url={item.attachment_url!} mine={mine} pending={item._pending} timeText={timeText} onLongPress={onBubbleLongPress} />
+            <VoiceBubble url={item.attachment_url!} mine={mine} pending={item._pending} timeText={timeText} onLongPress={onBubbleLongPress} ticks={myTicks(C.muted2)} />
           ) : isMedia ? (
             <Pressable onPress={openMedia} onLongPress={onBubbleLongPress} delayLongPress={300} style={{ maxWidth: '80%' }}>
               {item.message_type === 'image' ? (
@@ -461,14 +490,20 @@ function MessageThread({ meId, conv, onBack, subtabs }: { meId: string; conv: Ch
                   </View>
                 </View>
               )}
-              <Text style={{ fontFamily: F.mono, fontSize: 8.5, color: C.muted3, alignSelf: mine ? 'flex-end' : 'flex-start', marginTop: 3 }}>{timeText}</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: mine ? 'flex-end' : 'flex-start', marginTop: 3 }}>
+                <Text style={{ fontFamily: F.mono, fontSize: 8.5, color: C.muted3 }}>{timeText}</Text>
+                {myTicks(C.muted2)}
+              </View>
             </Pressable>
           ) : mine ? (
             <Pressable onLongPress={onBubbleLongPress} delayLongPress={300} style={{ maxWidth: '82%' }}>
               <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ borderRadius: 16, borderBottomRightRadius: 5, paddingVertical: 9, paddingHorizontal: 13, opacity: item._pending ? 0.65 : 1 }}>
                 {quote}
                 <MentionText text={preview} names={mentionNames} highlight="#FFE9D2" style={{ fontFamily: F.body, fontSize: 14.5, color: '#fff', lineHeight: 20 }} />
-                <Text style={{ fontFamily: F.mono, fontSize: 8.5, color: 'rgba(255,255,255,0.75)', alignSelf: 'flex-end', marginTop: 3 }}>{timeText}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-end', marginTop: 3 }}>
+                  <Text style={{ fontFamily: F.mono, fontSize: 8.5, color: 'rgba(255,255,255,0.75)' }}>{timeText}</Text>
+                  {myTicks('rgba(255,255,255,0.85)')}
+                </View>
               </LinearGradient>
             </Pressable>
           ) : (
@@ -482,7 +517,7 @@ function MessageThread({ meId, conv, onBack, subtabs }: { meId: string; conv: Ch
         </SwipeReplyRow>
       </View>
     );
-  }, [meId, messages, isGroup, showMembers, profiles.data, mentionNames, msgById, quoteName]);
+  }, [meId, messages, isGroup, showMembers, profiles.data, mentionNames, msgById, quoteName, tickStateOf]);
 
   return (
     <View style={{ flex: 1 }}>
@@ -698,7 +733,7 @@ const fmtClock = (ms: number) => {
   const s = Math.max(0, Math.round(ms / 1000));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 };
-function VoiceBubble({ url, mine, pending, timeText, onLongPress }: { url: string; mine: boolean; pending?: boolean; timeText: string; onLongPress?: () => void }) {
+function VoiceBubble({ url, mine, pending, timeText, onLongPress, ticks }: { url: string; mine: boolean; pending?: boolean; timeText: string; onLongPress?: () => void; ticks?: React.ReactNode }) {
   const soundRef = React.useRef<Audio.Sound | null>(null);
   const [playing, setPlaying] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
@@ -763,7 +798,10 @@ function VoiceBubble({ url, mine, pending, timeText, onLongPress }: { url: strin
           </Text>
         </View>
       </View>
-      <Text style={{ fontFamily: F.mono, fontSize: 8.5, color: C.muted3, alignSelf: mine ? 'flex-end' : 'flex-start', marginTop: 3 }}>{timeText}</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: mine ? 'flex-end' : 'flex-start', marginTop: 3 }}>
+        <Text style={{ fontFamily: F.mono, fontSize: 8.5, color: C.muted3 }}>{timeText}</Text>
+        {ticks}
+      </View>
     </Pressable>
   );
 }
