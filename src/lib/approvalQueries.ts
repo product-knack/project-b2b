@@ -202,8 +202,10 @@ export function useReviewRosterRequest() {
         if (!req.clientId) throw new Error('This request has no client to schedule.');
         if (!schedule?.modality?.trim()) throw new Error('Pick a modality before scheduling.');
         const when = schedule.datetimeIso;
-        // 1. Past-date — HARD block, no override.
-        if (new Date(when).getTime() < Date.now() - 60_000) throw new Error('That slot is in the past — pick a future time.');
+        // 1. Past-slot — HARD block, but with a 30-minute grace window: trainers often
+        //    send "create roster" for a slot the CRM only gets to approve mid-session
+        //    (9:00 request approved at 9:20 must succeed).
+        if (new Date(when).getTime() < Date.now() - 30 * 60_000) throw new Error('That slot is more than 30 minutes in the past — pick a future time.');
         const winMs = (min: number) => min * 60_000;
         const t = new Date(when).getTime();
         // 2. Trainer on approved leave — HARD block, no override (web useCreateSingleSession rule).
