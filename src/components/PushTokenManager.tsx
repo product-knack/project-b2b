@@ -42,17 +42,27 @@ export function PushTokenManager() {
     const t = String(data.type ?? '');
     if (t === 'far_session_alert' || t === 'longevity_message' || data.route || data.session_id) go('home');
   }, [go, setOpenChat]);
+  // Android FCM notification-messages tapped from background/kill sometimes
+  // carry the data on the trigger's remoteMessage instead of content.data —
+  // merge both so conversation_id is never missed.
+  const extractPushData = (resp: Notifications.NotificationResponse | null): any => {
+    if (!resp) return null;
+    const content: any = resp.notification?.request?.content ?? {};
+    const trigger: any = resp.notification?.request?.trigger ?? {};
+    const remote = trigger?.remoteMessage?.data ?? trigger?.payload ?? {};
+    return { ...(remote || {}), ...(content.data || {}) };
+  };
   const coldStartHandled = React.useRef(false);
   React.useEffect(() => {
     const sub = Notifications.addNotificationResponseReceivedListener((resp) => {
-      routeFromNotification(resp.notification.request.content.data);
+      routeFromNotification(extractPushData(resp));
     });
     // Cold start: the app was launched BY tapping a notification — the listener
     // above never fires for it, so replay the launching response once.
     if (!coldStartHandled.current) {
       coldStartHandled.current = true;
       Notifications.getLastNotificationResponseAsync()
-        .then((resp) => { if (resp) routeFromNotification(resp.notification.request.content.data); })
+        .then((resp) => { if (resp) routeFromNotification(extractPushData(resp)); })
         .catch(() => {});
     }
     return () => sub.remove();

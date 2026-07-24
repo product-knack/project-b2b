@@ -1336,14 +1336,43 @@ export function Messenger() {
   }, [active, activeClient]);
 
   // Deep-link from a tapped notification: resolve the conversation and open it.
+  // The overview list is the fast path; if the conversation isn't in it yet
+  // (fresh DM, stale cache, cold start), resolve it directly by id so the tap
+  // ALWAYS lands in the thread instead of the messenger home.
   React.useEffect(() => {
     if (!openChatId) return;
-    if (overview.data) {
-      const c = overview.data.find((x) => x.conversationId === openChatId);
-      if (c) { setActiveClient(null); setActive(c); }
-      setOpenChat(null);
-    }
-  }, [openChatId, overview.data]);
+    const fromOverview = overview.data?.find((x) => x.conversationId === openChatId);
+    if (fromOverview) { setActiveClient(null); setActive(fromOverview); setOpenChat(null); return; }
+    if (!overview.data && overview.isLoading) return; // wait for the first load
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data: conv } = await supabase.from('conversations').select('id, type, name').eq('id', openChatId).maybeSingle();
+        if (cancelled) return;
+        if (conv) {
+          // Title for unnamed direct chats: the other participant's name.
+          let title = (conv as any).name as string | null;
+          let otherUserId: string | null = null;
+          if (!title) {
+            const { data: parts } = await supabase.from('conversation_participants').select('user_id').eq('conversation_id', openChatId).eq('is_active', true).neq('user_id', meId).limit(1);
+            otherUserId = (parts as any[])?.[0]?.user_id ?? null;
+            if (otherUserId) {
+              const { data: pr } = await supabase.from('profiles').select('first_name, last_name').eq('id', otherUserId).maybeSingle();
+              title = pr ? `${(pr as any).first_name ?? ''} ${(pr as any).last_name ?? ''}`.trim() : null;
+            }
+          }
+          setActiveClient(null);
+          setActive({
+            conversationId: (conv as any).id, type: (conv as any).type ?? 'direct', title: title || 'Chat', subtitle: null,
+            otherUserId, isAnnouncements: (conv as any).name === 'Odds Announcements', memberCount: 0,
+            lastMessage: null, lastMessageType: null, lastMessageAt: null, lastSenderId: null, unreadCount: 0, myLastReadAt: null,
+          });
+        }
+      } catch { /* conversation not visible — stay on the list */ }
+      if (!cancelled) setOpenChat(null);
+    })();
+    return () => { cancelled = true; };
+  }, [openChatId, overview.data, overview.isLoading]);
 
   if (!meId) {
     return (
