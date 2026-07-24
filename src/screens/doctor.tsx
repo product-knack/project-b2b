@@ -1197,6 +1197,12 @@ export function DoctorRoster() {
   const [delOpen, setDelOpen] = React.useState(false);
   const [clientPickOpen, setClientPickOpen] = React.useState(false);
   const [clientSearch, setClientSearch] = React.useState('');
+  const [clientPickKb, setClientPickKb] = React.useState(0);
+  React.useEffect(() => {
+    const s = Keyboard.addListener('keyboardDidShow', (e) => setClientPickKb(e.endCoordinates.height));
+    const h = Keyboard.addListener('keyboardDidHide', () => setClientPickKb(0));
+    return () => { s.remove(); h.remove(); };
+  }, []);
   const [calSel, setCalSel] = React.useState<string | null>(null); // YYYY-MM-DD (local)
 
   // web: doctor filter is bypassed while a client is selected — both applied client-side here.
@@ -1466,10 +1472,11 @@ export function DoctorRoster() {
           </Pressable>
         </Modal>
 
-        {/* Client filter picker */}
+        {/* Client filter picker — keyboard-aware: the sheet lifts above the keyboard
+            so the search field and results stay visible while typing */}
         <Modal visible={clientPickOpen} transparent animationType="slide" onRequestClose={() => setClientPickOpen(false)}>
           <Pressable onPress={() => setClientPickOpen(false)} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'flex-end' }}>
-            <Pressable onPress={() => {}} style={{ maxHeight: '72%', backgroundColor: '#171210', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.15)', paddingHorizontal: 18, paddingTop: 16, paddingBottom: 26 }}>
+            <Pressable onPress={() => {}} style={{ maxHeight: '72%', backgroundColor: '#171210', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.15)', paddingHorizontal: 18, paddingTop: 16, paddingBottom: clientPickKb > 0 ? clientPickKb + 12 : 26 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9, marginBottom: 10 }}>
                 <Serif style={{ flex: 1, fontSize: 18, color: '#fff' }}>Filter by client</Serif>
                 <Pressable onPress={() => setClientPickOpen(false)} hitSlop={10} style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center', justifyContent: 'center' }}>
