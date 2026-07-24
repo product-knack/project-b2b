@@ -331,7 +331,10 @@ function ThreadView({ meId, meRole, threadId, clientId, clientName, onBack }: {
   const teamNames = React.useMemo(() => team.map((m) => m.name.split(' ')[0]).join(', '), [team]);
 
   return (
-    <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: insets.top + 4, paddingBottom: kbH > 0 ? kbH + (Platform.OS === 'android' ? insets.bottom : 0) : Math.max(insets.bottom, 8) }}>
+    // Transparent background (the app's ambient backdrop shows through) and NO
+    // insets.top — the global app bar already owns the safe area; adding it here
+    // rendered as a gap above the chat header (same fix as the messenger).
+    <View style={{ flex: 1, paddingBottom: kbH > 0 ? kbH + (Platform.OS === 'android' ? insets.bottom : 0) : Math.max(insets.bottom, 8) }}>
       {/* ===== Header — messenger MessageThread style ===== */}
       <LinearGradient colors={['#241812', '#120E0D']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', gap: 11, paddingTop: 10, paddingBottom: 11, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: hexA(C.orange, 0.18), borderTopWidth: 1, borderTopColor: 'rgba(255,150,90,0.08)' }}>
         <Pressable onPress={onBack} hitSlop={10} style={{ width: 34, height: 34, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)' }}>
