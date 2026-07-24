@@ -4,7 +4,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
-import { useRescheduleRequests, useApproveReschedule, useRejectReschedule, useRosterRequests, useReviewRosterRequest, RescheduleReq, RosterReq } from '../lib/approvalQueries';
+import { useRescheduleRequests, useApproveReschedule, useRejectReschedule, useRosterRequests, useReviewRosterRequest, ScheduleConflict, RescheduleReq, RosterReq } from '../lib/approvalQueries';
 import { SESSION_MODALITIES } from '../lib/trainerQueries';
 import { useChatOverview } from '../lib/chatQueries';
 import { FeatureTour, CRM_TOUR, TourLauncher } from '../components/featureTour';
@@ -1093,16 +1093,27 @@ export function CrmApprovals() {
     : null;
   const schedTimeValid = /^([01]\d|2[0-3]):[0-5]\d$/.test(schedTime.trim());
   const canSchedule = !!schedFor && !!schedDateYmd && schedTimeValid && !!schedModality && !reviewM.isPending;
-  const doSchedule = async () => {
+  // Conflict awaiting the CRM's Force Proceed decision; force flags accumulate so a
+  // trainer override survives into a subsequent client conflict on the same attempt.
+  const [schedConflict, setSchedConflict] = React.useState<{ kind: 'trainer' | 'client'; summary: string } | null>(null);
+  const schedForceRef = React.useRef<{ trainer?: boolean; client?: boolean }>({});
+  const doSchedule = async (force?: { trainer?: boolean; client?: boolean }) => {
     if (!canSchedule || !schedFor) return;
     setSchedErr(null);
+    setSchedConflict(null);
+    schedForceRef.current = { ...schedForceRef.current, ...force };
     const datetimeIso = new Date(`${schedDateYmd}T${schedTime.trim()}:00+05:30`).toISOString();
     try {
-      await reviewM.mutateAsync({ req: schedFor, crmId: crmId!, action: 'approve', schedule: { datetimeIso, modality: schedModality!, notes: schedNotes } });
+      await reviewM.mutateAsync({ req: schedFor, crmId: crmId!, action: 'approve', schedule: { datetimeIso, modality: schedModality!, notes: schedNotes }, force: schedForceRef.current });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       setSchedFor(null);
-    } catch (e: any) { setSchedErr(e?.message ?? 'Could not schedule. Try again.'); }
+    } catch (e: any) {
+      if (e instanceof ScheduleConflict) { setSchedConflict({ kind: e.kind, summary: e.summary }); Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {}); }
+      else setSchedErr(e?.message ?? 'Could not schedule. Try again.');
+    }
   };
+  // Fresh attempt state whenever the sheet opens or the slot/time changes.
+  React.useEffect(() => { setSchedConflict(null); schedForceRef.current = {}; }, [schedFor?.id, schedTime]);
 
   const rejectBox = (onConfirm: () => void, optional = false) => (
     <View style={{ gap: 8 }}>
@@ -1209,11 +1220,45 @@ export function CrmApprovals() {
                 </View>
               ) : null}
 
+              {schedConflict?.kind === 'trainer' ? (
+                <View style={{ padding: 12, borderRadius: 13, backgroundColor: hexA(C.gold, 0.08), borderWidth: 1, borderColor: hexA(C.gold, 0.35), marginBottom: 12, gap: 8 }}>
+                  <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+                    <Icon name="alert" size={14} color={C.gold} strokeWidth={2.2} />
+                    <Text style={{ flex: 1, fontFamily: F.bodyBold, fontSize: 12, color: C.gold }}>Trainer has a session within 60 minutes</Text>
+                  </View>
+                  <Body style={{ fontSize: 11.5, color: C.ink3 }}>{schedConflict.summary}</Body>
+                  <Body style={{ fontSize: 11, color: C.muted2 }}>You can still schedule this slot if the trainer can manage both.</Body>
+                  <Pressable onPress={() => doSchedule({ trainer: true })} disabled={reviewM.isPending} style={{ alignItems: 'center', paddingVertical: 11, borderRadius: 11, backgroundColor: hexA(C.gold, 0.16), borderWidth: 1, borderColor: hexA(C.gold, 0.5) }}>
+                    <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: C.gold }}>{reviewM.isPending ? 'Scheduling…' : 'Force Proceed Anyway'}</Text>
+                  </Pressable>
+                </View>
+              ) : null}
+
+              {schedConflict?.kind === 'client' ? (
+                <View style={{ padding: 13, borderRadius: 13, backgroundColor: hexA(C.red, 0.1), borderWidth: 1.5, borderColor: hexA(C.red, 0.55), marginBottom: 12, gap: 9 }}>
+                  <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+                    <Icon name="alert" size={16} color={C.red} strokeWidth={2.4} />
+                    <Text style={{ flex: 1, fontFamily: F.bodyBold, fontSize: 13, color: C.red }}>CLIENT ALREADY BOOKED AT THIS TIME</Text>
+                  </View>
+                  <View style={{ padding: 10, borderRadius: 10, backgroundColor: 'rgba(0,0,0,0.3)', borderWidth: 1, borderColor: hexA(C.red, 0.25) }}>
+                    <Mono style={{ fontSize: 8.5, letterSpacing: 0.8, color: C.muted3, marginBottom: 3 }}>OVERLAPPING SESSION</Mono>
+                    <Body style={{ fontSize: 12.5, fontFamily: F.bodySemi, color: '#fff' }}>{schedConflict.summary}</Body>
+                  </View>
+                  <Body style={{ fontSize: 11.5, color: '#F0A9A0', lineHeight: 17 }}>
+                    This client already has an overlapping session. Scheduling both may cause double billing or attendance conflicts. Proceed only if you are sure.
+                  </Body>
+                  <Body style={{ fontSize: 10.5, color: C.muted2 }}>If you proceed, this override is recorded on the session with your name for billing reconciliation.</Body>
+                  <Pressable onPress={() => doSchedule({ client: true })} disabled={reviewM.isPending} style={{ alignItems: 'center', paddingVertical: 12, borderRadius: 11, backgroundColor: hexA(C.red, 0.18), borderWidth: 1.5, borderColor: hexA(C.red, 0.6) }}>
+                    <Text style={{ fontFamily: F.bodyBold, fontSize: 13, color: C.red }}>{reviewM.isPending ? 'Scheduling…' : 'I Am Sure — Force Proceed'}</Text>
+                  </Pressable>
+                </View>
+              ) : null}
+
               <View style={{ flexDirection: 'row', gap: 9 }}>
                 <Pressable onPress={() => !reviewM.isPending && setSchedFor(null)} style={{ flex: 1, alignItems: 'center', paddingVertical: 14, borderRadius: 13, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }}>
                   <Text style={{ fontFamily: F.bodySemi, fontSize: 13.5, color: C.ink3 }}>Cancel</Text>
                 </Pressable>
-                <Pressable onPress={doSchedule} disabled={!canSchedule} style={{ flex: 1.5, borderRadius: 13, overflow: 'hidden', opacity: canSchedule ? 1 : 0.5 }}>
+                <Pressable onPress={() => doSchedule()} disabled={!canSchedule} style={{ flex: 1.5, borderRadius: 13, overflow: 'hidden', opacity: canSchedule ? 1 : 0.5 }}>
                   <LinearGradient colors={['#3FBF77', '#2E9A5D']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 14 }}>
                     <Icon path="M20 6 9 17l-5-5" size={14} color="#fff" strokeWidth={2.8} />
                     <Text style={{ fontFamily: F.bodyBold, fontSize: 13.5, color: '#fff' }}>{reviewM.isPending ? 'Scheduling…' : 'Schedule Session'}</Text>

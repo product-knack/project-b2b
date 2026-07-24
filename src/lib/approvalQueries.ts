@@ -171,6 +171,21 @@ export function useRosterRequests(crmId: string | null) {
   });
 }
 
+/* Conflict the CRM may override with "Force Proceed Anyway". `kind` picks the UI
+   (amber for trainer, loud red for client); `summary` names the clashing session. */
+export class ScheduleConflict extends Error {
+  kind: 'trainer' | 'client';
+  summary: string;
+  constructor(kind: 'trainer' | 'client', summary: string, message: string) {
+    super(message);
+    this.kind = kind;
+    this.summary = summary;
+  }
+}
+
+const istClock = (iso: string) =>
+  new Date(iso).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true });
+
 export function useReviewRosterRequest() {
   const qc = useQueryClient();
   return useMutation({
@@ -179,44 +194,85 @@ export function useReviewRosterRequest() {
       /* Single-day approve comes from the Schedule Session sheet (web
          CreateSessionDialog port): CRM-confirmed slot, REQUIRED modality, notes. */
       schedule?: { datetimeIso: string; modality: string; notes: string | null };
+      /* Set after the CRM confirms a ScheduleConflict via Force Proceed Anyway. */
+      force?: { trainer?: boolean; client?: boolean };
     }) => {
-      const { req, crmId, action, note, schedule } = input;
+      const { req, crmId, action, note, schedule, force } = input;
       if (action === 'approve' && req.rosterType === 'single') {
         if (!req.clientId) throw new Error('This request has no client to schedule.');
         if (!schedule?.modality?.trim()) throw new Error('Pick a modality before scheduling.');
         const when = schedule.datetimeIso;
-        // Guards (web CreateSessionDialog rules):
-        // 1. Past-date block.
+        // 1. Past-date — HARD block, no override.
         if (new Date(when).getTime() < Date.now() - 60_000) throw new Error('That slot is in the past — pick a future time.');
         const winMs = (min: number) => min * 60_000;
         const t = new Date(when).getTime();
-        // 2. Trainer conflict ±90 min — hard block.
+        // 2. Trainer on approved leave — HARD block, no override (web useCreateSingleSession rule).
+        const dateYmd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(when));
+        const { data: leaves } = await supabase
+          .from('leave_request')
+          .select('start_date, start_time, end_date, end_time')
+          .eq('trainer_id', req.trainerId)
+          .lte('start_date', dateYmd)
+          .gte('end_date', dateYmd);
+        for (const lv of (leaves ?? []) as any[]) {
+          // DB times are HH:MM:SS — normalize to HH:MM before building the ISO string
+          const hm = (v: any, fb: string) => (v ? String(v).slice(0, 5) : fb);
+          const lvStart = new Date(`${lv.start_date}T${hm(lv.start_time, '00:00')}:00+05:30`).getTime();
+          const lvEnd = new Date(`${lv.end_date}T${hm(lv.end_time, '23:59')}:59+05:30`).getTime();
+          if (t >= lvStart && t <= lvEnd) {
+            throw new Error(`The trainer is on leave from ${lv.start_date} ${lv.start_time ?? ''} to ${lv.end_date} ${lv.end_time ?? ''}. Pick another slot or trainer.`);
+          }
+        }
+        // 3. Trainer conflict ±60 min (web window: [t-60, t+60)) — soft, Force Proceed allowed.
         const { data: tClash } = await supabase
           .from('session_schedule')
-          .select('id, scheduled_datetime')
+          .select('id, scheduled_datetime, client_id')
           .eq('trainer_id', req.trainerId)
-          .gte('scheduled_datetime', new Date(t - winMs(90)).toISOString())
-          .lte('scheduled_datetime', new Date(t + winMs(90)).toISOString())
+          .gte('scheduled_datetime', new Date(t - winMs(60)).toISOString())
+          .lt('scheduled_datetime', new Date(t + winMs(60)).toISOString())
           .neq('status', 'cancelled')
           .limit(1);
-        if ((tClash?.length ?? 0) > 0) throw new Error('The trainer already has a session within 90 minutes of this slot.');
-        // 3. Client double-booking ±60 min — hard block.
+        const tHit = (tClash ?? [])[0] as any;
+        if (tHit && !force?.trainer) {
+          const { data: oc } = await supabase.from('clients').select('first_name, last_name').eq('id', tHit.client_id).maybeSingle();
+          const who = oc ? `${(oc as any).first_name ?? ''} ${(oc as any).last_name ?? ''}`.trim() : 'another client';
+          const summary = `${req.trainerName} · session with ${who} at ${istClock(tHit.scheduled_datetime)}`;
+          throw new ScheduleConflict('trainer', summary, `${req.trainerName} already has a session with ${who} at ${istClock(tHit.scheduled_datetime)}.`);
+        }
+        // 4. Client conflict ±60 min — soft, but with a LOUD confirm + audit trail.
+        //    NOTE: this deliberately diverges from web, which hard-blocks client double-booking.
         const { data: cClash } = await supabase
           .from('session_schedule')
-          .select('id')
+          .select('id, scheduled_datetime, trainer_id')
           .eq('client_id', req.clientId)
           .gte('scheduled_datetime', new Date(t - winMs(60)).toISOString())
-          .lte('scheduled_datetime', new Date(t + winMs(60)).toISOString())
+          .lt('scheduled_datetime', new Date(t + winMs(60)).toISOString())
           .neq('status', 'cancelled')
           .limit(1);
-        if ((cClash?.length ?? 0) > 0) throw new Error('The client already has a session around this slot.');
+        const cHit = (cClash ?? [])[0] as any;
+        let clientOverrideAudit: string | null = null;
+        if (cHit) {
+          const { data: ot } = await supabase.from('profiles').select('first_name, last_name').eq('id', cHit.trainer_id).maybeSingle();
+          const otherTrainer = ot ? `${(ot as any).first_name ?? ''} ${(ot as any).last_name ?? ''}`.trim() : 'another trainer';
+          const clashLabel = `${otherTrainer} at ${istClock(cHit.scheduled_datetime)}`;
+          if (!force?.client) {
+            const summary = `${req.clientName} · session with ${clashLabel}`;
+            throw new ScheduleConflict('client', summary, `${req.clientName} already has a session with ${clashLabel}.`);
+          }
+          // Forced through: log who forced it, when, and what it clashed with — the audit
+          // line lives on the session row (notes) so billing/reporting can reconcile it.
+          const { data: me } = await supabase.from('profiles').select('first_name, last_name').eq('id', crmId).maybeSingle();
+          const crmName = me ? `${(me as any).first_name ?? ''} ${(me as any).last_name ?? ''}`.trim() : crmId;
+          clientOverrideAudit = `[CLIENT DOUBLE-BOOKING OVERRIDE by ${crmName} on ${new Date().toISOString()} — overlaps session with ${clashLabel}]`;
+        }
+        const crmNotes = schedule.notes?.trim() || null;
         const { error: insErr } = await supabase.from('session_schedule').insert({
           client_id: req.clientId,
           trainer_id: req.trainerId,
           scheduled_datetime: when,
           modality: schedule.modality.trim(),
           status: 'scheduled',
-          notes: schedule.notes?.trim() || null,
+          notes: clientOverrideAudit ? (crmNotes ? `${crmNotes}\n${clientOverrideAudit}` : clientOverrideAudit) : crmNotes,
         });
         if (insErr) throw new Error(insErr.message);
       }
