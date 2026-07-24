@@ -5279,6 +5279,30 @@ export function Workout() {
     setPairNames(null);
     AsyncStorage.removeItem(PARALLEL_STORE_KEY).catch(() => {});
   };
+  // Tap the second-client tab (before the first leg is saved) → swap which client
+  // the form is currently logging. The entered exercises stay on screen and now
+  // belong to the newly active client; the other client moves to the NEXT slot.
+  const swapPair = () => {
+    if (!pairNames || !partnerPlan?.next || pairLeg !== 'first') return;
+    const doSwap = () => {
+      const newPrimary = pairNames.second;
+      const newSecond = pairNames.primary;
+      setPairNames({ primary: newPrimary, second: newSecond });
+      setPartnerPlan({ groupId: partnerPlan.groupId, next: newSecond });
+      set({ selectedClientId: newPrimary.id, selectedClientName: newPrimary.name, workoutScheduleId: null });
+      // Keep the on-screen exercises; block the new client's stored draft restore
+      // so it can't overwrite what is already typed.
+      if (trainerId) draftCheckedRef.current = `workout-draft:${trainerId}:${newPrimary.id}`;
+      AsyncStorage.setItem(PARALLEL_STORE_KEY, JSON.stringify({ primaryId: newPrimary.id, primaryName: newPrimary.name, second: newSecond, groupId: partnerPlan.groupId, at: Date.now() })).catch(() => {});
+    };
+    if (exercises.some(exHasData)) {
+      Alert.alert(
+        'Switch client?',
+        `The values entered so far will now be logged for ${pairNames.second.name.split(' ')[0]} instead of ${pairNames.primary.name.split(' ')[0]}.`,
+        [{ text: 'Cancel', style: 'cancel' }, { text: 'Switch', onPress: doSwap }]
+      );
+    } else doSwap();
+  };
   // Restore a stored pair for the SAME primary client within the TTL (web localStorage parity).
   React.useEffect(() => {
     if (!selectedClientId || editingOutboxId) return;
@@ -5685,20 +5709,20 @@ export function Workout() {
                 </Text>
                 {pairLeg === 'second' ? <Mono style={{ fontSize: 7, color: C.green }}>SAVED</Mono> : null}
               </View>
-              {/* Tab 2 — add / second client */}
+              {/* Tab 2 — add / second client (tap to swap which client logs first) */}
               {pairNames ? (
-                <View style={{ flex: 1.2, flexDirection: 'row', alignItems: 'center', gap: 7, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 13, backgroundColor: pairLeg === 'second' ? hexA(C.orange, 0.14) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: pairLeg === 'second' ? hexA(C.orange, 0.45) : hexA(C.purple, 0.35) }}>
+                <Pressable onPress={swapPair} disabled={pairLeg !== 'first'} style={{ flex: 1.2, flexDirection: 'row', alignItems: 'center', gap: 7, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 13, backgroundColor: pairLeg === 'second' ? hexA(C.orange, 0.14) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: pairLeg === 'second' ? hexA(C.orange, 0.45) : hexA(C.purple, 0.35) }}>
                   <Icon name="userPlus" size={13} color={pairLeg === 'second' ? C.orange : C.purple} strokeWidth={2.2} />
                   <Text numberOfLines={1} style={{ flex: 1, fontFamily: F.bodyBold, fontSize: 12, color: pairLeg === 'second' ? C.orange : '#C9B8F5' }}>{pairNames.second.name}</Text>
                   {pairLeg === 'first' ? (
                     <>
-                      <Mono style={{ fontSize: 7, color: C.muted3 }}>NEXT</Mono>
+                      <Mono style={{ fontSize: 7, color: C.muted3 }}>TAP TO SWITCH</Mono>
                       <Pressable onPress={removePair} hitSlop={8} style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: hexA(C.red, 0.14), alignItems: 'center', justifyContent: 'center' }}>
                         <Icon name="close" size={9} color={C.red} strokeWidth={2.6} />
                       </Pressable>
                     </>
                   ) : null}
-                </View>
+                </Pressable>
               ) : (
                 <Pressable onPress={() => { setPairSearch(''); setPairPickerOpen(true); }} style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 13, backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderStyle: 'dashed', borderColor: 'rgba(255,255,255,0.22)' }}>
                   <Icon name="userPlus" size={13} color={C.muted} strokeWidth={2.2} />
