@@ -1084,15 +1084,41 @@ function MessengerHome({ meId, onOpen, onOpenClient }: { meId: string; onOpen: (
   );
 }
 
-/* ---------- Client chat: GROUP ONLY ----------
-   Direct 1:1 DMs with clients are DISABLED — staff communicate with a client
-   only through the care-team group (client + assigned staff), so the whole
-   team always has context. Groups list opens straight away. */
-function ClientChat({ meId, client, onBack }: { meId: string; client: MessengerClient; onBack: () => void }) {
+/* ---------- Client chat ----------
+   Groups (care-team) for everyone; direct 1:1 DMs with the client are enabled
+   ONLY for CRMs (allowDirect) — other staff keep the group-only rule so the
+   whole team always has context. The B2C client app already supports staff
+   DMs (live data: CRMs hold existing type='direct' conversations with clients),
+   resolved/created via the get_or_create_dm RPC. */
+function ClientChat({ meId, client, onBack, allowDirect }: { meId: string; client: MessengerClient; onBack: () => void; allowDirect?: boolean }) {
   const [openGroup, setOpenGroup] = React.useState<ChatConversation | null>(null);
   const overview = useChatOverview(meId);
   const groupsQ = useClientGroups(client.profileId, true);
   const qc = useQueryClient();
+
+  // ---- Direct DM (CRM only) ----
+  const hasDirect = !!allowDirect && !!client.profileId;
+  const [view, setView] = React.useState<'direct' | 'group'>('group');
+  const [dmConv, setDmConv] = React.useState<ChatConversation | null>(null);
+  const [dmErr, setDmErr] = React.useState<string | null>(null);
+  const openDm = useOpenOrCreateDm();
+  const subtabs = hasDirect ? { view, hasDirect: true, onChange: setView } : undefined;
+  React.useEffect(() => {
+    if (view !== 'direct' || !hasDirect || dmConv) return;
+    const ex = overview.data?.find((c) => c.type === 'direct' && c.otherUserId === client.profileId);
+    if (ex) { setDmConv(ex); return; }
+    setDmErr(null);
+    openDm.mutateAsync({ otherUserId: client.profileId!, type: 'direct' })
+      .then((id) => {
+        qc.invalidateQueries({ queryKey: ['chat-overview'] });
+        setDmConv({
+          conversationId: id, type: 'direct', title: client.name, subtitle: 'Client', otherUserId: client.profileId,
+          isAnnouncements: false, memberCount: 2, lastMessage: null, lastMessageType: null,
+          lastMessageAt: null, lastSenderId: null, unreadCount: 0, myLastReadAt: null,
+        });
+      })
+      .catch((e: any) => setDmErr(e?.message ?? 'Could not open the direct chat.'));
+  }, [view, hasDirect, overview.data]);
 
   // Ensure the caller is a member of the client's care-team group so it's visible
   // (assigned staff aren't always participants, and RLS then hides the group).
@@ -1128,13 +1154,23 @@ function ClientChat({ meId, client, onBack }: { meId: string; client: MessengerC
     if (gs.length === 1) { autoOpenedRef.current = true; openGroupCard(gs[0]); }
   }, [groupsQ.data]);
 
+  // ----- DIRECT DM (CRM only) -----
+  if (view === 'direct' && hasDirect) {
+    if (dmConv) return <MessageThread meId={meId} conv={dmConv} onBack={onBack} subtabs={subtabs} />;
+    return (
+      <ClientChatShell name={client.name} onBack={onBack} subtabs={subtabs}>
+        {dmErr ? <ClientChatCentered text={dmErr} /> : <View style={{ paddingVertical: 40, alignItems: 'center' }}><ActivityIndicator color={C.orange} /></View>}
+      </ClientChatShell>
+    );
+  }
+
   // ----- GROUP CHAT (a card was tapped, or the single group auto-opened) -----
-  if (openGroup) return <MessageThread meId={meId} conv={openGroup} onBack={() => (soloGroup ? onBack() : setOpenGroup(null))} />;
+  if (openGroup) return <MessageThread meId={meId} conv={openGroup} onBack={() => (soloGroup ? onBack() : setOpenGroup(null))} subtabs={subtabs} />;
 
   // ----- GROUPS LIST -----
   const groups = groupsQ.data ?? [];
   return (
-    <ClientChatShell name={client.name} onBack={onBack}>
+    <ClientChatShell name={client.name} onBack={onBack} subtabs={subtabs}>
       {!client.profileId ? (
         <ClientChatCentered text="This client has no app account, so there are no groups." />
       ) : groupsQ.isLoading ? (
@@ -1221,7 +1257,7 @@ function ClientChatShell({ name, onBack, subtabs, children }: { name: string; on
 }
 
 export function Messenger() {
-  const { session } = useAuth();
+  const { session, role } = useAuth();
   const meId = session?.user?.id ?? '';
   const { openChatId, setOpenChat } = useStore();
   const [active, setActive] = React.useState<ChatConversation | null>(null);
@@ -1257,7 +1293,7 @@ export function Messenger() {
       </Page>
     );
   }
-  if (activeClient) return <ClientChat meId={meId} client={activeClient} onBack={() => setActiveClient(null)} />;
+  if (activeClient) return <ClientChat meId={meId} client={activeClient} onBack={() => setActiveClient(null)} allowDirect={role === 'crm'} />;
   if (active) return <MessageThread meId={meId} conv={active} onBack={() => setActive(null)} />;
   return <MessengerHome meId={meId} onOpen={setActive} onOpenClient={setActiveClient} />;
 }
