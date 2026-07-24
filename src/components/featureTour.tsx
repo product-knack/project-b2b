@@ -23,6 +23,7 @@ export type TourStep = {
 
 export const TRAINER_TOUR: TourStep[] = [
   { icon: 'sparkle', color: C.orange, title: 'Welcome to Odds Passport', body: 'Your complete training workspace. Sessions, clients, plans and your team, all in one place. Here is a quick tour of everything you can do.' },
+  { icon: 'pin', color: C.green, title: 'Pin the Client Home First', preview: 'pinHome', body: 'Make this your first move with every client. While you are at their home, open their page and tap the green Pin Home button. One capture unlocks live distance and drive time on every roster card, a full route map with one tap navigation, and smarter day planning. Pin once and it works for the whole team forever.', where: 'CLIENT PAGE · PIN HOME' },
   { icon: 'calendar', color: C.gold, title: "Today's Roster", preview: 'roster', body: 'Your day at a glance. Every session card shows the client, time and acknowledge status. Log the workout, cancel with a reason, or request a reschedule right from the card.', where: "HOME · TODAY'S ROSTER" },
   { icon: 'route', color: C.blue, title: 'Distance to Client', preview: 'distance', body: 'When a client home is pinned, the card shows live distance and drive time. Tap it for the full route map and one tap Google Maps navigation.', where: 'ROSTER CARD · MAP ICON' },
   { icon: 'dumbbell', color: C.green, title: 'Log Workout', preview: 'workout', body: 'Offline first logging that never loses a value. Exercises collapse into clean rows, every set shows the client previous numbers, blank exercises drop automatically, and RPE wraps it up.', where: 'ROSTER · LOG WORKOUT' },
@@ -82,6 +83,7 @@ export const ADMIN_TOUR: TourStep[] = [
 
 export const DOCTOR_TOUR: TourStep[] = [
   { icon: 'sparkle', color: C.orange, title: 'Welcome to Odds Passport', body: 'Your clinical workspace. Rosters, physio sessions, protocols and medical records in one place. Here is a quick tour.' },
+  { icon: 'pin', color: C.green, title: 'Pin the Client Home First', preview: 'pinHome', body: 'Make this your first move with every client. While you are at their home, open their page and tap the green Pin Home button. One capture unlocks live distance and drive time on your roster cards, a full route map with one tap navigation, and smarter day planning. Pin once and it works for the whole care team forever.', where: 'CLIENT PAGE · PIN HOME' },
   { icon: 'calendar', color: C.gold, title: "Today's Roster", preview: 'roster', body: 'Your own schedule for the day, built by the head doctor. Log the session or cancel with a reason right from the card.', where: 'HOME' },
   { icon: 'route', color: C.blue, title: 'Distance to Client', preview: 'distance', body: 'When a client home is pinned, the card shows live distance and drive time with a full route map on tap.', where: 'ROSTER CARD' },
   { icon: 'activity', color: C.green, title: 'Log Physio Session', body: 'Rehab with or without a plan, recovery modalities and cognitive checks, all in one structured sheet.', where: 'SIDEBAR · SESSIONS' },
@@ -143,6 +145,47 @@ const PvBtn = ({ label, color, icon, grow }: { label: string; color: string; ico
 );
 
 const PREVIEWS: Record<string, () => React.ReactElement> = {
+  pinHome: () => (
+    <View style={{ gap: 8 }}>
+      {/* client hero with the green Pin Home pill */}
+      <View style={[pvCard, { gap: 8 }]}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
+          <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: hexA(C.purple, 0.2), borderWidth: 1, borderColor: hexA(C.purple, 0.45), alignItems: 'center', justifyContent: 'center' }}>
+            <Text style={{ fontFamily: F.bodyBold, fontSize: 13, color: C.purple }}>A</Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Body style={{ fontSize: 13.5, fontFamily: F.bodySemi, color: '#fff' }}>Aarav Mehta</Body>
+            <Mono style={{ fontSize: 7.5, color: C.muted3 }}>CLIENT PAGE</Mono>
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 6, paddingHorizontal: 11, borderRadius: 999, backgroundColor: hexA(C.green, 0.15), borderWidth: 1, borderColor: hexA(C.green, 0.5) }}>
+            <Icon name="pin" size={11} color={C.green} strokeWidth={2.2} />
+            <Text style={{ fontFamily: F.bodyBold, fontSize: 10.5, color: C.green }}>Pin Home</Text>
+          </View>
+        </View>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, padding: 8, borderRadius: 10, backgroundColor: hexA(C.green, 0.07), borderWidth: 1, borderColor: hexA(C.green, 0.25) }}>
+          <Icon name="checks" size={11} color={C.green} strokeWidth={2.4} />
+          <Text style={{ flex: 1, fontFamily: F.bodySemi, fontSize: 9.5, color: C.green }}>Home location saved. One time only, at the client home.</Text>
+        </View>
+      </View>
+      {/* what it unlocks */}
+      <Mono style={{ fontSize: 7.5, letterSpacing: 1, color: C.muted3 }}>WHAT PINNING UNLOCKS</Mono>
+      <View style={[pvCard, { flexDirection: 'row', alignItems: 'center', gap: 9, borderColor: hexA(C.blue, 0.3), backgroundColor: hexA(C.blue, 0.06) }]}>
+        <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: hexA(C.blue, 0.15), borderWidth: 1, borderColor: hexA(C.blue, 0.45), alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name="route" size={12} color={C.blue} strokeWidth={2.1} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Body style={{ fontSize: 11.5, fontFamily: F.bodySemi, color: '#fff' }}>4.2 km · 15 min drive</Body>
+          <Mono style={{ fontSize: 7.5, color: C.muted3 }}>LIVE ON EVERY ROSTER CARD</Mono>
+        </View>
+        <PvChip text="Route map" color={C.blue} />
+      </View>
+      <View style={{ flexDirection: 'row', gap: 6 }}>
+        <PvChip text="One tap navigation" color={C.green} />
+        <PvChip text="Plan your day" color={C.gold} />
+        <PvChip text="Whole team" color={C.purple} />
+      </View>
+    </View>
+  ),
   roster: () => (
     <View style={[pvCard, { gap: 9 }]}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
