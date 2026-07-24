@@ -135,12 +135,24 @@ export function useClientThreadMessages(threadId: string | null) {
     enabled: !!threadId,
     staleTime: 5_000,
     queryFn: async (): Promise<ClientThreadMessage[]> => {
-      const { data, error } = await supabase
+      // reply_to_id needs the optional client_thread_replies migration — select
+      // gracefully degrades on backends without the column (replies just don't link).
+      const SEL_BASE = 'id, sender_id, body, attachment_url, attachment_type, created_at';
+      let res: any = await supabase
         .from('client_thread_messages')
-        .select('id, sender_id, body, attachment_url, attachment_type, created_at, reply_to_id')
+        .select(`${SEL_BASE}, reply_to_id`)
         .eq('thread_id', threadId)
         .order('created_at', { ascending: false })
         .limit(200);
+      if (res.error && /reply_to_id/.test(res.error.message)) {
+        res = await supabase
+          .from('client_thread_messages')
+          .select(SEL_BASE)
+          .eq('thread_id', threadId)
+          .order('created_at', { ascending: false })
+          .limit(200);
+      }
+      const { data, error } = res;
       if (error) throw new Error(error.message);
       const rows = (data ?? []).reverse();
       const senderIds = [...new Set(rows.map((m: any) => m.sender_id))];
@@ -190,9 +202,18 @@ export function useSendClientThreadMessage(meId: string | null | undefined, meNa
       const uid = userData.user?.id;
       if (!uid) throw new Error('Not signed in');
       if (!body.trim()) throw new Error('Message is empty');
-      const { error } = await supabase
+      // Insert WITHOUT reply_to_id unless a reply is actually being sent — the
+      // column is optional (migration) and including it unconditionally made
+      // EVERY send fail on backends without it ("Could not find the
+      // 'reply_to_id' column"). A reply falls back to a plain message when the
+      // column is missing (text still delivers, linkage is skipped).
+      const base: Record<string, any> = { thread_id: threadId, sender_id: uid, body: body.trim() };
+      let { error } = await supabase
         .from('client_thread_messages')
-        .insert({ thread_id: threadId, sender_id: uid, body: body.trim(), reply_to_id: replyToId ?? null });
+        .insert(replyToId ? { ...base, reply_to_id: replyToId } : base);
+      if (error && replyToId && /reply_to_id/.test(error.message)) {
+        ({ error } = await supabase.from('client_thread_messages').insert(base));
+      }
       if (error) throw new Error(error.message);
     },
     onMutate: async ({ threadId, body, replyToId }) => {
