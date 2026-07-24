@@ -327,73 +327,68 @@ function ThreadView({ meId, meRole, threadId, clientId, clientName, onBack }: {
       .slice(0, 4);
   }, [mentionQuery, team, meId]);
   const applyMention = (name: string) => setText((d) => d.replace(/(^|\s)@\w*$/, `$1@${name} `));
+  const [membersOpen, setMembersOpen] = React.useState(false);
+  const teamNames = React.useMemo(() => team.map((m) => m.name.split(' ')[0]).join(', '), [team]);
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: insets.top + 4, paddingBottom: kbH > 0 ? kbH + (Platform.OS === 'android' ? insets.bottom : 0) : Math.max(insets.bottom, 8) }}>
-      {/* ===== Header — gradient hero with team strip ===== */}
-      <View style={{ marginHorizontal: 12, borderRadius: 20, overflow: 'hidden', borderWidth: 1, borderColor: hexA(C.purple, 0.2) }}>
-        <LinearGradient colors={['rgba(48,36,66,0.55)', 'rgba(18,14,20,0.85)']} start={{ x: 0, y: 0 }} end={{ x: 0.9, y: 1 }} style={{ padding: 13, gap: 11 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 11 }}>
-            <Pressable onPress={onBack} hitSlop={8} style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.07)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }}>
-              <Icon name="arrowLeft" size={16} color="#fff" strokeWidth={2.2} />
-            </Pressable>
-            <View style={{ padding: 2, borderRadius: 24, borderWidth: 1.5, borderColor: hexA(C.purple, 0.5) }}>
-              <Avatar initial={chatInitials(clientName)} size={40} colors={avatarColors(clientName)} fontSize={15} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Serif style={{ fontSize: 19 }} numberOfLines={1}>{clientName}</Serif>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 }}>
-                <Icon name="shield" size={10} color={C.purple} strokeWidth={2.2} />
-                <Body style={{ fontSize: 10.5, color: hexA(C.purple, 0.95) }}>Internal · client can't see this</Body>
-              </View>
-            </View>
-            {team.length ? (
-              <View style={{ alignItems: 'center', paddingHorizontal: 4 }}>
-                <Text style={{ fontFamily: F.bodyBold, fontSize: 17, color: C.purple }}>{team.length}</Text>
-                <Mono style={{ fontSize: 6.5, letterSpacing: 0.7, color: C.muted3 }}>TEAM</Mono>
-              </View>
-            ) : null}
+      {/* ===== Header — messenger MessageThread style ===== */}
+      <LinearGradient colors={['#241812', '#120E0D']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', gap: 11, paddingTop: 10, paddingBottom: 11, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: hexA(C.orange, 0.18), borderTopWidth: 1, borderTopColor: 'rgba(255,150,90,0.08)' }}>
+        <Pressable onPress={onBack} hitSlop={10} style={{ width: 34, height: 34, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)' }}>
+          <Icon name="arrowLeft" size={17} color={C.ink2} strokeWidth={2.2} />
+        </Pressable>
+        <View style={{ padding: 2, borderRadius: 999, borderWidth: 1.5, borderColor: hexA(avatarColors(clientName)[0], 0.5) }}>
+          <Avatar initial={chatInitials(clientName)} size={36} colors={avatarColors(clientName)} fontSize={13} />
+        </View>
+        <Pressable onPress={() => setMembersOpen((o) => !o)} style={{ flex: 1 }}>
+          <Body numberOfLines={1} style={{ fontSize: 15.5, fontFamily: F.bodySemi, color: '#fff' }}>{clientName}</Body>
+          <Body numberOfLines={1} style={{ fontSize: 11, color: C.muted2, marginTop: 1 }}>
+            {teamQ.isLoading ? 'Loading team…' : teamNames || 'Internal team thread'}
+          </Body>
+        </Pressable>
+        <Pressable onPress={() => setMembersOpen((o) => !o)} hitSlop={8} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 7, paddingHorizontal: 12, borderRadius: 999, backgroundColor: membersOpen ? hexA(C.purple, 0.18) : hexA(C.purple, 0.1), borderWidth: 1, borderColor: hexA(C.purple, membersOpen ? 0.5 : 0.3) }}>
+          <Icon name="users" size={13} color={C.purple} strokeWidth={2.1} />
+          <Text style={{ fontFamily: F.bodyBold, fontSize: 12, color: C.purple }}>Team</Text>
+        </Pressable>
+      </LinearGradient>
+
+      {/* Team panel — messenger members-panel style (plus the internal-only note) */}
+      {membersOpen ? (
+        <View style={{ paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.07)', backgroundColor: 'rgba(8,6,6,0.96)', gap: 8 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Icon name="shield" size={10} color={C.purple} strokeWidth={2.2} />
+            <Mono style={{ flex: 1, fontSize: 9, letterSpacing: 1, color: C.mono2 }}>INTERNAL · CLIENT CAN'T SEE THIS · {team.length} MEMBER{team.length === 1 ? '' : 'S'}</Mono>
           </View>
-          {team.length ? (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
-              {team.map((m) => {
-                const rc = roleColorOf(m.role);
-                return (
-                  <View key={m.userId} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 4.5, paddingHorizontal: 10, borderRadius: 999, backgroundColor: hexA(rc, 0.08), borderWidth: 1, borderColor: hexA(rc, 0.28) }}>
-                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: rc }} />
-                    <Text style={{ fontFamily: F.bodySemi, fontSize: 10.5, color: '#EDE7E1' }}>{m.name}</Text>
-                    <Text style={{ fontFamily: F.mono, fontSize: 7.5, color: rc }}>{m.roleLabel.toUpperCase()}</Text>
-                  </View>
-                );
-              })}
-            </ScrollView>
-          ) : null}
-        </LinearGradient>
-      </View>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}>
+            {team.map((m) => {
+              const rc = roleColorOf(m.role);
+              return (
+                <View key={m.userId} style={{ flexDirection: 'row', alignItems: 'center', gap: 7, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 999, backgroundColor: hexA(rc, 0.08), borderWidth: 1, borderColor: hexA(rc, 0.28) }}>
+                  <Avatar initial={chatInitials(m.name)} size={22} colors={avatarColors(m.name)} fontSize={9} />
+                  <Text style={{ fontFamily: F.bodySemi, fontSize: 12, color: '#fff' }}>{m.name}{m.userId === meId ? ' (you)' : ''}</Text>
+                  <Text style={{ fontFamily: F.bodyBold, fontSize: 9, letterSpacing: 0.5, color: rc }}>{m.roleLabel.toUpperCase()}</Text>
+                </View>
+              );
+            })}
+          </View>
+        </View>
+      ) : null}
 
       {/* ===== Messages ===== */}
       <ScrollView
         ref={scrollRef}
         style={{ flex: 1 }}
-        contentContainerStyle={{ paddingHorizontal: 14, paddingTop: 14, paddingBottom: 10, flexGrow: 1 }}
+        contentContainerStyle={{ paddingHorizontal: 12, paddingVertical: 12, flexGrow: 1 }}
         onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
         {msgsQ.isLoading ? (
-          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10 }}>
-            <ActivityIndicator color={C.purple} />
-            <Body style={{ fontSize: 12, color: C.muted3 }}>Loading thread…</Body>
-          </View>
+          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}><ActivityIndicator color={C.orange} /></View>
         ) : msgs.length === 0 ? (
-          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, paddingHorizontal: 34 }}>
-            <View style={{ width: 58, height: 58, borderRadius: 20, backgroundColor: hexA(C.purple, 0.1), borderWidth: 1, borderColor: hexA(C.purple, 0.25), alignItems: 'center', justifyContent: 'center' }}>
-              <Icon name="bubble" size={25} color={C.purple} strokeWidth={1.7} />
-            </View>
-            <Serif style={{ fontSize: 17, textAlign: 'center' }}>Start the conversation</Serif>
-            <Body style={{ fontSize: 12.5, color: C.muted3, textAlign: 'center', lineHeight: 18 }}>
-              Share updates, hand-offs and notes about {clientName.split(' ')[0]} — the whole care team sees them here.
-            </Body>
+          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            <Icon path="M21 11.5a8.38 8.38 0 0 1-8.5 8.5 8.5 8.5 0 0 1-3.8-.9L3 21l1.9-5.7A8.38 8.38 0 0 1 4 11.5 8.5 8.5 0 0 1 12.5 3 8.38 8.38 0 0 1 21 11.5Z" size={26} color="#4C4640" strokeWidth={1.6} />
+            <Body style={{ fontSize: 13, color: C.muted3 }}>No messages yet.</Body>
           </View>
         ) : (
           msgs.map((m, i) => (
@@ -406,64 +401,63 @@ function ThreadView({ meId, meRole, threadId, clientId, clientName, onBack }: {
         )}
       </ScrollView>
 
-      {/* ===== Composer — floating pill ===== */}
-      <View style={{ paddingHorizontal: 12, paddingTop: 6 }}>
-        {sendM.isError ? (
-          <Body style={{ fontSize: 11, color: C.red, paddingHorizontal: 6, paddingBottom: 5 }}>{(sendM.error as Error).message}</Body>
-        ) : null}
+      {sendM.isError ? (
+        <Body style={{ fontSize: 11, color: C.red, paddingHorizontal: 16, paddingBottom: 4 }}>{(sendM.error as Error).message}</Body>
+      ) : null}
 
-        {/* @mention suggestions while typing "@name" */}
-        {mentionSuggestions.length > 0 ? (
-          <View style={{ marginBottom: 7, borderRadius: 16, backgroundColor: '#12100E', borderWidth: 1, borderColor: hexA(C.purple, 0.25), overflow: 'hidden' }}>
-            {mentionSuggestions.map((m, i) => {
-              const rc = roleColorOf(m.role);
-              return (
-                <Pressable key={m.userId} onPress={() => applyMention(m.name)} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 13, borderTopWidth: i === 0 ? 0 : 1, borderTopColor: 'rgba(255,255,255,0.05)' }}>
-                  <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: hexA(rc, 0.14), borderWidth: 1, borderColor: hexA(rc, 0.4), alignItems: 'center', justifyContent: 'center' }}>
-                    <Text style={{ fontFamily: F.bodyBold, fontSize: 10.5, color: rc }}>{chatInitials(m.name)}</Text>
-                  </View>
-                  <Text style={{ flex: 1, fontFamily: F.bodySemi, fontSize: 13, color: '#fff' }}>{m.name}</Text>
-                  <Text style={{ fontFamily: F.mono, fontSize: 8, color: rc }}>{m.roleLabel.toUpperCase()}</Text>
-                </Pressable>
-              );
-            })}
+      {/* Reply preview — messenger style (full-width bar above the composer) */}
+      {replyTo ? (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 9, paddingHorizontal: 14, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.08)', backgroundColor: '#0E0B0A' }}>
+          <View style={{ width: 3, alignSelf: 'stretch', borderRadius: 2, backgroundColor: C.orange }} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontFamily: F.bodyBold, fontSize: 11.5, color: C.orange }}>Replying to {replyTo.senderId === meId ? 'yourself' : replyTo.senderName}</Text>
+            <Text numberOfLines={1} style={{ fontFamily: F.body, fontSize: 12.5, color: C.muted2, marginTop: 1 }}>{replyTo.body ?? 'Message'}</Text>
           </View>
-        ) : null}
+          <Pressable onPress={() => setReplyTo(null)} hitSlop={8} style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="close" size={13} color={C.muted2} strokeWidth={2.3} />
+          </Pressable>
+        </View>
+      ) : null}
 
-        {/* Reply preview bar */}
-        {replyTo ? (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 7, paddingVertical: 9, paddingHorizontal: 12, borderRadius: 14, backgroundColor: '#12100E', borderWidth: 1, borderColor: hexA(C.orange, 0.25) }}>
-            <View style={{ width: 3, alignSelf: 'stretch', borderRadius: 2, backgroundColor: C.orange }} />
-            <View style={{ flex: 1 }}>
-              <Text style={{ fontFamily: F.bodyBold, fontSize: 11.5, color: C.orange }}>Replying to {replyTo.senderId === meId ? 'yourself' : replyTo.senderName}</Text>
-              <Text numberOfLines={1} style={{ fontFamily: F.body, fontSize: 12.5, color: C.muted2, marginTop: 1 }}>{replyTo.body ?? 'Message'}</Text>
-            </View>
-            <Pressable onPress={() => setReplyTo(null)} hitSlop={8} style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center', justifyContent: 'center' }}>
-              <Icon name="close" size={13} color={C.muted2} strokeWidth={2.3} />
-            </Pressable>
-          </View>
-        ) : null}
-        <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8, padding: 6, borderRadius: 26, backgroundColor: 'rgba(255,255,255,0.045)', borderWidth: 1, borderColor: text.trim() ? hexA(C.orange, 0.3) : 'rgba(255,255,255,0.09)' }}>
+      {/* @mention suggestions — messenger style rows */}
+      {mentionSuggestions.length > 0 ? (
+        <View style={{ borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.08)', backgroundColor: '#0E0B0A', paddingVertical: 6 }}>
+          {mentionSuggestions.map((m) => {
+            const rc = roleColorOf(m.role);
+            return (
+              <Pressable key={m.userId} onPress={() => applyMention(m.name)} style={{ flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 9, paddingHorizontal: 16 }}>
+                <Avatar initial={chatInitials(m.name)} size={30} colors={avatarColors(m.name)} fontSize={11} />
+                <Body style={{ flex: 1, fontSize: 14, fontFamily: F.bodySemi, color: '#fff' }} numberOfLines={1}>{m.name}</Body>
+                <Text style={{ fontFamily: F.bodyBold, fontSize: 9, letterSpacing: 0.6, color: rc }}>{m.roleLabel.toUpperCase()}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
+
+      {/* ===== Composer — messenger style ===== */}
+      <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 9, paddingHorizontal: 14, paddingTop: 12, paddingBottom: 4, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.08)', backgroundColor: '#0B0908' }}>
+        <View style={{ flex: 1, borderRadius: 21, backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', paddingHorizontal: 16, paddingVertical: Platform.OS === 'ios' ? 11 : 6, minHeight: 42, justifyContent: 'center', maxHeight: 120 }}>
           <TextInput
             value={text}
             onChangeText={setText}
-            placeholder={`Message the team about ${clientName.split(' ')[0]}…`}
+            placeholder="Message…"
             placeholderTextColor={C.muted3}
             multiline
-            style={{ flex: 1, maxHeight: 110, paddingVertical: 9, paddingHorizontal: 12, color: '#fff', fontFamily: F.body, fontSize: 14.5, lineHeight: 20 }}
+            style={{ fontFamily: F.body, fontSize: 15, lineHeight: 20, color: '#fff', padding: 0, maxHeight: 98 }}
           />
-          <Pressable onPress={send} disabled={!text.trim() || sendM.isPending} style={{ borderRadius: 20, overflow: 'hidden' }}>
-            {text.trim() ? (
-              <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center' }}>
-                <Icon name="send" size={16} color="#fff" strokeWidth={2.2} />
-              </LinearGradient>
-            ) : (
-              <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.05)', alignItems: 'center', justifyContent: 'center' }}>
-                <Icon name="send" size={16} color={C.muted3} strokeWidth={2} />
-              </View>
-            )}
-          </Pressable>
         </View>
+        <Pressable onPress={send} disabled={!text.trim() || sendM.isPending} style={{ marginBottom: 1 }}>
+          {text.trim() ? (
+            <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' }}>
+              <Icon path="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z" size={17} color="#fff" strokeWidth={2.2} />
+            </LinearGradient>
+          ) : (
+            <View style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: 'rgba(255,255,255,0.05)', alignItems: 'center', justifyContent: 'center' }}>
+              <Icon path="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z" size={17} color={C.muted3} strokeWidth={2} />
+            </View>
+          )}
+        </Pressable>
       </View>
     </View>
   );
@@ -489,51 +483,37 @@ function Bubble({ m, mine, prev, pending, quoted, mentionNames }: {
   return (
     <View>
       {newDay ? (
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 12 }}>
-          <View style={{ flex: 1, height: 1, backgroundColor: 'rgba(255,255,255,0.06)' }} />
-          <View style={{ paddingVertical: 3.5, paddingHorizontal: 12, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)' }}>
-            <Mono style={{ fontSize: 8.5, letterSpacing: 0.8, color: C.muted2 }}>{msgDay(m.createdAt).toUpperCase()}</Mono>
+        <View style={{ alignItems: 'center', marginVertical: 10 }}>
+          <View style={{ paddingVertical: 3, paddingHorizontal: 11, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.05)' }}>
+            <Mono style={{ fontSize: 9, letterSpacing: 0.6, color: C.muted3 }}>{msgDay(m.createdAt).toUpperCase()}</Mono>
           </View>
-          <View style={{ flex: 1, height: 1, backgroundColor: 'rgba(255,255,255,0.06)' }} />
         </View>
       ) : null}
-      <View style={{ flexDirection: 'row', justifyContent: mine ? 'flex-end' : 'flex-start', marginTop: newSender ? 10 : 3 }}>
-        {/* Sender avatar (others only, first message of a run) */}
-        {!mine ? (
-          <View style={{ width: 34, marginRight: 8, alignItems: 'center' }}>
-            {newSender ? (
-              <View style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: hexA(rc, 0.14), borderWidth: 1, borderColor: hexA(rc, 0.4), alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ fontFamily: F.bodyBold, fontSize: 11, color: rc }}>{chatInitials(m.senderName)}</Text>
-              </View>
-            ) : null}
+      <View style={{ alignItems: mine ? 'flex-end' : 'flex-start', marginVertical: 2, paddingHorizontal: 2 }}>
+        {!mine && newSender ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 2, marginLeft: 6 }}>
+            <Mono style={{ fontSize: 9, color: C.muted3 }}>{m.senderName}</Mono>
+            {m.senderRole ? <Mono style={{ fontSize: 7.5, color: rc }}>{(m.senderRole === 'super_admin' ? 'admin' : m.senderRole).toUpperCase()}</Mono> : null}
           </View>
         ) : null}
-        <View style={{ maxWidth: '78%' }}>
-          {!mine && newSender ? (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 3, marginLeft: 3 }}>
-              <Text style={{ fontFamily: F.bodySemi, fontSize: 11.5, color: rc }}>{m.senderName}</Text>
-              {m.senderRole ? <Text style={{ fontFamily: F.mono, fontSize: 7.5, color: C.muted3 }}>{(m.senderRole === 'super_admin' ? 'admin' : m.senderRole).toUpperCase()}</Text> : null}
-            </View>
-          ) : null}
-          {mine ? (
-            <View style={{ borderRadius: 18, borderBottomRightRadius: 6, overflow: 'hidden', opacity: pending ? 0.65 : 1 }}>
-              <LinearGradient colors={['rgba(240,120,60,0.28)', 'rgba(200,80,40,0.16)']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ paddingVertical: 9, paddingHorizontal: 13, borderRadius: 18, borderBottomRightRadius: 6, borderWidth: 1, borderColor: hexA(C.orange, 0.32) }}>
-                {quote}
-                {m.body ? <MentionText text={m.body} names={mentionNames ?? []} highlight="#FFE9D2" style={{ fontFamily: F.body, fontSize: 14.5, color: '#FFF4EC', lineHeight: 20 }} /> : null}
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-end', marginTop: 3 }}>
-                  <Mono style={{ fontSize: 8, color: hexA('#FFD9BF', 0.65) }}>{msgTime(m.createdAt)}</Mono>
-                  {pending ? <Icon name="clock" size={9} color={hexA('#FFD9BF', 0.65)} strokeWidth={2.2} /> : <Icon name="checks" size={10} color={hexA('#FFD9BF', 0.8)} strokeWidth={2.2} />}
-                </View>
-              </LinearGradient>
-            </View>
-          ) : (
-            <View style={{ paddingVertical: 9, paddingHorizontal: 13, borderRadius: 18, borderBottomLeftRadius: newSender ? 6 : 18, backgroundColor: 'rgba(255,255,255,0.055)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' }}>
+        {mine ? (
+          <View style={{ maxWidth: '82%' }}>
+            <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ borderRadius: 16, borderBottomRightRadius: 5, paddingVertical: 9, paddingHorizontal: 13, opacity: pending ? 0.65 : 1 }}>
               {quote}
-              {m.body ? <MentionText text={m.body} names={mentionNames ?? []} highlight={C.orange} style={{ fontFamily: F.body, fontSize: 14.5, color: '#F2EDE8', lineHeight: 20 }} /> : null}
-              <Mono style={{ fontSize: 8, color: C.muted3, marginTop: 3, alignSelf: 'flex-end' }}>{msgTime(m.createdAt)}</Mono>
-            </View>
-          )}
-        </View>
+              {m.body ? <MentionText text={m.body} names={mentionNames ?? []} highlight="#FFE9D2" style={{ fontFamily: F.body, fontSize: 14.5, color: '#fff', lineHeight: 20 }} /> : null}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-end', marginTop: 3 }}>
+                <Text style={{ fontFamily: F.mono, fontSize: 8.5, color: 'rgba(255,255,255,0.75)' }}>{pending ? 'sending…' : msgTime(m.createdAt)}</Text>
+                {pending ? <Icon name="clock" size={9} color="rgba(255,255,255,0.75)" strokeWidth={2.2} /> : <Icon name="checks" size={10} color="rgba(255,255,255,0.85)" strokeWidth={2.2} />}
+              </View>
+            </LinearGradient>
+          </View>
+        ) : (
+          <View style={{ maxWidth: '82%', borderRadius: 16, borderBottomLeftRadius: 5, paddingVertical: 9, paddingHorizontal: 13, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)' }}>
+            {quote}
+            {m.body ? <MentionText text={m.body} names={mentionNames ?? []} highlight={C.orange} style={{ fontFamily: F.body, fontSize: 14.5, color: C.ink, lineHeight: 20 }} /> : null}
+            <Text style={{ fontFamily: F.mono, fontSize: 8.5, color: C.muted3, alignSelf: 'flex-end', marginTop: 3 }}>{msgTime(m.createdAt)}</Text>
+          </View>
+        )}
       </View>
     </View>
   );
