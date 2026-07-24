@@ -890,8 +890,7 @@ function MsgTabBar({ tab, setTab, counts }: { tab: 'clients' | 'team' | 'odds'; 
 }
 
 /* ---------- Messenger home — three tabs ---------- */
-function MessengerHome({ meId, onOpen, onOpenClient }: { meId: string; onOpen: (c: ChatConversation) => void; onOpenClient: (c: MessengerClient) => void }) {
-  const [tab, setTab] = React.useState<'clients' | 'team' | 'odds'>('clients');
+function MessengerHome({ meId, onOpen, onOpenClient, tab, setTab }: { meId: string; onOpen: (c: ChatConversation) => void; onOpenClient: (c: MessengerClient) => void; tab: 'clients' | 'team' | 'odds'; setTab: (t: 'clients' | 'team' | 'odds') => void }) {
   const [search, setSearch] = React.useState('');
   const [opening, setOpening] = React.useState<string | null>(null);
   const overview = useChatOverview(meId);
@@ -1262,6 +1261,9 @@ export function Messenger() {
   const { openChatId, setOpenChat } = useStore();
   const [active, setActive] = React.useState<ChatConversation | null>(null);
   const [activeClient, setActiveClient] = React.useState<MessengerClient | null>(null);
+  // Lifted here so closing a thread returns to the tab it was opened from
+  // (MessengerHome unmounts while a thread is open and would reset to Clients).
+  const [homeTab, setHomeTab] = React.useState<'clients' | 'team' | 'odds'>('clients');
   const overview = useChatOverview(meId);
 
   // While a chat is open, the page-level swipe-back closes the chat (back to
@@ -1295,7 +1297,7 @@ export function Messenger() {
   }
   if (activeClient) return <ClientChat meId={meId} client={activeClient} onBack={() => setActiveClient(null)} allowDirect={role === 'crm'} />;
   if (active) return <MessageThread meId={meId} conv={active} onBack={() => setActive(null)} />;
-  return <MessengerHome meId={meId} onOpen={setActive} onOpenClient={setActiveClient} />;
+  return <MessengerHome meId={meId} onOpen={setActive} onOpenClient={setActiveClient} tab={homeTab} setTab={setHomeTab} />;
 }
 
 /* ---------- In-app new-message banner (shown on any screen except Messenger) ----------
