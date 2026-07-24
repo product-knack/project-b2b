@@ -1150,6 +1150,19 @@ export function useRescheduleRosterSession() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['head-doctor-month-sessions'] }),
   });
 }
+/* Permanently delete ONE roster session (head-doctor page card action). */
+export function useDeleteRosterSession() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (sessionId: string) => {
+      const { error, count } = await supabase.from('session_schedule').delete({ count: 'exact' }).eq('id', sessionId);
+      if (error) throw new Error(error.message);
+      if (!count) throw new Error('Could not delete this session (not permitted).');
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['head-doctor-month-sessions'] }); qc.invalidateQueries({ queryKey: ['doctor-today-roster'] }); },
+  });
+}
+
 export function useDeleteFutureRoster() {
   const qc = useQueryClient();
   return useMutation({

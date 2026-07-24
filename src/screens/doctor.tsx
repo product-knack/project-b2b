@@ -13,7 +13,7 @@ import {
   useProtocolExercises, useCreateProtocol, usePhysioProtocols, useDoctorAssignedClients,
   useDoctorClientSessionCounts, useAllClientsForDoctor, useHeadDoctorMonthSessions,
   useHeadDoctorDoctors, useBulkCreateRoster, useCancelRosterSession, useRescheduleRosterSession,
-  useDeleteFutureRoster, formatDoctorSessionType, personName, DOCTOR_ROSTER_CREATE_MODALITIES,
+  useDeleteFutureRoster, useDeleteRosterSession, formatDoctorSessionType, personName, DOCTOR_ROSTER_CREATE_MODALITIES,
   ProtocolExerciseInput, usePhysioDialogClients, useHeadDoctorClients, fetchRosterReplicatePrefill,
   useDoctorsRunRate, useDoctorTodayRoster, DoctorRosterRow, usePhysioSessionExercises,
 } from '../lib/doctorQueries';
@@ -1184,6 +1184,16 @@ export function DoctorRoster() {
   const q = useHeadDoctorMonthSessions(monthDate, 'all');
   const cancelM = useCancelRosterSession();
   const reschedM = useRescheduleRosterSession();
+  const deleteM = useDeleteRosterSession();
+  const confirmDelete = (s: any) =>
+    Alert.alert(
+      'Delete Session?',
+      `Permanently delete ${s.client_name}'s ${formatDoctorSessionType(s.modality)} session on ${fmtAt(s.scheduled_datetime)}? This cannot be undone. Use Cancel instead if you want a cancellation record kept.`,
+      [
+        { text: 'Keep', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: () => { setErr(null); deleteM.mutate(s.id, { onError: (e: any) => setErr(e?.message ?? 'Delete failed') }); } },
+      ]
+    );
   const [tab, setTab] = React.useState<'calendar' | 'reschedule' | 'list'>('calendar');
   const [cancelFor, setCancelFor] = React.useState<any | null>(null);
   // DB check constraint session_schedule_canceled_by_check allows exactly 'Client' | 'Trainer' (live-verified) — web dialog contract
@@ -1237,16 +1247,22 @@ export function DoctorRoster() {
         <Badge text={s.status || 'scheduled'} color={statusColor(s.status)} />
       </View>
       {s.reschedule_request ? <Body style={{ fontSize: 11, color: C.gold }}>Request: {s.reschedule_request}</Body> : null}
-      {s.status !== 'cancelled' ? (
-        <View style={{ flexDirection: 'row', gap: 8 }}>
-          <Pressable onPress={() => { setReschedFor(s); const d = new Date(s.scheduled_datetime); setReschedDate(d.toLocaleDateString('en-CA')); setReschedTime(d.toTimeString().slice(0, 5)); }} style={{ flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: 11, backgroundColor: hexA(C.blue, 0.1), borderWidth: 1, borderColor: hexA(C.blue, 0.3) }}>
-            <Text style={{ fontFamily: F.bodySemi, fontSize: 11.5, color: '#A9BCFF' }}>Reschedule</Text>
-          </Pressable>
-          <Pressable onPress={() => { setCancelFor(s); setCancelBy(null); setCancelRemark(''); }} style={{ flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: 11, backgroundColor: hexA(C.red, 0.08), borderWidth: 1, borderColor: hexA(C.red, 0.28) }}>
-            <Text style={{ fontFamily: F.bodySemi, fontSize: 11.5, color: C.red }}>Cancel</Text>
-          </Pressable>
-        </View>
-      ) : null}
+      <View style={{ flexDirection: 'row', gap: 8 }}>
+        {s.status !== 'cancelled' ? (
+          <>
+            <Pressable onPress={() => { setReschedFor(s); const d = new Date(s.scheduled_datetime); setReschedDate(d.toLocaleDateString('en-CA')); setReschedTime(d.toTimeString().slice(0, 5)); }} style={{ flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: 11, backgroundColor: hexA(C.blue, 0.1), borderWidth: 1, borderColor: hexA(C.blue, 0.3) }}>
+              <Text style={{ fontFamily: F.bodySemi, fontSize: 11.5, color: '#A9BCFF' }}>Reschedule</Text>
+            </Pressable>
+            <Pressable onPress={() => { setCancelFor(s); setCancelBy(null); setCancelRemark(''); }} style={{ flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: 11, backgroundColor: hexA(C.red, 0.08), borderWidth: 1, borderColor: hexA(C.red, 0.28) }}>
+              <Text style={{ fontFamily: F.bodySemi, fontSize: 11.5, color: C.red }}>Cancel</Text>
+            </Pressable>
+          </>
+        ) : null}
+        <Pressable onPress={() => confirmDelete(s)} disabled={deleteM.isPending} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 9, paddingHorizontal: 13, borderRadius: 11, backgroundColor: hexA(C.red, 0.14), borderWidth: 1, borderColor: hexA(C.red, 0.45), flex: s.status === 'cancelled' ? 1 : undefined, opacity: deleteM.isPending ? 0.6 : 1 }}>
+          <Icon path="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14ZM10 11v6M14 11v6" size={12} color={C.red} strokeWidth={2.1} />
+          <Text style={{ fontFamily: F.bodyBold, fontSize: 11.5, color: C.red }}>Delete</Text>
+        </Pressable>
+      </View>
     </Card>
   );
 
