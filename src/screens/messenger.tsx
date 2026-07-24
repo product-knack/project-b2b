@@ -152,18 +152,16 @@ function MentionText({ text, names, style, highlight }: { text: string; names: s
 }
 
 /* ---------- Thread ---------- */
-/* WhatsApp-style status ticks for own messages. pending=clock, sent=✓,
-   some-read=✓✓ grey, all-read=✓✓ green. */
+/* WhatsApp-style status ticks for own messages. sending=single ✓ grey,
+   delivered (stored on server, incl. group partially-read)=✓✓ grey,
+   read by everyone else=✓✓ green. */
 const TICK_PATH = 'M20 6 9 17l-5-5';
-function Ticks({ state, dim }: { state: 'pending' | 'sent' | 'some' | 'all'; dim: string }) {
-  if (state === 'pending') {
-    return <Icon path="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM12 8v4l2.5 1.5" size={10} color={dim} strokeWidth={1.9} />;
-  }
+function Ticks({ state, dim }: { state: 'pending' | 'delivered' | 'all'; dim: string }) {
   const col = state === 'all' ? '#3DDC84' : dim;
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
       <Icon path={TICK_PATH} size={11} color={col} strokeWidth={2.6} />
-      {state !== 'sent' ? <View style={{ marginLeft: -7 }}><Icon path={TICK_PATH} size={11} color={col} strokeWidth={2.6} /></View> : null}
+      {state !== 'pending' ? <View style={{ marginLeft: -7 }}><Icon path={TICK_PATH} size={11} color={col} strokeWidth={2.6} /></View> : null}
     </View>
   );
 }
@@ -187,15 +185,14 @@ function MessageThread({ meId, conv, onBack, subtabs }: { meId: string; conv: Ch
   // Read receipts — power the WhatsApp-style ticks on own bubbles (all chats)
   // and the long-press "seen by" sheet (groups). Polls every 20s.
   const readsQ = useConversationReads(conv.conversationId, true);
-  // Tick state for an own message: 'sent' (single grey) → 'some' (double grey,
-  // part of a group has read it) → 'all' (double green, everyone else read it).
-  // True per-device delivery isn't tracked (B2C interop), so there is no
-  // WhatsApp "delivered" state — double grey here means partially seen.
-  const tickStateOf = React.useCallback((createdAt: string): 'sent' | 'some' | 'all' => {
+  // Tick state for an own message once it's in the DB: 'delivered' (✓✓ grey —
+  // on the server; in groups also covers partially-read, like WhatsApp) or
+  // 'all' (✓✓ green — every other participant's last_read_at passed it).
+  const tickStateOf = React.useCallback((createdAt: string): 'delivered' | 'all' => {
     const others = (readsQ.data ?? []).filter((r) => r.userId !== meId);
-    if (!others.length) return 'sent';
+    if (!others.length) return 'delivered';
     const seen = others.filter((r) => r.lastReadAt && r.lastReadAt >= createdAt).length;
-    return seen === others.length ? 'all' : seen > 0 ? 'some' : 'sent';
+    return seen === others.length ? 'all' : 'delivered';
   }, [readsQ.data, meId]);
   const [seenMsg, setSeenMsg] = React.useState<(ChatMessage & { _pending?: boolean }) | null>(null);
   React.useEffect(() => { setSeenMsg(null); }, [conv.conversationId]);
@@ -432,10 +429,10 @@ function MessageThread({ meId, conv, onBack, subtabs }: { meId: string; conv: Ch
     const isMedia = item.message_type !== 'text' && !!item.attachment_url;
     const openMedia = () => { if (item.attachment_url && !item._pending) setViewer({ kind: item.message_type ?? 'document', url: item.attachment_url }); };
     const timeText = item._pending ? (isMedia ? 'uploading…' : 'sending…') : `${tp.time} ${tp.ampm}`;
-    const tickState: 'pending' | 'sent' | 'some' | 'all' = item._pending ? 'pending' : tickStateOf(item.created_at);
+    const tickState: 'pending' | 'delivered' | 'all' = item._pending ? 'pending' : tickStateOf(item.created_at);
     const myTicks = (dim: string) => (mine ? <Ticks state={tickState} dim={dim} /> : null);
-    // Long-press a bubble in a group → "seen by" sheet.
-    const onBubbleLongPress = () => { if (showMembers && !item._pending) setSeenMsg(item); };
+    // Long-press any bubble (all chats) → Message Info sheet (sent/delivered/seen + times).
+    const onBubbleLongPress = () => { if (!item._pending) setSeenMsg(item); };
     // Quoted message block (rendered inside the bubble when this message is a reply).
     const quote = item.reply_to_id ? (() => {
       const orig = msgById.get(item.reply_to_id!);
@@ -852,6 +849,13 @@ function MediaViewer({ media, onClose }: { media: { kind: string; url: string } 
 
 /* Read-receipt sheet: who in the group has seen the long-pressed message. A member
    has "seen" it when their last_read_at is at/after the message's created_at. */
+const infoDT = (iso: string) => {
+  const d = new Date(iso);
+  const day = d.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', year: 'numeric' });
+  const time = d.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true });
+  return `${day} · ${time}`;
+};
+
 function SeenBySheet({ msg, reads, meId, onClose }: { msg: (ChatMessage & { _pending?: boolean }) | null; reads: ConversationRead[]; meId: string; onClose: () => void }) {
   const roleColor = (role: string | null) => role === 'crm' ? C.gold : role === 'trainer' ? C.orange : role === 'doctor' ? C.blue : (role === 'admin' || role === 'super_admin') ? C.red : role === 'client' ? C.green : C.muted2;
   const msgAt = msg ? new Date(msg.created_at).getTime() : 0;
@@ -866,17 +870,32 @@ function SeenBySheet({ msg, reads, meId, onClose }: { msg: (ChatMessage & { _pen
         <Body numberOfLines={1} style={{ fontSize: 13.5, fontFamily: F.bodySemi, color: '#fff' }}>{r.name}{r.userId === meId ? ' (you)' : ''}</Body>
         <Text style={{ fontFamily: F.bodySemi, fontSize: 9, letterSpacing: 0.5, color: roleColor(r.role) }}>{(r.role ?? 'member').toUpperCase()}</Text>
       </View>
-      {when ? <Mono style={{ fontSize: 9.5, color: C.muted3 }}>{relTime(when)}</Mono> : null}
+      {when ? <Mono style={{ fontSize: 9.5, color: C.muted3 }}>{infoDT(when)}</Mono> : null}
+    </View>
+  );
+  const statusRow = (label: string, when: string, state: 'pending' | 'delivered' | 'all') => (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 7 }}>
+      <Ticks state={state} dim={C.muted2} />
+      <Text style={{ width: 74, fontFamily: F.bodySemi, fontSize: 11.5, color: C.ink3 }}>{label}</Text>
+      <Mono style={{ flex: 1, fontSize: 10, color: C.muted2, textAlign: 'right' }}>{when}</Mono>
     </View>
   );
   return (
-    <SheetShell visible={!!msg} onClose={onClose} accent={C.blue} icon="checks" title="Seen by" subtitle={msg ? `${seen.length} of ${others.length} member${others.length === 1 ? '' : 's'}` : undefined}>
+    <SheetShell visible={!!msg} onClose={onClose} accent={C.blue} icon="checks" title="Message Info" subtitle={msg ? `Seen by ${seen.length} of ${others.length}` : undefined}>
       {msg ? (
         <>
           <View style={{ padding: 11, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' }}>
             <Body numberOfLines={2} style={{ fontSize: 12.5, color: C.ink3 }}>
               {msg.message_type !== 'text' ? ({ image: '📷 Photo', video: '🎥 Video', voice: '🎤 Voice', document: '📄 Document' }[msg.message_type] ?? 'Message') : msg.message}
             </Body>
+          </View>
+          {/* Status timeline — sent/delivered share the server receipt time */}
+          <View style={{ marginTop: 8, paddingHorizontal: 11, paddingVertical: 4, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.03)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)' }}>
+            {statusRow('Sent', infoDT(msg.created_at), 'pending')}
+            <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.05)' }} />
+            {statusRow('Delivered', infoDT(msg.created_at), 'delivered')}
+            <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.05)' }} />
+            {statusRow('Seen', seen.length === others.length && others.length > 0 ? infoDT(seen.reduce((a, r) => (a > r.lastReadAt! ? a : r.lastReadAt!), seen[0]?.lastReadAt ?? msg.created_at)) : seen.length ? `${seen.length} of ${others.length} so far` : 'Not yet', seen.length === others.length && others.length > 0 ? 'all' : 'delivered')}
           </View>
           {seen.length ? (
             <>
@@ -1135,7 +1154,8 @@ function ClientChat({ meId, client, onBack, allowDirect }: { meId: string; clien
 
   // ---- Direct DM (CRM only) ----
   const hasDirect = !!allowDirect && !!client.profileId;
-  const [view, setView] = React.useState<'direct' | 'group'>('group');
+  // CRMs land on the DIRECT chat by default (their primary channel); Groups is one tap away.
+  const [view, setView] = React.useState<'direct' | 'group'>(hasDirect ? 'direct' : 'group');
   const [dmConv, setDmConv] = React.useState<ChatConversation | null>(null);
   const [dmErr, setDmErr] = React.useState<string | null>(null);
   const openDm = useOpenOrCreateDm();
