@@ -7433,10 +7433,24 @@ function QhpAssessor() {
                       {qhpDate(q.assessment_date)}{qhpTime(q.assessment_time) ? `  ·  ${qhpTime(q.assessment_time)}` : '  ·  Time not set'}
                     </Body>
                   </View>
-                  {q.location ? (
+                  {q.location || q.lead_address ? (
                     <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
                       <View style={{ marginTop: 2 }}><Icon name="pin" size={13} color={C.muted2} strokeWidth={2} /></View>
-                      <Body style={{ flex: 1, fontSize: 12, color: C.ink3, lineHeight: 17 }}>{q.location}</Body>
+                      <Body style={{ flex: 1, fontSize: 12, color: C.ink3, lineHeight: 17 }}>{q.location || q.lead_address}</Body>
+                    </View>
+                  ) : null}
+                  {q.client_phone ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <Icon name="phone" size={13} color={C.muted2} strokeWidth={2} />
+                      <Body style={{ flex: 1, fontSize: 12.5, color: '#fff', fontFamily: F.bodySemi }}>{q.client_phone}</Body>
+                      <Pressable
+                        onPress={() => Linking.openURL(`tel:${String(q.client_phone).replace(/[^0-9+]/g, '')}`).catch(() => {})}
+                        hitSlop={6}
+                        style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 7, paddingHorizontal: 14, borderRadius: 999, backgroundColor: hexA(C.green, 0.15), borderWidth: 1, borderColor: hexA(C.green, 0.5) }}
+                      >
+                        <Icon name="phone" size={12} color={C.green} strokeWidth={2.2} />
+                        <Text style={{ fontFamily: F.bodyBold, fontSize: 11.5, color: C.green }}>Call</Text>
+                      </Pressable>
                     </View>
                   ) : null}
                 </View>

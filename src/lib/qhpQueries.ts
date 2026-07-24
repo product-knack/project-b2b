@@ -33,6 +33,7 @@ export type QhpRow = {
   label: string; // QHP Baseline / QHP Refresh N / New Prospect
   client_type: 'New Client' | 'Existing Client' | 'New Prospect';
   client_phone: string | null;
+  lead_address: string | null; // leads.qhp_pref_location — address fallback for upcoming cards
   client_created_at: string | null;
   /** clients.brb_location captured → hide the location-capture pin on QHP cards */
   home_captured: boolean;
@@ -82,12 +83,18 @@ export function useQhpAssessments(trainerId: string) {
       if (error) throw new Error(error.message);
       const rows = (data ?? []) as any[];
 
-      // Phone fallback from leads.contact_no for clients missing clients.phone (web parity).
-      const missingPhoneIds = [...new Set(rows.filter((r) => r.client_id && !r.clients?.phone).map((r) => r.client_id))];
+      // Leads enrichment (web parity): contact_no as the phone fallback, and
+      // qhp_pref_location as the address fallback for the upcoming cards.
+      const leadIds = [...new Set(rows.filter((r) => r.client_id).map((r) => r.client_id))];
       const leadPhone = new Map<string, string>();
-      if (missingPhoneIds.length) {
-        const { data: leadRows } = await supabase.from('leads').select('client_id, contact_no').in('client_id', missingPhoneIds);
-        (leadRows ?? []).forEach((l: any) => { if (l.client_id && l.contact_no && !leadPhone.has(l.client_id)) leadPhone.set(l.client_id, l.contact_no); });
+      const leadAddress = new Map<string, string>();
+      for (let i = 0; i < leadIds.length; i += 200) {
+        const { data: leadRows } = await supabase.from('leads').select('client_id, contact_no, qhp_pref_location').in('client_id', leadIds.slice(i, i + 200));
+        (leadRows ?? []).forEach((l: any) => {
+          if (!l.client_id) return;
+          if (l.contact_no && !leadPhone.has(l.client_id)) leadPhone.set(l.client_id, l.contact_no);
+          if (l.qhp_pref_location && !leadAddress.has(l.client_id)) leadAddress.set(l.client_id, l.qhp_pref_location);
+        });
       }
 
       // Baseline / Refresh N — index of the assessment within the client's history (date asc).
@@ -122,6 +129,7 @@ export function useQhpAssessments(trainerId: string) {
         label: labelOf(r),
         client_type: !r.client_id ? 'New Prospect' : r.clients?.subscription_type ? 'Existing Client' : 'New Client',
         client_phone: r.clients?.phone ?? (r.client_id ? leadPhone.get(r.client_id) ?? null : null),
+        lead_address: r.client_id ? leadAddress.get(r.client_id) ?? null : null,
         client_created_at: r.clients?.created_at ?? null,
         home_captured: r.clients?.brb_location != null,
         mechanical_score: r.mechanical_score ?? null,
