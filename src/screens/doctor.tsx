@@ -1566,6 +1566,74 @@ function ClientSelect({ visible, value, onSelect }: { visible: boolean; value: {
   );
 }
 
+/* Wheel-style time picker — two snapping columns (hour / 5-min steps). Rendered as
+   a Modal NESTED inside the RosterSheet's Modal tree (Android renders sibling
+   modals blank + touch-blocking, so it must live inside the open sheet). */
+const WHEEL_ITEM = 40;
+function TimeWheelPicker({ visible, initial, onClose, onPick }: { visible: boolean; initial: string; onClose: () => void; onPick: (hhmm: string) => void }) {
+  const hours = Array.from({ length: 24 }, (_, i) => i);
+  const mins = Array.from({ length: 12 }, (_, i) => i * 5);
+  const [h, setH] = React.useState(9);
+  const [m, setM] = React.useState(0);
+  React.useEffect(() => {
+    if (!visible) return;
+    const mt = /^(\d{2}):(\d{2})$/.exec(initial);
+    setH(mt ? Math.min(23, parseInt(mt[1], 10)) : 9);
+    setM(mt ? Math.min(55, Math.round(parseInt(mt[2], 10) / 5) * 5) : 0);
+  }, [visible]);
+  const p2 = (n: number) => String(n).padStart(2, '0');
+  const wheel = (data: number[], val: number, setVal: (n: number) => void) => (
+    <View style={{ height: WHEEL_ITEM * 3, width: 72 }}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        snapToInterval={WHEEL_ITEM}
+        decelerationRate="fast"
+        nestedScrollEnabled
+        contentOffset={{ x: 0, y: data.indexOf(val) * WHEEL_ITEM }}
+        contentContainerStyle={{ paddingVertical: WHEEL_ITEM }}
+        onMomentumScrollEnd={(e) => {
+          const idx = Math.max(0, Math.min(data.length - 1, Math.round(e.nativeEvent.contentOffset.y / WHEEL_ITEM)));
+          setVal(data[idx]);
+        }}
+      >
+        {data.map((n) => (
+          <View key={n} style={{ height: WHEEL_ITEM, alignItems: 'center', justifyContent: 'center' }}>
+            <Text style={{ fontFamily: n === val ? F.bodyBold : F.body, fontSize: n === val ? 20 : 15, color: n === val ? C.orange : C.muted2 }}>{p2(n)}</Text>
+          </View>
+        ))}
+      </ScrollView>
+      {/* selection band */}
+      <View pointerEvents="none" style={{ position: 'absolute', top: WHEEL_ITEM, left: 0, right: 0, height: WHEEL_ITEM, borderTopWidth: 1, borderBottomWidth: 1, borderColor: hexA(C.orange, 0.35) }} />
+    </View>
+  );
+  if (!visible) return null;
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable onPress={onClose} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', alignItems: 'center', justifyContent: 'center', padding: 30 }}>
+        <Pressable onPress={() => {}} style={{ width: '100%', maxWidth: 300, borderRadius: 20, backgroundColor: '#171210', borderWidth: 1, borderColor: 'rgba(255,150,90,0.2)', padding: 18, gap: 14 }}>
+          <Text style={{ fontFamily: F.bodyBold, fontSize: 15, color: '#fff', textAlign: 'center' }}>Pick a time</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            {wheel(hours, h, setH)}
+            <Text style={{ fontFamily: F.bodyBold, fontSize: 20, color: C.muted2 }}>:</Text>
+            {wheel(mins, m, setM)}
+          </View>
+          <Mono style={{ fontSize: 9, letterSpacing: 1, color: C.muted3, textAlign: 'center' }}>IST · 24 HOUR</Mono>
+          <View style={{ flexDirection: 'row', gap: 9 }}>
+            <Pressable onPress={onClose} style={{ flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }}>
+              <Text style={{ fontFamily: F.bodySemi, fontSize: 12.5, color: C.ink }}>Cancel</Text>
+            </Pressable>
+            <Pressable onPress={() => { onPick(`${p2(h)}:${p2(m)}`); onClose(); }} style={{ flex: 1, borderRadius: 12, overflow: 'hidden' }}>
+              <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ alignItems: 'center', paddingVertical: 12 }}>
+                <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: '#fff' }}>Set {p2(h)}:{p2(m)}</Text>
+              </LinearGradient>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
 function BulkCreateSheet({ visible, onClose, doctors, presetClient }: { visible: boolean; onClose: () => void; doctors: { id: string; name: string }[]; presetClient?: { id: string; name: string } }) {
   const bulkM = useBulkCreateRoster();
   const [mode, setMode] = React.useState<'create' | 'replicate'>('create');
@@ -1578,7 +1646,10 @@ function BulkCreateSheet({ visible, onClose, doctors, presetClient }: { visible:
   const [dayDoctor, setDayDoctor] = React.useState<Record<number, string | null>>({});
   const [dayModality, setDayModality] = React.useState<Record<number, string | null>>({});
   const [weeks, setWeeks] = React.useState('4');
+  // startDate has no UI (web Create New iterates from today); Replicate still
+  // auto-anchors to next Monday internally, matching the web Copy tab default.
   const [startDate, setStartDate] = React.useState('');
+  const [timePickFor, setTimePickFor] = React.useState<number | null>(null);
   const [repBusy, setRepBusy] = React.useState(false);
   const [repNote, setRepNote] = React.useState<string | null>(null);
 
@@ -1737,7 +1808,11 @@ function BulkCreateSheet({ visible, onClose, doctors, presetClient }: { visible:
           <View key={d} style={{ backgroundColor: 'rgba(0,0,0,0.22)', borderRadius: 12, padding: 10, gap: 8 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
               <Body style={{ width: 40, fontSize: 12, fontFamily: F.bodySemi, color: '#fff' }}>{WEEKDAYS[d][0]}</Body>
-              <TextInput value={times[d] ?? ''} onChangeText={(v) => setTimes((t) => ({ ...t, [d]: v }))} placeholder="09:00" placeholderTextColor={C.muted3} style={[inputStyle, { flex: 1, fontFamily: F.mono, paddingVertical: 9 }]} />
+              <Pressable onPress={() => setTimePickFor(d)} style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: hexA(C.orange, 0.3) }}>
+                <Icon name="clock" size={13} color={C.orange} strokeWidth={2} />
+                <Text style={{ flex: 1, fontFamily: F.mono, fontSize: 14, color: '#fff' }}>{times[d] ?? '09:00'}</Text>
+                <Icon name="chevDown" size={11} color={C.muted3} strokeWidth={2.4} />
+              </Pressable>
             </View>
             <View style={{ flexDirection: 'row', gap: 7 }}>
               <Pressable onPress={() => cycleDayDoctor(d)} style={{ flex: 1.4, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 7, borderRadius: 10, backgroundColor: hexA(C.blue, dayDoctor[d] ? 0.14 : 0.05), borderWidth: 1, borderColor: hexA(C.blue, dayDoctor[d] ? 0.45 : 0.18) }}>
@@ -1752,17 +1827,29 @@ function BulkCreateSheet({ visible, onClose, doctors, presetClient }: { visible:
         ))}
         {days.size ? <Body style={{ fontSize: 9.5, color: C.muted3 }}>Per-day doctor / modality fall back to the defaults above — tap to override.</Body> : null}
       </View>
-      <View style={{ flexDirection: 'row', gap: 10 }}>
-        <View style={{ flex: 1, gap: 6 }}>
-          <Mono style={{ fontSize: 9, letterSpacing: 1, color: C.mono2 }}>WEEKS (1–8)</Mono>
-          <TextInput value={weeks} onChangeText={(v) => setWeeks(v.replace(/[^0-9]/g, '').slice(0, 1))} keyboardType="number-pad" placeholder="4" placeholderTextColor={C.muted3} style={[inputStyle, { fontFamily: F.mono }]} />
-        </View>
-        <View style={{ flex: 2, gap: 6 }}>
-          <Mono style={{ fontSize: 9, letterSpacing: 1, color: C.mono2 }}>START DATE (OPTIONAL)</Mono>
-          <TextInput value={startDate} onChangeText={setStartDate} placeholder="YYYY-MM-DD (today)" placeholderTextColor={C.muted3} style={[inputStyle, { fontFamily: F.mono }]} />
+      <View style={{ gap: 6 }}>
+        <Mono style={{ fontSize: 9, letterSpacing: 1, color: C.mono2 }}>WEEKS</Mono>
+        <View style={{ flexDirection: 'row', gap: 6 }}>
+          {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => {
+            const active = weeks === String(n);
+            return (
+              <Pressable key={n} onPress={() => setWeeks(String(n))} style={{ flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 11, backgroundColor: active ? hexA(C.orange, 0.16) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: active ? hexA(C.orange, 0.55) : 'rgba(255,255,255,0.09)' }}>
+                <Text style={{ fontFamily: active ? F.bodyBold : F.bodySemi, fontSize: 13, color: active ? C.orange : C.muted }}>{n}</Text>
+              </Pressable>
+            );
+          })}
         </View>
       </View>
-      <Body style={{ fontSize: 10.5, color: C.muted3 }}>Slots already booked for the doctor or client at the exact time are skipped as conflicts.</Body>
+      {mode === 'replicate' && startDate ? (
+        <Body style={{ fontSize: 10.5, color: C.muted3 }}>Roster starts next Monday ({startDate}).</Body>
+      ) : null}
+      <Body style={{ fontSize: 10.5, color: C.muted3 }}>Sessions start from today. Slots already booked for the doctor or client at the exact time are skipped as conflicts.</Body>
+      <TimeWheelPicker
+        visible={timePickFor != null}
+        initial={timePickFor != null ? (times[timePickFor] ?? '09:00') : '09:00'}
+        onClose={() => setTimePickFor(null)}
+        onPick={(hhmm) => { if (timePickFor != null) setTimes((t) => ({ ...t, [timePickFor]: hhmm })); }}
+      />
     </RosterSheet>
   );
 }
