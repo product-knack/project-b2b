@@ -24,6 +24,10 @@ import {
   useAssignableDoctors, useAssignDoctors, useClientDoctorAssignments,
 } from '../lib/doctorQueries';
 import { useWorkoutSessionExercises, useClientCrm } from '../lib/doctorQueries';
+import * as Location from 'expo-location';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { supabase } from '../lib/supabase';
+import { useSaveClientHomeLocation } from '../lib/clientQueries';
 import { useWorkoutSessions } from '../lib/adminClientDetailQueries';
 import { useClientHealthReports } from '../lib/qhpQueries';
 import { PhysioSessionSheet } from './doctorSessions';
@@ -985,6 +989,48 @@ export function DoctorClientDetail() {
   const [remarkPage, setRemarkPage] = React.useState(0);
   const [editRemark, setEditRemark] = React.useState<{ id: string; content: string } | null>(null);
 
+  // Capture client's home location (trainer parity; RLS allows doctors to update
+  // brb_location only for their ASSIGNED clients — live-verified). Button shows
+  // only while brb_location is still null.
+  const qcLoc = useQueryClient();
+  const brbQ = useQuery({
+    queryKey: ['client-brb', clientId],
+    enabled: !!clientId,
+    staleTime: 60_000,
+    queryFn: async () => {
+      const { data, error } = await supabase.from('clients').select('brb_location').eq('id', clientId!).maybeSingle();
+      if (error) throw new Error(error.message);
+      return (data?.brb_location ?? null) as any;
+    },
+  });
+  const saveLocM = useSaveClientHomeLocation();
+  const [capturingLoc, setCapturingLoc] = React.useState(false);
+  const captureHomeLocation = async () => {
+    if (!clientId) return;
+    setCapturingLoc(true);
+    try {
+      const perm = await Location.requestForegroundPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert('Permission needed', "Allow location access to capture the client's home location.");
+        return;
+      }
+      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      await saveLocM.mutateAsync({ clientId, lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy ?? null });
+      qcLoc.invalidateQueries({ queryKey: ['client-brb', clientId] });
+      Alert.alert('Location saved', `${name}'s home location has been captured.`);
+    } catch (e: any) {
+      Alert.alert('Could not capture', e?.message ?? 'Turn on GPS and try again.');
+    } finally {
+      setCapturingLoc(false);
+    }
+  };
+  const confirmCaptureLocation = () =>
+    Alert.alert(
+      "Capture client's home location?",
+      `Do you want to capture the location of ${name}'s home? Your current position will be saved — make sure you are at the client's home right now.`,
+      [{ text: 'Cancel', style: 'cancel' }, { text: 'OK, Capture', onPress: captureHomeLocation }]
+    );
+
   if (!clientId) {
     return <Page><Body style={{ color: C.muted3, textAlign: 'center', paddingVertical: 40 }}>No client selected.</Body></Page>;
   }
@@ -1025,6 +1071,15 @@ export function DoctorClientDetail() {
               {h?.subscription ? <Badge text={h.subscription} color={C.gold} /> : null}
               {h?.status ? <Badge text={h.status} color={h.status === 'active' ? C.green : C.red} /> : null}
               <ServicesButton subscriptionType={h?.subscription} />
+              {brbQ.data == null && !brbQ.isLoading ? (
+                <Pressable
+                  onPress={capturingLoc ? undefined : confirmCaptureLocation}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 5, paddingHorizontal: 10, borderRadius: 999, backgroundColor: hexA(C.green, 0.13), borderWidth: 1, borderColor: hexA(C.green, 0.4) }}
+                >
+                  {capturingLoc ? <ActivityIndicator size="small" color={C.green} /> : <Icon name="pin" size={12} color={C.green} strokeWidth={2.1} />}
+                  <Text style={{ fontFamily: F.bodySemi, fontSize: 10.5, color: C.green }}>Pin Home</Text>
+                </Pressable>
+              ) : null}
             </View>
             {crmQ.data ? (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 5 }}>
