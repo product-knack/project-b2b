@@ -1749,17 +1749,19 @@ function BulkCreateSheet({ visible, onClose, doctors, presetClient }: { visible:
     }
   };
 
-  const cycleDayDoctor = (d: number) => {
-    const opts: (string | null)[] = [null, ...doctors.map((x) => x.id)];
-    const cur = opts.indexOf(dayDoctor[d] ?? null);
-    setDayDoctor((p) => ({ ...p, [d]: opts[(cur + 1) % opts.length] }));
-  };
-  const cycleDayModality = (d: number) => {
-    const opts: (string | null)[] = [null, ...DOCTOR_ROSTER_CREATE_MODALITIES];
-    const cur = opts.indexOf(dayModality[d] ?? null);
-    setDayModality((p) => ({ ...p, [d]: opts[(cur + 1) % opts.length] }));
-  };
+  // Per-day dropdowns (web parity: Doctor / Modality selects under each day's time)
+  const [dropFor, setDropFor] = React.useState<{ day: number; kind: 'doctor' | 'modality' } | null>(null);
   const doctorName = (id: string | null) => (id ? doctors.find((x) => x.id === id)?.name ?? '—' : 'Default');
+  const dropOptions: { value: string | null; label: string }[] = dropFor?.kind === 'doctor'
+    ? [{ value: null, label: 'Default' }, ...doctors.map((x) => ({ value: x.id, label: x.name }))]
+    : [{ value: null, label: 'Default' }, ...DOCTOR_ROSTER_CREATE_MODALITIES.map((m) => ({ value: m, label: formatDoctorSessionType(m) }))];
+  const dropCurrent = dropFor ? (dropFor.kind === 'doctor' ? dayDoctor[dropFor.day] ?? null : dayModality[dropFor.day] ?? null) : null;
+  const pickDrop = (v: string | null) => {
+    if (!dropFor) return;
+    if (dropFor.kind === 'doctor') setDayDoctor((p) => ({ ...p, [dropFor.day]: v }));
+    else setDayModality((p) => ({ ...p, [dropFor.day]: v }));
+    setDropFor(null);
+  };
 
   return (
     <RosterSheet visible={visible} onClose={onClose} title="Create Roster" footer={
@@ -1842,12 +1844,14 @@ function BulkCreateSheet({ visible, onClose, doctors, presetClient }: { visible:
               </Pressable>
             </View>
             <View style={{ flexDirection: 'row', gap: 7 }}>
-              <Pressable onPress={() => cycleDayDoctor(d)} style={{ flex: 1.4, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 7, borderRadius: 10, backgroundColor: hexA(C.blue, dayDoctor[d] ? 0.14 : 0.05), borderWidth: 1, borderColor: hexA(C.blue, dayDoctor[d] ? 0.45 : 0.18) }}>
+              <Pressable onPress={() => setDropFor({ day: d, kind: 'doctor' })} style={{ flex: 1.4, flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 9, paddingHorizontal: 10, borderRadius: 10, backgroundColor: hexA(C.blue, dayDoctor[d] ? 0.14 : 0.05), borderWidth: 1, borderColor: hexA(C.blue, dayDoctor[d] ? 0.45 : 0.2) }}>
                 <Icon name="user" size={10} color={dayDoctor[d] ? '#A9BCFF' : C.muted3} strokeWidth={2.2} />
-                <Text numberOfLines={1} style={{ fontFamily: F.bodySemi, fontSize: 10, color: dayDoctor[d] ? '#A9BCFF' : C.muted3 }}>{doctorName(dayDoctor[d] ?? null)}</Text>
+                <Text numberOfLines={1} style={{ flex: 1, fontFamily: F.bodySemi, fontSize: 10.5, color: dayDoctor[d] ? '#A9BCFF' : C.muted2 }}>{doctorName(dayDoctor[d] ?? null)}</Text>
+                <Icon name="chevDown" size={10} color={C.muted3} strokeWidth={2.4} />
               </Pressable>
-              <Pressable onPress={() => cycleDayModality(d)} style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 7, borderRadius: 10, backgroundColor: hexA(C.orange, dayModality[d] ? 0.14 : 0.05), borderWidth: 1, borderColor: hexA(C.orange, dayModality[d] ? 0.45 : 0.18) }}>
-                <Text numberOfLines={1} style={{ fontFamily: F.bodySemi, fontSize: 10, color: dayModality[d] ? C.orange : C.muted3 }}>{dayModality[d] ? formatDoctorSessionType(dayModality[d]!) : 'Default'}</Text>
+              <Pressable onPress={() => setDropFor({ day: d, kind: 'modality' })} style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 9, paddingHorizontal: 10, borderRadius: 10, backgroundColor: hexA(C.orange, dayModality[d] ? 0.14 : 0.05), borderWidth: 1, borderColor: hexA(C.orange, dayModality[d] ? 0.45 : 0.2) }}>
+                <Text numberOfLines={1} style={{ flex: 1, fontFamily: F.bodySemi, fontSize: 10.5, color: dayModality[d] ? C.orange : C.muted2 }}>{dayModality[d] ? formatDoctorSessionType(dayModality[d]!) : 'Default'}</Text>
+                <Icon name="chevDown" size={10} color={C.muted3} strokeWidth={2.4} />
               </Pressable>
             </View>
           </View>
@@ -1877,6 +1881,32 @@ function BulkCreateSheet({ visible, onClose, doctors, presetClient }: { visible:
         onClose={() => setTimePickFor(null)}
         onPick={(hhmm) => { if (timePickFor != null) setTimes((t) => ({ ...t, [timePickFor]: hhmm })); }}
       />
+      {/* Per-day Doctor / Modality dropdown — nested Modal (Android sibling-modal bug) */}
+      {dropFor ? (
+        <Modal visible transparent animationType="fade" onRequestClose={() => setDropFor(null)}>
+          <Pressable onPress={() => setDropFor(null)} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', alignItems: 'center', justifyContent: 'center', padding: 28 }}>
+            <Pressable onPress={() => {}} style={{ width: '100%', maxWidth: 320, maxHeight: '70%', borderRadius: 20, backgroundColor: '#171210', borderWidth: 1, borderColor: 'rgba(255,150,90,0.2)', paddingVertical: 14 }}>
+              <Text style={{ fontFamily: F.bodyBold, fontSize: 14.5, color: '#fff', textAlign: 'center', marginBottom: 8 }}>
+                {WEEKDAYS[dropFor.day][0]} · {dropFor.kind === 'doctor' ? 'Doctor' : 'Modality'}
+              </Text>
+              <ScrollView nestedScrollEnabled showsVerticalScrollIndicator={false}>
+                {dropOptions.map((o) => {
+                  const active = dropCurrent === o.value;
+                  return (
+                    <Pressable key={o.value ?? '__default'} onPress={() => pickDrop(o.value)} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, paddingHorizontal: 18, backgroundColor: active ? hexA(C.orange, 0.09) : 'transparent' }}>
+                      <View style={{ width: 16, height: 16, borderRadius: 8, borderWidth: 1.6, borderColor: active ? C.orange : 'rgba(255,255,255,0.25)', alignItems: 'center', justifyContent: 'center' }}>
+                        {active ? <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: C.orange }} /> : null}
+                      </View>
+                      <Text numberOfLines={1} style={{ flex: 1, fontFamily: active ? F.bodyBold : F.bodySemi, fontSize: 13, color: active ? C.orange : C.ink }}>{o.label}</Text>
+                      {o.value === null ? <Mono style={{ fontSize: 8, letterSpacing: 0.8, color: C.muted3 }}>USES DEFAULT</Mono> : null}
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      ) : null}
     </RosterSheet>
   );
 }
