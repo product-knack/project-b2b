@@ -71,6 +71,15 @@ export function PushTokenManager() {
     // vibration lives on the NOTIFICATION CHANNEL, so it fires even with the
     // app killed / phone locked (~30s of buzz-pause cycles). The server's
     // longevity push targets this channel via channel_id.
+    // Chat message pushes — the shared B2C send-chat-notification fn targets
+    // channel_id 'chat_messages'; register it so delivery/heads-up is reliable.
+    Notifications.setNotificationChannelAsync('chat_messages', {
+      name: 'Chat messages',
+      importance: Notifications.AndroidImportance.MAX,
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: '#F97316',
+      sound: 'default',
+    }).catch(() => {});
     Notifications.setNotificationChannelAsync('longevity-alerts', {
       name: 'Longevity Team messages',
       importance: Notifications.AndroidImportance.MAX,
