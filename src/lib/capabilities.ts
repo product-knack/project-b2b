@@ -33,6 +33,8 @@ export type Capabilities = {
   isTrainerManager: boolean;
   /* CRM Escalations page (web: role_specialization includes 'crm_manager') */
   isCrmManager: boolean;
+  /* Pilates Run Rate card (web: role_specialization includes 'pilates-head') */
+  isPilatesHead: boolean;
 };
 
 const EMPTY: Capabilities = {
@@ -48,6 +50,7 @@ const EMPTY: Capabilities = {
   isManager: false,
   isTrainerManager: false,
   isCrmManager: false,
+  isPilatesHead: false,
 };
 
 export function useMyCapabilities(): { data: Capabilities; isLoading: boolean } {
@@ -78,6 +81,7 @@ export function useMyCapabilities(): { data: Capabilities; isLoading: boolean } 
         isManager: (data as any)?.managers === true,
         isTrainerManager: Array.isArray(spec) ? spec.includes('trainer-manager') : typeof spec === 'string' && spec.includes('trainer-manager'),
         isCrmManager: Array.isArray(spec) ? spec.includes('crm_manager') : typeof spec === 'string' && spec.includes('crm_manager'),
+        isPilatesHead: Array.isArray(spec) ? spec.includes('pilates-head') : typeof spec === 'string' && spec.includes('pilates-head'),
       };
     },
   });

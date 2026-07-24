@@ -1454,3 +1454,53 @@ export function usePlanExpiryMap(clientIds: (string | null)[]) {
     },
   });
 }
+
+/* ---------- Pilates Run Rate (pilates-head only; web usePilatesRunRate port) ----------
+   RPC get_pilates_run_rate(p_start, p_end) — SECURITY DEFINER, counts every
+   trainer's completed pilates sessions (session_type OR session_name ~ pilates),
+   half-open IST month window; current month caps the upper bound at now() so the
+   daily-rate denominator is elapsed days only. */
+export type PilatesRunRate = {
+  completed: number;
+  daysInMonth: number;
+  daysElapsed: number;
+  dailyRate: number;
+  projectedMonthTotal: number;
+  monthLabel: string;
+  isCurrentMonth: boolean;
+  breakdown: { trainerId: string; trainerName: string; completed: number }[];
+};
+const istNowParts = () => {
+  const n = new Date(Date.now() + IST_OFFSET_MIN * 60_000);
+  return { y: n.getUTCFullYear(), m: n.getUTCMonth(), d: n.getUTCDate() };
+};
+export function usePilatesRunRate(year: number, month: number, enabled: boolean) {
+  return useQuery({
+    queryKey: ['pilates-run-rate-all', year, month],
+    enabled,
+    staleTime: 300_000,
+    queryFn: async (): Promise<PilatesRunRate> => {
+      // IST month window shifted to UTC (00:00 IST = previous day 18:30 UTC)
+      const monthStartUtc = new Date(Date.UTC(year, month, 1, 0, 0) - IST_OFFSET_MIN * 60_000);
+      const monthEndUtc = new Date(Date.UTC(year, month + 1, 1, 0, 0) - IST_OFFSET_MIN * 60_000);
+      const now = istNowParts();
+      const isCurrentMonth = now.y === year && now.m === month;
+      const upperBound = isCurrentMonth ? new Date() : monthEndUtc;
+      const { data, error } = await supabase.rpc('get_pilates_run_rate', {
+        p_start: monthStartUtc.toISOString(),
+        p_end: upperBound.toISOString(),
+      });
+      if (error) throw new Error(error.message);
+      const breakdown = ((data ?? []) as any[])
+        .map((r) => ({ trainerId: r.trainer_id as string, trainerName: (r.trainer_name as string) || 'Unknown', completed: Number(r.completed) || 0 }))
+        .sort((a, b) => b.completed - a.completed);
+      const completed = breakdown.reduce((a, r) => a + r.completed, 0);
+      const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+      const daysElapsed = isCurrentMonth ? now.d : (new Date(Date.UTC(year, month, 1)) > new Date() ? 1 : daysInMonth);
+      const dailyRate = Math.round((completed / Math.max(1, daysElapsed)) * 10) / 10;
+      const projectedMonthTotal = isCurrentMonth ? Math.round(dailyRate * daysInMonth) : completed;
+      const monthLabel = new Date(Date.UTC(year, month, 1)).toLocaleString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+      return { completed, daysInMonth, daysElapsed, dailyRate, projectedMonthTotal, monthLabel, isCurrentMonth, breakdown };
+    },
+  });
+}

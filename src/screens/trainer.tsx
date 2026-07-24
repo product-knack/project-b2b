@@ -22,7 +22,7 @@ import { useAuth } from '../auth';
 import { supabase, DEV_TRAINER_ID } from '../lib/supabase';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { QhpAssessmentForm, CoachPresenceModal, fetchHasPriorCompletedQHP } from './qhpAssessmentForm';
-import { useTodayRoster, useTrainerStats, useTrainerProfile, useTrainerMonthSessions, useTrainerLeaderboard, useManagerLeaderboard, useManagerTeam, useManagerTeamLeaves, useManagerTeamIncidents, useManagerTeamRetention, useManagerTeamLateLogs, useManagerTeamRoster, useManagerTeamPlanOverview, useManagerTeamAcks, useManagerTeamAppAdoption, useTrainerSessionBreakdown, useTrainerReferralBreakdown, useFirstSessionAlert, istTimeParts, istDayLabel, istDate, useCancelScheduledSession, useRequestReschedule, useAddMissedRemark, lbMonthBounds, lbMonthLabel, LbBounds, RosterRow, ManagerTeamMember, MgrMonthFilter, usePlanExpiryMap, PlanExpiry, useTrainerAckSummary, useRequestRoster, useRosterDistance, SESSION_MODALITIES, useMyMonthSessionBreakdown } from '../lib/trainerQueries';
+import { useTodayRoster, useTrainerStats, useTrainerProfile, useTrainerMonthSessions, useTrainerLeaderboard, useManagerLeaderboard, useManagerTeam, useManagerTeamLeaves, useManagerTeamIncidents, useManagerTeamRetention, useManagerTeamLateLogs, useManagerTeamRoster, useManagerTeamPlanOverview, useManagerTeamAcks, useManagerTeamAppAdoption, useTrainerSessionBreakdown, useTrainerReferralBreakdown, useFirstSessionAlert, istTimeParts, istDayLabel, istDate, useCancelScheduledSession, useRequestReschedule, useAddMissedRemark, lbMonthBounds, lbMonthLabel, LbBounds, RosterRow, ManagerTeamMember, MgrMonthFilter, usePlanExpiryMap, PlanExpiry, useTrainerAckSummary, useRequestRoster, useRosterDistance, SESSION_MODALITIES, useMyMonthSessionBreakdown, usePilatesRunRate } from '../lib/trainerQueries';
 import { useMyClients, useClientDetail, useClientSessions, useClientPlans, useClientGoals, useClientReports, useClientBioAge, useClientProgression, useCreateWorkoutSession, useModalityGate, useWorkoutTemplates, useSaveWorkoutTemplate, useDeleteWorkoutTemplate, useClientHealthCheck, useSaveHealthData, useExerciseDb, useSessionExercises, uuidv4, HealthDataInput, useWeeklyProgressionAll, ackWeeklyReport, WeeklyProgressionRow, useApprovedPlansForLogging, usePartnerInfo, usePreviousExerciseData, checkDuplicateWorkoutToday, PlanExerciseRow, useClientDailyStats, useSaveClientHomeLocation } from '../lib/clientQueries';
 import * as Location from 'expo-location';
 import KvStorage from 'expo-sqlite/kv-store';
@@ -1270,6 +1270,131 @@ export function LeaderboardPreview({ title, sub, accent, unit, rows, onPress, li
 }
 
 /* ============ DASHBOARD ============ */
+/* ---------- Pilates Run Rate (pilates-head only; web PilatesRunRateCard port) ---------- */
+function useCountUp(target: number, dur = 700) {
+  const [val, setVal] = React.useState(0);
+  const anim = React.useRef(new Animated.Value(0)).current;
+  React.useEffect(() => {
+    const id = anim.addListener(({ value }) => setVal(value));
+    Animated.timing(anim, { toValue: target, duration: dur, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start();
+    return () => { anim.removeListener(id); };
+  }, [target]);
+  return val;
+}
+
+function PilatesRunRateCard() {
+  const istNow = new Date(Date.now() + 330 * 60_000);
+  const curY = istNow.getUTCFullYear(), curM = istNow.getUTCMonth();
+  const [ym, setYm] = React.useState({ y: curY, m: curM });
+  const [expanded, setExpanded] = React.useState(false);
+  const q = usePilatesRunRate(ym.y, ym.m, true);
+  const d = q.data;
+  const rate10 = useCountUp((d?.dailyRate ?? 0) * 10);
+  const proj = useCountUp(d?.projectedMonthTotal ?? 0);
+  if (q.isError) return null; // silent hide, web parity
+  if (q.isLoading && !d) {
+    return (
+      <View style={{ height: 86, borderRadius: 19, backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)' }} />
+    );
+  }
+  if (!d) return null;
+  const isNextDisabled = ym.y === curY && ym.m === curM;
+  const shift = (dir: number) => setYm((p) => {
+    const n = new Date(Date.UTC(p.y, p.m + dir, 1));
+    return { y: n.getUTCFullYear(), m: n.getUTCMonth() };
+  });
+  const progress = d.daysElapsed / Math.max(1, d.daysInMonth);
+  const tagline = !d.isCurrentMonth
+    ? `Final tally for ${d.monthLabel}`
+    : progress < 0.25 ? 'Strong start, keep the reformers moving'
+    : progress < 0.75 ? 'You are on rhythm, hold the pace'
+    : 'Finish strong, beast mode 🚀';
+  const progressPct = Math.min(100, d.projectedMonthTotal > 0 ? Math.round((d.completed / d.projectedMonthTotal) * 100) : 0);
+  const maxCompleted = d.breakdown[0]?.completed ?? 1;
+  const PIL = '#B78BFF';
+  return (
+    <Pressable onPress={() => setExpanded((e) => !e)}>
+      <View style={{ borderRadius: 19, overflow: 'hidden', borderWidth: 1, borderColor: hexA(PIL, 0.3) }}>
+        <LinearGradient colors={['rgba(40,26,58,0.62)', 'rgba(18,14,20,0.68)']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+          <LinearGradient colors={[hexA(PIL, 0.6), 'rgba(255,255,255,0.02)']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ height: 3 }} />
+          {/* collapsed strip */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 13, padding: 15 }}>
+            <View style={{ width: 48, height: 48, borderRadius: 17, backgroundColor: hexA(PIL, 0.13), borderWidth: 1, borderColor: hexA(PIL, 0.42), alignItems: 'center', justifyContent: 'center' }}>
+              <Icon name="activity" size={21} color={PIL} strokeWidth={2} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Mono style={{ fontSize: 8.5, letterSpacing: 1.2, color: hexA(PIL, 0.85) }}>PILATES RUN RATE</Mono>
+              <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 8, marginTop: 2 }}>
+                <Serif style={{ fontSize: 30, color: '#fff' }}>{(Math.round(rate10) / 10).toFixed(1)}</Serif>
+                <Body style={{ fontSize: 11, color: C.muted2, marginBottom: 6 }}>sessions/day</Body>
+                <View style={{ paddingVertical: 3, paddingHorizontal: 9, borderRadius: 999, backgroundColor: hexA(C.green, 0.1), borderWidth: 1, borderColor: hexA(C.green, 0.32), marginBottom: 6 }}>
+                  <Text style={{ fontFamily: F.bodySemi, fontSize: 9.5, color: C.green }}>≈ {Math.round(proj)} this month</Text>
+                </View>
+              </View>
+              {!expanded ? <Body style={{ fontSize: 10.5, color: C.muted3 }}>{d.monthLabel} · tap for the full picture</Body> : null}
+            </View>
+            <Icon name={expanded ? 'chevDown' : 'chevRight'} size={17} color={PIL} strokeWidth={2.3} />
+          </View>
+
+          {expanded ? (
+            <View style={{ paddingHorizontal: 15, paddingBottom: 16, gap: 12 }}>
+              {/* month switcher */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Pressable onPress={() => shift(-1)} hitSlop={8} style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon name="chevLeft" size={13} color={C.ink3} strokeWidth={2.3} />
+                </Pressable>
+                <Text style={{ flex: 1, textAlign: 'center', fontFamily: F.bodyBold, fontSize: 12.5, color: '#fff' }}>{d.monthLabel}</Text>
+                <Pressable onPress={() => !isNextDisabled && shift(1)} hitSlop={8} style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center', justifyContent: 'center', opacity: isNextDisabled ? 0.3 : 1 }}>
+                  <Icon name="chevRight" size={13} color={C.ink3} strokeWidth={2.3} />
+                </Pressable>
+              </View>
+              {/* hero stats */}
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                {([['COMPLETED', String(d.completed), PIL], ['DAILY RATE', d.dailyRate.toFixed(1), C.gold], ['PROJECTED', String(d.projectedMonthTotal), C.green]] as const).map(([lab, val, col]) => (
+                  <View key={lab} style={{ flex: 1, alignItems: 'center', paddingVertical: 11, borderRadius: 13, backgroundColor: hexA(col, 0.07), borderWidth: 1, borderColor: hexA(col, 0.25) }}>
+                    <Serif style={{ fontSize: 20, color: col }}>{val}</Serif>
+                    <Mono style={{ fontSize: 7, letterSpacing: 0.8, color: C.muted3, marginTop: 2 }}>{lab}</Mono>
+                  </View>
+                ))}
+              </View>
+              <Body style={{ fontSize: 11.5, color: hexA(PIL, 0.9), textAlign: 'center' }}>{tagline}</Body>
+              {/* pace vs projection */}
+              <View style={{ gap: 5 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                  <Mono style={{ fontSize: 8, letterSpacing: 1, color: C.muted3 }}>PACE VS PROJECTION</Mono>
+                  <Mono style={{ fontSize: 8, color: C.muted2 }}>{progressPct}% · day {d.daysElapsed}/{d.daysInMonth}</Mono>
+                </View>
+                <View style={{ height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.07)', overflow: 'hidden' }}>
+                  <LinearGradient colors={[PIL, hexA(PIL, 0.55)]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ width: `${progressPct}%`, height: 6, borderRadius: 3 }} />
+                </View>
+              </View>
+              {/* trainer breakdown — relative bars */}
+              {d.breakdown.length ? (
+                <View style={{ gap: 7 }}>
+                  <Mono style={{ fontSize: 8, letterSpacing: 1, color: C.muted3 }}>TRAINER BREAKDOWN</Mono>
+                  {d.breakdown.map((t, i) => (
+                    <View key={t.trainerId} style={{ gap: 3 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        <Text numberOfLines={1} style={{ flex: 1, fontFamily: i === 0 ? F.bodyBold : F.bodySemi, fontSize: 11.5, color: i === 0 ? '#fff' : C.ink3 }}>{t.trainerName}</Text>
+                        <Mono style={{ fontSize: 10, color: i === 0 ? PIL : C.muted2 }}>{t.completed}</Mono>
+                      </View>
+                      <View style={{ height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
+                        <View style={{ width: `${Math.max(3, Math.round((t.completed / Math.max(1, maxCompleted)) * 100))}%`, height: 4, borderRadius: 2, backgroundColor: i === 0 ? PIL : hexA(PIL, 0.45) }} />
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <Body style={{ fontSize: 11.5, color: C.muted3, textAlign: 'center' }}>No pilates sessions logged in {d.monthLabel}.</Body>
+              )}
+            </View>
+          ) : null}
+        </LinearGradient>
+      </View>
+    </Pressable>
+  );
+}
+
 export function Dashboard() {
   const { firstName, set, go, rosterOpen, openClient, openWorkout } = useStore();
   const [openSession, setOpenSession] = React.useState<number | null>(null);
@@ -1514,6 +1639,9 @@ export function Dashboard() {
           </Pressable>
         );
       })()}
+
+      {/* ---- Pilates Run Rate — pilates-head specialization only ---- */}
+      {dashCaps.data.isPilatesHead ? <PilatesRunRateCard /> : null}
 
       {/* Breakdown modal — per-client sessions this month */}
       <Modal visible={monthCardOpen} transparent animationType="slide" onRequestClose={() => setMonthCardOpen(false)}>
