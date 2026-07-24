@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { useAuth } from '../auth';
 import { safeDeviceTokenUpsert, resetDeviceTokenCache, setPendingDeviceToken, consumePendingDeviceToken, getLastKnownToken } from '../lib/pushToken';
+import { useStore } from '../store';
 
 /* ============ Push notifications — permission + FCM token → odds_device_tokens ============
    Render-nothing manager mounted in the authed shell. Lifecycle (web parity):
@@ -29,6 +30,33 @@ export function PushTokenManager() {
   const { session } = useAuth();
   const uid = session?.user?.id ?? null;
   const askedRef = React.useRef(false);
+  const { go, setOpenChat } = useStore();
+
+  // ---- Tap → deep link (all dashboards) ----
+  // Chat pushes carry conversation_id → open that exact thread in Messenger.
+  // Session/roster alerts land on Home (the roster lives there for every role).
+  const routeFromNotification = React.useCallback((data: any) => {
+    if (!data || typeof data !== 'object') return;
+    const convId = data.conversation_id ? String(data.conversation_id) : null;
+    if (convId) { setOpenChat(convId); go('messenger'); return; }
+    const t = String(data.type ?? '');
+    if (t === 'far_session_alert' || t === 'longevity_message' || data.route || data.session_id) go('home');
+  }, [go, setOpenChat]);
+  const coldStartHandled = React.useRef(false);
+  React.useEffect(() => {
+    const sub = Notifications.addNotificationResponseReceivedListener((resp) => {
+      routeFromNotification(resp.notification.request.content.data);
+    });
+    // Cold start: the app was launched BY tapping a notification — the listener
+    // above never fires for it, so replay the launching response once.
+    if (!coldStartHandled.current) {
+      coldStartHandled.current = true;
+      Notifications.getLastNotificationResponseAsync()
+        .then((resp) => { if (resp) routeFromNotification(resp.notification.request.content.data); })
+        .catch(() => {});
+    }
+    return () => sub.remove();
+  }, [routeFromNotification]);
 
   // Android notification channel (required for heads-up display on 8+).
   React.useEffect(() => {
