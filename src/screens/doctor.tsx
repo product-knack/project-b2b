@@ -300,7 +300,8 @@ function DoctorTodayRoster() {
   const doCancel = async () => {
     if (!cancelFor) return;
     try {
-      await cancelM.mutateAsync({ session_id: cancelFor.id, canceled_by: uid, cancellation_remark: remark.trim() || 'Cancelled by doctor' });
+      // canceled_by check constraint accepts only 'Client' | 'Trainer' — a uuid here is rejected by the DB
+      await cancelM.mutateAsync({ session_id: cancelFor.id, canceled_by: 'Trainer', cancellation_remark: remark.trim() || 'Cancelled by doctor' });
       setCancelFor(null); setRemark('');
     } catch { /* error shown below */ }
   };
@@ -1185,6 +1186,8 @@ export function DoctorRoster() {
   const reschedM = useRescheduleRosterSession();
   const [tab, setTab] = React.useState<'calendar' | 'reschedule' | 'list'>('calendar');
   const [cancelFor, setCancelFor] = React.useState<any | null>(null);
+  // DB check constraint session_schedule_canceled_by_check allows exactly 'Client' | 'Trainer' (live-verified) — web dialog contract
+  const [cancelBy, setCancelBy] = React.useState<'Client' | 'Trainer' | null>(null);
   const [cancelRemark, setCancelRemark] = React.useState('');
   const [reschedFor, setReschedFor] = React.useState<any | null>(null);
   const [reschedDate, setReschedDate] = React.useState('');
@@ -1233,7 +1236,7 @@ export function DoctorRoster() {
           <Pressable onPress={() => { setReschedFor(s); const d = new Date(s.scheduled_datetime); setReschedDate(d.toLocaleDateString('en-CA')); setReschedTime(d.toTimeString().slice(0, 5)); }} style={{ flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: 11, backgroundColor: hexA(C.blue, 0.1), borderWidth: 1, borderColor: hexA(C.blue, 0.3) }}>
             <Text style={{ fontFamily: F.bodySemi, fontSize: 11.5, color: '#A9BCFF' }}>Reschedule</Text>
           </Pressable>
-          <Pressable onPress={() => { setCancelFor(s); setCancelRemark(''); }} style={{ flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: 11, backgroundColor: hexA(C.red, 0.08), borderWidth: 1, borderColor: hexA(C.red, 0.28) }}>
+          <Pressable onPress={() => { setCancelFor(s); setCancelBy(null); setCancelRemark(''); }} style={{ flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: 11, backgroundColor: hexA(C.red, 0.08), borderWidth: 1, borderColor: hexA(C.red, 0.28) }}>
             <Text style={{ fontFamily: F.bodySemi, fontSize: 11.5, color: C.red }}>Cancel</Text>
           </Pressable>
         </View>
@@ -1394,16 +1397,37 @@ export function DoctorRoster() {
             <Pressable onPress={() => {}} style={{ borderRadius: 18, backgroundColor: '#141010', borderWidth: 1, borderColor: hexA(C.red, 0.3), padding: 18, gap: 12 }}>
               <Text style={{ fontFamily: F.bodyBold, fontSize: 15, color: '#fff' }}>Cancel Session</Text>
               <Body style={{ fontSize: 12, color: C.muted2 }}>{cancelFor?.client_name} · {cancelFor ? fmtAt(cancelFor.scheduled_datetime) : ''}</Body>
-              <TextInput value={cancelRemark} onChangeText={setCancelRemark} placeholder="Cancellation remark…" placeholderTextColor={C.muted3} multiline style={[inputStyle, { minHeight: 56, textAlignVertical: 'top' }]} />
+              <Mono style={{ fontSize: 9, letterSpacing: 1, color: C.mono2 }}>CANCELLED BY</Mono>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                {(['Client', 'Trainer'] as const).map((who) => {
+                  const active = cancelBy === who;
+                  return (
+                    <Pressable key={who} onPress={() => setCancelBy(who)} style={{ flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 11, backgroundColor: hexA(C.red, active ? 0.16 : 0.04), borderWidth: 1, borderColor: hexA(C.red, active ? 0.5 : 0.16) }}>
+                      <Text style={{ fontFamily: active ? F.bodyBold : F.bodySemi, fontSize: 12, color: active ? C.red : C.muted }}>{who === 'Trainer' ? 'Doctor' : who}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <Mono style={{ fontSize: 9, letterSpacing: 1, color: C.mono2 }}>REASON</Mono>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}>
+                {['Client Request', 'Doctor Unavailable', 'Scheduling Conflict', 'Emergency', 'Other'].map((r) => {
+                  const active = cancelRemark === r;
+                  return (
+                    <Pressable key={r} onPress={() => setCancelRemark(r)} style={{ paddingVertical: 7, paddingHorizontal: 12, borderRadius: 999, backgroundColor: active ? hexA(C.orange, 0.16) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: active ? hexA(C.orange, 0.5) : 'rgba(255,255,255,0.1)' }}>
+                      <Text style={{ fontFamily: active ? F.bodyBold : F.bodySemi, fontSize: 11.5, color: active ? C.orange : C.muted }}>{r}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
               <View style={{ flexDirection: 'row', gap: 9 }}>
                 <Pressable onPress={() => setCancelFor(null)} style={{ flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }}>
                   <Text style={{ fontFamily: F.bodySemi, fontSize: 12.5, color: C.ink }}>Keep</Text>
                 </Pressable>
-                <Pressable disabled={!cancelRemark.trim() || cancelM.isPending} onPress={() => {
+                <Pressable disabled={!cancelBy || !cancelRemark || cancelM.isPending} onPress={() => {
                   setErr(null);
-                  cancelM.mutate({ session_id: cancelFor.id, canceled_by: 'Head Doctor', cancellation_remark: cancelRemark.trim() }, { onSuccess: () => setCancelFor(null), onError: (e: any) => { setCancelFor(null); setErr(e?.message ?? 'Failed'); } });
-                }} style={{ flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: 12, backgroundColor: hexA(C.red, cancelRemark.trim() ? 0.16 : 0.06), borderWidth: 1, borderColor: hexA(C.red, cancelRemark.trim() ? 0.45 : 0.2) }}>
-                  <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: cancelRemark.trim() ? C.red : C.muted3 }}>{cancelM.isPending ? 'Cancelling…' : 'Cancel Session'}</Text>
+                  cancelM.mutate({ session_id: cancelFor.id, canceled_by: cancelBy!, cancellation_remark: cancelRemark }, { onSuccess: () => setCancelFor(null), onError: (e: any) => { setCancelFor(null); setErr(e?.message ?? 'Failed'); } });
+                }} style={{ flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: 12, backgroundColor: hexA(C.red, cancelBy && cancelRemark ? 0.16 : 0.06), borderWidth: 1, borderColor: hexA(C.red, cancelBy && cancelRemark ? 0.45 : 0.2) }}>
+                  <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: cancelBy && cancelRemark ? C.red : C.muted3 }}>{cancelM.isPending ? 'Cancelling…' : 'Cancel Session'}</Text>
                 </Pressable>
               </View>
             </Pressable>
