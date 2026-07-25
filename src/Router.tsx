@@ -66,6 +66,7 @@ import { AdminRevenueTracker, AdminRevenueSummary } from './screens/adminRevenue
 import { AnalyticsTracker } from './components/Analytics';
 import { ReplayShield } from './components/ReplayShield';
 import { AcademyDashboard } from './screens/academy';
+import { AcademyHome, AcademyQhpAnalyser } from './screens/academyHome';
 import { MarketingDashboard, MarketingClients, MarketingClientDetail, MarketingLeads, MarketingLeadAnalytics } from './screens/marketing';
 
 const SCREENS: Record<string, React.ComponentType> = {
@@ -157,7 +158,9 @@ const SCREENS: Record<string, React.ComponentType> = {
   'admin-revenue-tracker': AdminRevenueTracker,
   'admin-revenue-summary': AdminRevenueSummary,
   'marketing-dashboard': MarketingDashboard,
-  'academy-dashboard': AcademyDashboard,
+  'academy-dashboard': AcademyHome,
+  'academy-management': AcademyDashboard,
+  'academy-qhp-analyser': AcademyQhpAnalyser,
   'marketing-clients': MarketingClients,
   'marketing-client-detail': MarketingClientDetail,
   'marketing-leads': MarketingLeads,
@@ -181,7 +184,7 @@ const SENSITIVE_ROUTES = new Set([
   // Ops / Admin / Marketing surfaces that expose health data
   'ops-qhp-hold', 'admin-client-detail', 'marketing-client-detail', 'b2c-reports',
   // Academy — named students with attendance and exam marks (personal data)
-  'academy-dashboard',
+  'academy-dashboard', 'academy-management', 'academy-qhp-analyser',
   // Chats — client health details are routinely discussed in messages
   'messenger', 'client-threads',
 ]);

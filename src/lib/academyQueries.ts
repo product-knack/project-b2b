@@ -407,3 +407,161 @@ export function useUpdateAssessmentMeta() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['academy-assessments'] }),
   });
 }
+
+/* ============================================================================
+   QHP Analyser — turnaround between an assessment being COMPLETED and the
+   coach's final PDF landing in qhp_details. Read-only; all joining/aggregation
+   happens client-side (no RPC), scoped to assessments completed since the
+   2026-01-01 cutoff. RLS lets academy/admin read across every coach.
+   ========================================================================== */
+export const QHP_CUTOFF = '2026-01-01T00:00:00Z';
+export const QHP_OVERDUE_MS = 3 * 24 * 60 * 60 * 1000; // 3-day SLA for a pending PDF
+
+export type QhpAnalyserRow = {
+  id: string; clientName: string; coachName: string;
+  completedAt: string; completedMs: number;
+  status: 'done' | 'pending';
+  turnaroundMs: number | null;
+  isOverdue: boolean;
+  pdfStoragePath: string | null;
+  reviewStatus: string | null;
+};
+
+/* Supabase caps a request at 1000 rows — page until short. */
+async function fetchAll<T>(build: (from: number, to: number) => any): Promise<T[]> {
+  const out: T[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await build(from, from + 999);
+    if (error) throw new Error(error.message);
+    const chunk = (data ?? []) as T[];
+    out.push(...chunk);
+    if (chunk.length < 1000) break;
+  }
+  return out;
+}
+
+const personLabel = (p: any, fallback: string) => {
+  const n = `${p?.first_name ?? ''} ${p?.last_name ?? ''}`.replace(/\s+/g, ' ').trim();
+  return n || fallback;
+};
+
+export function useQhpAnalyser() {
+  return useQuery({
+    queryKey: ['academy-qhp-analyser'],
+    staleTime: 60_000,
+    queryFn: async (): Promise<QhpAnalyserRow[]> => {
+      const assessments = await fetchAll<any>((from, to) =>
+        supabase
+          .from('coach_assessment')
+          .select('id, completed, client_id, coach_id, clients:client_id (first_name, last_name), profiles:coach_id (first_name, last_name)')
+          .gte('completed', QHP_CUTOFF)
+          .not('client_id', 'is', null)
+          .not('completed', 'is', null)
+          .order('completed', { ascending: false })
+          .range(from, to)
+      );
+      if (!assessments.length) return [];
+      const ids = assessments.map((a) => a.id);
+      // Details are fetched in id-chunks so the IN() list never gets oversized.
+      const details: any[] = [];
+      for (let i = 0; i < ids.length; i += 300) {
+        const slice = ids.slice(i, i + 300);
+        const part = await fetchAll<any>((from, to) =>
+          supabase
+            .from('qhp_details')
+            .select('id, coach_assessment_id, updated_at, pdf_storage_path, pdf_filename, review_status')
+            .in('coach_assessment_id', slice)
+            .range(from, to)
+        );
+        details.push(...part);
+      }
+      // One canonical detail per assessment: a row WITH a stored PDF beats a
+      // metadata-only row; otherwise the most recently updated wins. (24 of the
+      // live assessments carry more than one detail row.)
+      const best = new Map<string, any>();
+      details.forEach((d) => {
+        if (!d.coach_assessment_id) return;
+        const cur = best.get(d.coach_assessment_id);
+        const better =
+          !cur ||
+          (!!d.pdf_storage_path && !cur.pdf_storage_path) ||
+          (!!d.pdf_storage_path === !!cur.pdf_storage_path &&
+            new Date(d.updated_at ?? 0).getTime() > new Date(cur.updated_at ?? 0).getTime());
+        if (better) best.set(d.coach_assessment_id, d);
+      });
+      const now = Date.now();
+      return assessments.map((a) => {
+        const d = best.get(a.id);
+        const completedMs = new Date(a.completed).getTime();
+        const done = !!d;
+        return {
+          id: a.id,
+          clientName: personLabel(a.clients, 'Unknown client'),
+          coachName: personLabel(a.profiles, 'Unknown coach'),
+          completedAt: a.completed,
+          completedMs,
+          status: done ? 'done' : 'pending',
+          turnaroundMs: done ? Math.max(0, new Date(d.updated_at ?? a.completed).getTime() - completedMs) : null,
+          isOverdue: !done && now - completedMs > QHP_OVERDUE_MS,
+          pdfStoragePath: d?.pdf_storage_path ?? null,
+          reviewStatus: d?.review_status ?? null,
+        } as QhpAnalyserRow;
+      });
+    },
+  });
+}
+
+/* Public URL for a stored QHP PDF (bucket: qhp-images). */
+export const qhpPdfUrl = (path: string) => supabase.storage.from('qhp-images').getPublicUrl(path).data.publicUrl;
+
+/* ---------- Dashboard action banners ---------- */
+export type QhpBanners = {
+  pendingHod: { id: string; clientName: string; coachName: string; at: string | null }[];
+  onHold: { id: string; clientName: string; coachName: string; at: string | null }[];
+  missing: { id: string; clientName: string; coachName: string; at: string }[];
+};
+export function useAcademyBanners() {
+  return useQuery({
+    queryKey: ['academy-banners'],
+    staleTime: 60_000,
+    queryFn: async (): Promise<QhpBanners> => {
+      const assessments = await fetchAll<any>((from, to) =>
+        supabase
+          .from('coach_assessment')
+          .select('id, completed, existing_client_assessment_data, new_client_assessment_data, clients:client_id (first_name, last_name), profiles:coach_id (first_name, last_name)')
+          .gte('completed', QHP_CUTOFF)
+          .not('client_id', 'is', null)
+          .not('completed', 'is', null)
+          .order('completed', { ascending: false })
+          .range(from, to)
+      );
+      const details = await fetchAll<any>((from, to) =>
+        supabase.from('qhp_details').select('id, coach_assessment_id, review_status, held_at, updated_at').range(from, to)
+      );
+      const byAssessment = new Map<string, any>();
+      details.forEach((d) => { if (d.coach_assessment_id && !byAssessment.has(d.coach_assessment_id)) byAssessment.set(d.coach_assessment_id, d); });
+      const aById = new Map(assessments.map((a) => [a.id, a]));
+      const label = (a: any) => ({
+        clientName: personLabel(a?.clients, 'Unknown client'),
+        coachName: personLabel(a?.profiles, 'Unknown coach'),
+      });
+      const fromDetails = (pred: (d: any) => boolean) =>
+        details.filter(pred).map((d) => {
+          const a = aById.get(d.coach_assessment_id);
+          return { id: d.id, ...label(a), at: d.updated_at ?? null };
+        });
+      // Live review_status values: pending_senior | pending_hod | fully_signed | on_hold.
+      const pendingHod = fromDetails((d) => d.review_status === 'pending_hod');
+      const onHold = fromDetails((d) => d.review_status === 'on_hold' || !!d.held_at);
+      // Missing: assessment completed WITH captured data but no report row at all.
+      const hasData = (r: any) => {
+        const ok = (v: any) => v && typeof v === 'object' && Object.keys(v).length > 0;
+        return ok(r.existing_client_assessment_data) || ok(r.new_client_assessment_data);
+      };
+      const missing = assessments
+        .filter((a) => !byAssessment.has(a.id) && hasData(a))
+        .map((a) => ({ id: a.id, ...label(a), at: a.completed as string }));
+      return { pendingHod, onHold, missing };
+    },
+  });
+}
