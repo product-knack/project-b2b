@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, Pressable, ScrollView, FlatList, Image, Modal, TextInput, Keyboard, Platform, PanResponder, Animated, Easing, Alert, ActivityIndicator, useWindowDimensions, Linking, AppState } from 'react-native';
 import { backSwipeLock } from '../gestureLock';
+import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { trackClientTab } from '../lib/amplitude';
 import { FeatureTour, TRAINER_TOUR, TourLauncher } from '../components/featureTour';
@@ -5044,7 +5045,8 @@ const PILATES_EQUIPMENT = ['Pilates Ring', 'Ball', 'Resistance Band', 'Brick']; 
 function RpeSlider({ value, onChange, colorFn, labelFn }: { value: number | null; onChange: (v: number) => void; colorFn: (n: number) => string; labelFn: (n: number) => string }) {
   const MIN = 1, MAX = 10;
   const wRef = React.useRef(0);
-  const leftRef = React.useRef(0); // track's absolute left edge (page X)
+  const leftRef = React.useRef(0);       // track's absolute left edge (page X)
+  const haveGeomRef = React.useRef(false); // geometry known for THIS gesture
   const viewRef = React.useRef<View>(null);
   const dragRef = React.useRef<number | null>(null);
   const onChangeRef = React.useRef(onChange);
@@ -5053,17 +5055,19 @@ function RpeSlider({ value, onChange, colorFn, labelFn }: { value: number | null
 
   const measure = () => {
     viewRef.current?.measureInWindow((x, _y, w) => {
-      if (w) { leftRef.current = x; wRef.current = w; }
+      if (w) { leftRef.current = x; wRef.current = w; haveGeomRef.current = true; }
     });
   };
   const setFromAbsX = (absX: number) => {
     const w = wRef.current;
-    if (!w) return;
+    if (!w || !haveGeomRef.current) return;
     const clamped = Math.max(0, Math.min(1, (absX - leftRef.current) / w));
     // Whole-number steps — training_sessions.rpe is an integer column (web slider step=1).
     const stepped = Math.max(MIN, Math.min(MAX, Math.round(MIN + clamped * (MAX - MIN))));
     if (stepped !== dragRef.current) {
       dragRef.current = stepped;
+      // A tick per step makes the drag feel physical and instantly responsive.
+      Haptics.selectionAsync().catch(() => {});
       setDrag(stepped); // re-renders only the slider, not the whole form
     }
   };
@@ -5077,10 +5081,26 @@ function RpeSlider({ value, onChange, colorFn, labelFn }: { value: number | null
     PanResponder.create({
       // Only respond to an actual drag — a plain tap must NOT change the value.
       onStartShouldSetPanResponder: () => false,
-      onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dx) > 2,
-      onMoveShouldSetPanResponderCapture: (_e, g) => Math.abs(g.dx) > 2,
+      // 1px is enough: the parent's back-swipe is locked on touch, so claiming the
+      // gesture early is safe and removes the dead zone at the start of a drag.
+      onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dx) > 1,
+      onMoveShouldSetPanResponderCapture: (_e, g) => Math.abs(g.dx) > 1,
       onPanResponderTerminationRequest: () => false,
-      onPanResponderGrant: () => { backSwipeLock.locked = true; },
+      onPanResponderGrant: (e) => {
+        backSwipeLock.locked = true;
+        // Derive the track's page-left SYNCHRONOUSLY from the touch itself
+        // (pageX - locationX). measureInWindow is async, so on the FIRST drag its
+        // callback hadn't landed yet and the opening moves were computed against a
+        // stale/zero left edge — that was the initial jump/stutter. Decorative
+        // children are pointerEvents="none", so locationX is always relative to
+        // this container.
+        const { pageX, locationX } = e.nativeEvent as any;
+        if (typeof pageX === 'number' && typeof locationX === 'number') {
+          leftRef.current = pageX - locationX;
+          if (wRef.current) haveGeomRef.current = true;
+        }
+        measure(); // refresh for the rest of the gesture (handles scrolled layouts)
+      },
       // Use absolute screen X against the measured track edge — robust regardless
       // of which child element the touch landed on.
       onPanResponderMove: (_e, g) => setFromAbsX(g.moveX),
@@ -5097,14 +5117,16 @@ function RpeSlider({ value, onChange, colorFn, labelFn }: { value: number | null
     <View
       ref={viewRef}
       style={{ paddingVertical: 16 }}
-      onLayout={measure}
+      // Width comes straight off the layout event (synchronous) — no waiting on
+      // measureInWindow before the first drag can be computed.
+      onLayout={(e) => { wRef.current = e.nativeEvent.layout.width; measure(); }}
       onTouchStart={() => { backSwipeLock.locked = true; measure(); }}
       onTouchEnd={() => { backSwipeLock.locked = false; }}
       onTouchCancel={() => { backSwipeLock.locked = false; }}
       {...pan.panHandlers}
     >
       {/* Live readout — updates while dragging */}
-      <View style={{ alignItems: 'center', marginBottom: 14 }}>
+      <View pointerEvents="none" style={{ alignItems: 'center', marginBottom: 14 }}>
         {has ? (
           <>
             <Serif style={{ fontSize: 34, color }}>{val}<Text style={{ fontSize: 15, color: C.muted2 }}> /10</Text></Serif>
@@ -5114,7 +5136,9 @@ function RpeSlider({ value, onChange, colorFn, labelFn }: { value: number | null
           <Serif style={{ fontSize: 22, color: C.muted3 }}>Drag to set</Serif>
         )}
       </View>
-      <View style={{ height: 10, borderRadius: 5, backgroundColor: 'rgba(255,255,255,0.09)', justifyContent: 'center' }}>
+      {/* Decorative only: pointerEvents="none" keeps every touch on the container
+          above, so locationX (and therefore the track's left edge) is always exact. */}
+      <View pointerEvents="none" style={{ height: 10, borderRadius: 5, backgroundColor: 'rgba(255,255,255,0.09)', justifyContent: 'center' }}>
         {Array.from({ length: 10 }, (_, i) => i).map((i) => (
           <View key={i} style={{ position: 'absolute', left: `${(i / 9) * 100}%`, marginLeft: i === 0 ? 0 : i === 9 ? -2 : -1, width: 2, height: 10, backgroundColor: 'rgba(255,255,255,0.14)' }} />
         ))}
