@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, Pressable, ScrollView, Image, Modal, TextInput, Keyboard, Platform, PanResponder, Animated, Easing, Alert, ActivityIndicator, useWindowDimensions, Linking } from 'react-native';
+import { View, Text, Pressable, ScrollView, FlatList, Image, Modal, TextInput, Keyboard, Platform, PanResponder, Animated, Easing, Alert, ActivityIndicator, useWindowDimensions, Linking, AppState } from 'react-native';
 import { backSwipeLock } from '../gestureLock';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { trackClientTab } from '../lib/amplitude';
@@ -5491,21 +5491,40 @@ export function Workout() {
       } catch { /* corrupt draft — ignore */ }
     }).catch(() => {});
   }, [draftKey]);
+  // Newest form state, kept in a ref so a flush can serialise it WITHOUT this
+  // render having to stringify anything (assignment only — no work per keystroke).
+  const draftStateRef = React.useRef<any>(null);
+  draftStateRef.current = { sessionName, exercises, remark, rpe, modality, customModalityName };
+  const draftKeyRef = React.useRef<string | null>(null);
+  draftKeyRef.current = draftKey;
+  const draftDirtyRef = React.useRef(false);
+  const flushDraft = React.useCallback(() => {
+    if (!draftDirtyRef.current || !draftKeyRef.current) return;
+    draftDirtyRef.current = false;
+    KvStorage.setItem(draftKeyRef.current, JSON.stringify(draftStateRef.current)).catch(() => {});
+  }, []);
   React.useEffect(() => {
     if (!draftKey || done || editingOutboxId) return; // edits live in the outbox item, not the draft
     const meaningful = exercises.some((e) => e.name.trim()) || sessionName.trim() || remark.trim();
     if (!meaningful) return; // never overwrite a good draft with an empty form
-    // SQLite draft (expo-sqlite kv-store): debounced to coalesce keystrokes, but the
-    // cleanup FLUSHES the pending write instead of dropping it — an unmount, crash
-    // or app kill can lose at most nothing (the newest state is written on the way
-    // out). This is the "never lose an entered value" guarantee.
-    const payload = JSON.stringify({ sessionName, exercises, remark, rpe, modality, customModalityName });
-    let written = false;
-    const write = () => { if (!written) { written = true; KvStorage.setItem(draftKey, payload).catch(() => {}); } };
-    const t = setTimeout(write, 250);
-    return () => { clearTimeout(t); write(); };
-  }, [draftKey, sessionName, exercises, remark, rpe, modality, customModalityName, done]);
-  const clearDraft = () => { if (draftKey) KvStorage.removeItem(draftKey).catch(() => {}); };
+    // SQLite draft (expo-sqlite kv-store), TRULY debounced: the cleanup only cancels
+    // the pending timer — it must NOT write, or every keystroke would pay a full
+    // JSON.stringify + SQLite write (that defeated the debounce and was the source
+    // of the form's input/tap lag). The "never lose a value" guarantee is kept by
+    // the unmount + background flushes below, which write the newest state once.
+    draftDirtyRef.current = true;
+    const t = setTimeout(flushDraft, 400);
+    return () => clearTimeout(t);
+  }, [draftKey, sessionName, exercises, remark, rpe, modality, customModalityName, done, flushDraft]);
+  // Crash/kill safety net: flush the pending draft on unmount and whenever the app
+  // leaves the foreground — once each, never per keystroke.
+  React.useEffect(() => {
+    const sub = AppState.addEventListener('change', (s) => { if (s !== 'active') flushDraft(); });
+    return () => { sub.remove(); flushDraft(); };
+  }, [flushDraft]);
+  // Clearing also drops any pending flush, so a saved log can't be resurrected
+  // by the unmount/background writer.
+  const clearDraft = () => { draftDirtyRef.current = false; if (draftKey) KvStorage.removeItem(draftKey).catch(() => {}); };
 
   const hasValidContent = isActivityModality
     ? exercises.some((e) => e.name.trim() && e.completed)
@@ -6558,10 +6577,22 @@ export function Workout() {
               const exactMatch = (exDbQ.data ?? []).some((e) => e.name.toLowerCase() === q);
               const addedCounts: Record<string, number> = {};
               exercises.forEach((e) => { const k = e.name.trim().toLowerCase(); addedCounts[k] = (addedCounts[k] ?? 0) + 1; });
+              // Virtualized: the DB holds 100+ exercises per modality and rendering
+              // them all at once made the picker slow to open and janky to search.
+              // Same rows, same look — only windowed.
               return (
-                <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: (kbH > 0 ? kbH : insets.bottom) + 96, gap: 8 }}>
-                  {q && !exactMatch ? (
-                    <Pressable onPress={() => { setCustomName(exSearch.trim()); setCustomMeasure('reps'); setCustomFormOpen(true); }} style={{ flexDirection: 'row', alignItems: 'center', gap: 11, padding: 14, borderRadius: 13, backgroundColor: hexA(C.orange, 0.08), borderWidth: 1, borderColor: hexA(C.orange, 0.3) }}>
+                <FlatList
+                  data={exDbQ.isLoading ? [] : list}
+                  keyExtractor={(e: any) => e.name}
+                  showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled"
+                  contentContainerStyle={{ paddingBottom: (kbH > 0 ? kbH : insets.bottom) + 96, gap: 8 }}
+                  initialNumToRender={12}
+                  maxToRenderPerBatch={12}
+                  windowSize={9}
+                  removeClippedSubviews
+                  ListHeaderComponent={q && !exactMatch ? (
+                    <Pressable onPress={() => { setCustomName(exSearch.trim()); setCustomMeasure('reps'); setCustomFormOpen(true); }} style={{ flexDirection: 'row', alignItems: 'center', gap: 11, padding: 14, borderRadius: 13, backgroundColor: hexA(C.orange, 0.08), borderWidth: 1, borderColor: hexA(C.orange, 0.3), marginBottom: 8 }}>
                       <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: hexA(C.orange, 0.14), alignItems: 'center', justifyContent: 'center' }}>
                         <Icon name="plus" size={16} color={C.orange} strokeWidth={2.6} />
                       </View>
@@ -6571,16 +6602,15 @@ export function Workout() {
                       </View>
                     </Pressable>
                   ) : null}
-
-                  {exDbQ.isLoading ? (
+                  ListEmptyComponent={exDbQ.isLoading ? (
                     <Body style={{ color: C.muted2, textAlign: 'center', paddingVertical: 24 }}>Loading exercises…</Body>
-                  ) : list.length === 0 && !q ? (
+                  ) : !q ? (
                     <Body style={{ color: C.muted2, textAlign: 'center', paddingVertical: 24 }}>No saved exercises for {modLabel}. Type a name above to add a custom one.</Body>
-                  ) : (
-                    list.map((e) => {
-                      const added = addedCounts[e.name.trim().toLowerCase()] ?? 0;
-                      return (
-                      <Pressable key={e.name} onPress={() => addExercise(e.name, e.measurement_type === 'duration' ? 'duration' : 'reps', 'Constant', e.muscle_group ?? undefined)} style={{ flexDirection: 'row', alignItems: 'center', gap: 11, padding: 13, borderRadius: 13, backgroundColor: added ? hexA(C.green, 0.07) : 'rgba(255,255,255,0.03)', borderWidth: 1, borderColor: added ? hexA(C.green, 0.3) : 'rgba(255,255,255,0.07)' }}>
+                  ) : null}
+                  renderItem={({ item: e }: { item: any }) => {
+                    const added = addedCounts[e.name.trim().toLowerCase()] ?? 0;
+                    return (
+                      <Pressable onPress={() => addExercise(e.name, e.measurement_type === 'duration' ? 'duration' : 'reps', 'Constant', e.muscle_group ?? undefined)} style={{ flexDirection: 'row', alignItems: 'center', gap: 11, padding: 13, borderRadius: 13, backgroundColor: added ? hexA(C.green, 0.07) : 'rgba(255,255,255,0.03)', borderWidth: 1, borderColor: added ? hexA(C.green, 0.3) : 'rgba(255,255,255,0.07)' }}>
                         <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: hexA(C.orange, 0.1), alignItems: 'center', justifyContent: 'center' }}>
                           <Icon name={e.measurement_type === 'duration' ? 'clock' : 'dumbbell'} size={15} color={C.orange} strokeWidth={1.9} />
                         </View>
@@ -6597,10 +6627,9 @@ export function Workout() {
                           <Icon name="plus" size={16} color={C.muted} strokeWidth={2.4} />
                         )}
                       </Pressable>
-                      );
-                    })
-                  )}
-                </ScrollView>
+                    );
+                  }}
+                />
               );
             })()}
 
