@@ -405,6 +405,7 @@ export const adminNav: NavGroup[] = [
     { label: 'Performance', icon: 'trend', route: 'admin-performance' },
     { label: 'Certifications', icon: 'award', route: 'admin-certifications' },
     { label: 'Tools', icon: 'grid', route: 'admin-tools' },
+    { label: 'Academy', icon: 'award', route: 'academy-dashboard' },
     { label: 'Messenger', icon: 'chat', route: 'messenger' },
     { label: 'Client Threads', icon: 'atSign', route: 'client-threads' },
   ] },
@@ -418,6 +419,13 @@ export const marketingNav: NavGroup[] = [
     { label: 'Influencer Clients', icon: 'users', route: 'marketing-clients' },
     { label: 'Leads', icon: 'userPlus', route: 'marketing-leads' },
     { label: 'Lead Analytics', icon: 'chart', route: 'marketing-lead-analytics' },
+    { label: 'Messenger', icon: 'chat', route: 'messenger' },
+  ] },
+];
+
+export const academyNav: NavGroup[] = [
+  { label: 'Academy', items: [
+    { label: 'Dashboard', icon: 'grid', route: 'academy-dashboard' },
     { label: 'Messenger', icon: 'chat', route: 'messenger' },
   ] },
 ];

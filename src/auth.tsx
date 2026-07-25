@@ -20,7 +20,7 @@ export const useAuth = () => useContext(Ctx);
    the CRM workspace; other STAFF roles land on the trainer workspace. Client
    accounts are not staff — they can't use this app at all. */
 const appRoleOf = (dbRole: string | null | undefined): Role | null =>
-  dbRole === 'client' || !dbRole ? null : dbRole === 'crm' ? 'crm' : dbRole === 'coach' ? 'coach' : dbRole === 'ops' ? 'ops' : dbRole === 'admin' ? 'admin' : dbRole === 'doctor' ? 'doctor' : dbRole === 'marketing' ? 'marketing' : 'trainer';
+  dbRole === 'client' || !dbRole ? null : dbRole === 'crm' ? 'crm' : dbRole === 'coach' ? 'coach' : dbRole === 'ops' ? 'ops' : dbRole === 'admin' ? 'admin' : dbRole === 'doctor' ? 'doctor' : dbRole === 'marketing' ? 'marketing' : dbRole === 'academy' ? 'academy' : 'trainer';
 
 async function fetchRole(userId: string): Promise<{ app: Role | null; db: string | null }> {
   const { data } = await supabase.from('profiles').select('role').eq('id', userId).maybeSingle();

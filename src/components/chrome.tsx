@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { C, F, hexA, ORANGE_GRAD } from '../theme';
 import { Icon, MenuIcon, IconName } from '../icons';
 import { useStore } from '../store';
-import { trainerNav, crmNav, coachNav, opsNav, adminNav, doctorNav, marketingNav, bottomTabs, tabMap } from '../data';
+import { trainerNav, crmNav, coachNav, opsNav, adminNav, doctorNav, marketingNav, academyNav, bottomTabs, tabMap } from '../data';
 import { OddsWordmark } from './oddsAi';
 import { useAuth } from '../auth';
 import { useSidebarProfile, useNavBadges } from '../lib/navQueries';
@@ -133,7 +133,7 @@ export function Drawer() {
   const { drawerOpen, closeDrawer, role, route, go, set } = useStore();
   const { signOut, session } = useAuth();
   const insets = useSafeAreaInsets();
-  const groups = role === 'crm' ? crmNav : role === 'coach' ? coachNav : role === 'ops' ? opsNav : role === 'admin' ? adminNav : role === 'doctor' ? doctorNav : role === 'marketing' ? marketingNav : trainerNav;
+  const groups = role === 'crm' ? crmNav : role === 'coach' ? coachNav : role === 'ops' ? opsNav : role === 'admin' ? adminNav : role === 'doctor' ? doctorNav : role === 'marketing' ? marketingNav : role === 'academy' ? academyNav : trainerNav;
   const profile = useSidebarProfile();
   const badges = useNavBadges();
   const caps = useMyCapabilities();

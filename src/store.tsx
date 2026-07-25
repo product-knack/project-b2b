@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useMemo, useState, useCallback } from 'react';
 
-export type Role = 'trainer' | 'crm' | 'coach' | 'ops' | 'admin' | 'doctor' | 'marketing';
+export type Role = 'trainer' | 'crm' | 'coach' | 'ops' | 'admin' | 'doctor' | 'marketing' | 'academy';
 export type SheetKind = 'ack' | 'leave' | 'schedule' | null;
 export type CrmDialog =
   | { kind: 'approve'; id: string }

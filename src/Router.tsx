@@ -65,6 +65,7 @@ import { AdminChurn } from './screens/adminChurn';
 import { AdminRevenueTracker, AdminRevenueSummary } from './screens/adminRevenue';
 import { AnalyticsTracker } from './components/Analytics';
 import { ReplayShield } from './components/ReplayShield';
+import { AcademyDashboard } from './screens/academy';
 import { MarketingDashboard, MarketingClients, MarketingClientDetail, MarketingLeads, MarketingLeadAnalytics } from './screens/marketing';
 
 const SCREENS: Record<string, React.ComponentType> = {
@@ -156,6 +157,7 @@ const SCREENS: Record<string, React.ComponentType> = {
   'admin-revenue-tracker': AdminRevenueTracker,
   'admin-revenue-summary': AdminRevenueSummary,
   'marketing-dashboard': MarketingDashboard,
+  'academy-dashboard': AcademyDashboard,
   'marketing-clients': MarketingClients,
   'marketing-client-detail': MarketingClientDetail,
   'marketing-leads': MarketingLeads,
@@ -178,6 +180,8 @@ const SENSITIVE_ROUTES = new Set([
   'coach-assessments', 'coach-client-overview', 'coach-progression',
   // Ops / Admin / Marketing surfaces that expose health data
   'ops-qhp-hold', 'admin-client-detail', 'marketing-client-detail', 'b2c-reports',
+  // Academy — named students with attendance and exam marks (personal data)
+  'academy-dashboard',
   // Chats — client health details are routinely discussed in messages
   'messenger', 'client-threads',
 ]);
@@ -351,6 +355,7 @@ export function Router() {
         : s.role === 'admin' ? 'admin-dashboard'
         : s.role === 'doctor' ? 'doctor-dashboard'
         : s.role === 'marketing' ? 'marketing-dashboard'
+        : s.role === 'academy' ? 'academy-dashboard'
         : 'dashboard';
       if (s.route === home || s.route === 'signin') return false; // default: background the app
       back(); // pops history, or falls back to the dashboard when the stack is empty
@@ -373,7 +378,7 @@ export function Router() {
         go('messenger', true);
         return;
       }
-      go(accountRole === 'crm' ? 'crm-dashboard' : accountRole === 'coach' ? 'coach-dashboard' : accountRole === 'ops' ? 'ops-dashboard' : accountRole === 'admin' ? 'admin-dashboard' : accountRole === 'doctor' ? 'doctor-dashboard' : accountRole === 'marketing' ? 'marketing-dashboard' : 'dashboard', true);
+      go(accountRole === 'crm' ? 'crm-dashboard' : accountRole === 'coach' ? 'coach-dashboard' : accountRole === 'ops' ? 'ops-dashboard' : accountRole === 'admin' ? 'admin-dashboard' : accountRole === 'doctor' ? 'doctor-dashboard' : accountRole === 'marketing' ? 'marketing-dashboard' : accountRole === 'academy' ? 'academy-dashboard' : 'dashboard', true);
     }
   }, [loading, session, accountRole, launchChecked]);
 
