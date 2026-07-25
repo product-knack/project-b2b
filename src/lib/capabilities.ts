@@ -33,6 +33,8 @@ export type Capabilities = {
   isTrainerManager: boolean;
   /* CRM Escalations page (web: role_specialization includes 'crm_manager') */
   isCrmManager: boolean;
+  /* Senior Analyst client overview (web: profiles.senior_analyst) */
+  seniorAnalyst: boolean;
   /* Pilates Run Rate card (web: role_specialization includes 'pilates-head') */
   isPilatesHead: boolean;
 };
@@ -50,6 +52,7 @@ const EMPTY: Capabilities = {
   isManager: false,
   isTrainerManager: false,
   isCrmManager: false,
+  seniorAnalyst: false,
   isPilatesHead: false,
 };
 
@@ -63,7 +66,7 @@ export function useMyCapabilities(): { data: Capabilities; isLoading: boolean } 
     queryFn: async (): Promise<Capabilities> => {
       const { data, error } = await supabase
         .from('profiles')
-        .select('can_schedule_assessments_for_others, can_conduct_assessments, can_view_all_assessments, can_view_all_trainers, workout_analysist, workout_compliances_analyst, qhp_report_creator, junior_researcher, managers, role_specialization')
+        .select('can_schedule_assessments_for_others, can_conduct_assessments, can_view_all_assessments, can_view_all_trainers, workout_analysist, workout_compliances_analyst, qhp_report_creator, junior_researcher, managers, role_specialization, senior_analyst')
         .eq('id', uid)
         .maybeSingle();
       if (error) throw new Error(error.message);
@@ -81,6 +84,7 @@ export function useMyCapabilities(): { data: Capabilities; isLoading: boolean } 
         isManager: (data as any)?.managers === true,
         isTrainerManager: Array.isArray(spec) ? spec.includes('trainer-manager') : typeof spec === 'string' && spec.includes('trainer-manager'),
         isCrmManager: Array.isArray(spec) ? spec.includes('crm_manager') : typeof spec === 'string' && spec.includes('crm_manager'),
+        seniorAnalyst: (data as any)?.senior_analyst === true,
         isPilatesHead: Array.isArray(spec) ? spec.includes('pilates-head') : typeof spec === 'string' && spec.includes('pilates-head'),
       };
     },

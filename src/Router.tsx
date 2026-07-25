@@ -68,6 +68,7 @@ import { ReplayShield } from './components/ReplayShield';
 import { AcademyDashboard } from './screens/academy';
 import { AcademyHome, AcademyQhpAnalyser } from './screens/academyHome';
 import { AcademyDailyGoals, AcademyWeeklySummary } from './screens/academyAnalysers';
+import { AcademySeniorAnalyst } from './screens/academySeniorAnalyst';
 import { MarketingDashboard, MarketingClients, MarketingClientDetail, MarketingLeads, MarketingLeadAnalytics } from './screens/marketing';
 
 const SCREENS: Record<string, React.ComponentType> = {
@@ -164,6 +165,7 @@ const SCREENS: Record<string, React.ComponentType> = {
   'academy-qhp-analyser': AcademyQhpAnalyser,
   'academy-daily-goals': AcademyDailyGoals,
   'academy-weekly-summary': AcademyWeeklySummary,
+  'academy-senior-analyst': AcademySeniorAnalyst,
   'marketing-clients': MarketingClients,
   'marketing-client-detail': MarketingClientDetail,
   'marketing-leads': MarketingLeads,
@@ -187,7 +189,7 @@ const SENSITIVE_ROUTES = new Set([
   // Ops / Admin / Marketing surfaces that expose health data
   'ops-qhp-hold', 'admin-client-detail', 'marketing-client-detail', 'b2c-reports',
   // Academy — named students with attendance and exam marks (personal data)
-  'academy-dashboard', 'academy-management', 'academy-qhp-analyser', 'academy-daily-goals', 'academy-weekly-summary',
+  'academy-dashboard', 'academy-management', 'academy-qhp-analyser', 'academy-daily-goals', 'academy-weekly-summary', 'academy-senior-analyst',
   // Chats — client health details are routinely discussed in messages
   'messenger', 'client-threads',
 ]);

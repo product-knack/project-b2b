@@ -8,6 +8,7 @@ import { Page, TitleBlock, HScroll, BackLink } from './common';
 import { PdfPreview } from '../components/PdfPreview';
 import { useStore } from '../store';
 import { useAcademyBanners, useQhpAnalyser, qhpPdfUrl, QHP_OVERDUE_MS, QhpAnalyserRow } from '../lib/academyQueries';
+import { useMyCapabilities } from '../lib/capabilities';
 
 /* ============================================================================
    Academy Admin home — a lightweight launcher: three data-driven action
@@ -26,10 +27,16 @@ const agoDays = (iso: string) => Math.floor((Date.now() - new Date(iso).getTime(
 export function AcademyHome() {
   const { go } = useStore();
   const q = useAcademyBanners();
+  const caps = useMyCapabilities();
   const b = q.data;
 
   const TOOLS: { label: string; sub: string; icon: any; route: string; colors: [string, string] }[] = [
+    // Senior Analyst and Workout Plans Analyst are capability-gated exactly like
+    // the web dashboard (profiles.senior_analyst / workout_compliances_analyst).
+    ...(caps.data.seniorAnalyst ? [{ label: 'Senior Analyst', sub: 'Client overview by goal', icon: 'trend' as any, route: 'academy-senior-analyst', colors: ['#2E5E6B', '#1A343C'] as [string, string] }] : []),
     { label: 'QHP Analyser', sub: 'Completion to PDF turnaround', icon: 'chart', route: 'academy-qhp-analyser', colors: ['#2B4A7E', '#1B2A46'] },
+    ...(caps.data.workoutComplianceAnalyst ? [{ label: 'Workout Plans Analyst', sub: 'Plan compliance by client', icon: 'activity' as any, route: 'plans-analyst', colors: ['#5E2E6B', '#341A3C'] as [string, string] }] : []),
+    { label: 'Progression', sub: 'Client progression metrics', icon: 'chart', route: 'coach-progression', colors: ['#2E6B6B', '#1A3C3C'] },
     { label: 'Daily Goals Analyser', sub: 'Trainer logging compliance', icon: 'target', route: 'academy-daily-goals', colors: ['#6B4A2E', '#3C2A1A'] },
     { label: 'Weekly Summary', sub: 'Who reads the AI summary', icon: 'calendar', route: 'academy-weekly-summary', colors: ['#2E6B5A', '#1A3C33'] },
     { label: 'Academy Management', sub: 'Students, batches, attendance', icon: 'award', route: 'academy-management', colors: ['#3D2E6B', '#221A3C'] },
