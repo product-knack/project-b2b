@@ -66,11 +66,19 @@ export function SignIn() {
   const { signIn } = useAuth();
   const [email, setEmail] = React.useState<string>('');
   const [password, setPassword] = React.useState<string>('');
-  // Role dropdown — cosmetic/UX only (NO credential prefill): the workspace is
-  // still decided by the ACCOUNT's real profiles.role after authentication.
-  const ROLE_OPTS = [['crm', 'CRM', 'userCircle'], ['trainer', 'Trainer', 'dumbbell'], ['coach', 'Coach', 'crown'], ['ops', 'Operations', 'layers'], ['admin', 'Admin', 'shield'], ['doctor', 'Doctor', 'heart'], ['marketing', 'Marketing', 'trend']] as const;
+  // Role dropdown — the workspace is still decided by the ACCOUNT's real
+  // profiles.role after authentication; picking a role only prefills the form.
+  const ROLE_OPTS = [['crm', 'CRM', 'userCircle'], ['trainer', 'Trainer', 'dumbbell'], ['coach', 'Coach', 'crown'], ['ops', 'Operations', 'layers'], ['admin', 'Admin', 'shield'], ['doctor', 'Doctor', 'heart'], ['marketing', 'Marketing', 'trend'], ['academy', 'Academy', 'award']] as const;
+  // TESTING ONLY — remove before a public release (these ship inside the binary).
+  const TEST_LOGINS: Partial<Record<(typeof ROLE_OPTS)[number][0], { email: string; password: string }>> = {
+    academy: { email: 'prateekbarbora@oddsfitness.com', password: 'Prateek@123' },
+  };
   const [fill, setFill] = React.useState<(typeof ROLE_OPTS)[number][0]>('trainer');
-  const pickRole = (id: (typeof ROLE_OPTS)[number][0]) => setFill(id);
+  const pickRole = (id: (typeof ROLE_OPTS)[number][0]) => {
+    setFill(id);
+    const t = TEST_LOGINS[id];
+    if (t) { setEmail(t.email); setPassword(t.password); }
+  };
   const [rolePickerOpen, setRolePickerOpen] = React.useState(false);
   const [showPw, setShowPw] = React.useState(false);
   const [authErr, setAuthErr] = React.useState<string | null>(null);
