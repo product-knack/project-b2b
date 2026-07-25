@@ -243,6 +243,13 @@ function ScreenHost({ route }: { route: string }) {
   const canBackRef = useRef(canGoBack);
   canBackRef.current = canGoBack;
 
+  // Screens where the edge swipe-back is DISABLED — long data-entry forms where an
+  // accidental horizontal drag must never navigate away mid-entry. The on-screen
+  // back button (and the hardware back button) remain the way out.
+  const NO_SWIPE_BACK = React.useMemo(() => new Set(['workout']), []);
+  const noSwipeRef = useRef(false);
+  noSwipeRef.current = NO_SWIPE_BACK.has(route);
+
   const pan = useRef(
     PanResponder.create({
       // No capture phase here: horizontal ScrollViews (tab rows, chip rows) must win
@@ -251,7 +258,7 @@ function ScreenHost({ route }: { route: string }) {
       // Rightward swipes only (standard back gesture) — leftward drags stay inert so
       // horizontal finger travel over lists/tabs can't accidentally change the page.
       onMoveShouldSetPanResponder: (_e, g) =>
-        !backSwipeLock.locked && (canBackRef.current || !!backOverride.handler) && g.dx > 12 && Math.abs(g.dx) > Math.abs(g.dy) * 1.3,
+        !noSwipeRef.current && !backSwipeLock.locked && (canBackRef.current || !!backOverride.handler) && g.dx > 12 && Math.abs(g.dx) > Math.abs(g.dy) * 1.3,
       onPanResponderMove: (_e, g) => drag.setValue(Math.max(0, g.dx)),
       onPanResponderRelease: (_e, g) => {
         if (g.dx > 48 || g.vx > 0.3) {
