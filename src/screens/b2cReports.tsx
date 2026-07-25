@@ -295,9 +295,13 @@ function BloodTab() {
 }
 
 export function B2cReports() {
-  const { session } = useAuth();
+  const { session, dbRole } = useAuth();
   const [tab, setTab] = React.useState<'qhp' | 'blood'>('qhp');
-  if (session?.user?.id !== B2C_REPORTS_UID) {
+  // The original single-UID gate blocked the Academy workspace, which links this
+  // page from its toolkit. Academy/admin accounts already have RLS read access to
+  // qhp_details, B2C clients and health_reports (live-verified), so they're allowed.
+  const allowed = session?.user?.id === B2C_REPORTS_UID || dbRole === 'academy' || dbRole === 'admin' || dbRole === 'super_admin';
+  if (!allowed) {
     return (
       <Page gap={14}>
         <TitleBlock title="B2C Reports" sub="Academy" />

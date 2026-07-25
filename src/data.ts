@@ -427,6 +427,8 @@ export const academyNav: NavGroup[] = [
   { label: 'Academy', items: [
     { label: 'Dashboard', icon: 'grid', route: 'academy-dashboard' },
     { label: 'QHP Analyser', icon: 'chart', route: 'academy-qhp-analyser' },
+    { label: 'Daily Goals', icon: 'target', route: 'academy-daily-goals' },
+    { label: 'Weekly Summary', icon: 'calendar', route: 'academy-weekly-summary' },
     { label: 'Academy Management', icon: 'award', route: 'academy-management' },
     { label: 'B2C Reports', icon: 'file', route: 'b2c-reports' },
     { label: 'Messenger', icon: 'chat', route: 'messenger' },

@@ -30,6 +30,8 @@ export function AcademyHome() {
 
   const TOOLS: { label: string; sub: string; icon: any; route: string; colors: [string, string] }[] = [
     { label: 'QHP Analyser', sub: 'Completion to PDF turnaround', icon: 'chart', route: 'academy-qhp-analyser', colors: ['#2B4A7E', '#1B2A46'] },
+    { label: 'Daily Goals Analyser', sub: 'Trainer logging compliance', icon: 'target', route: 'academy-daily-goals', colors: ['#6B4A2E', '#3C2A1A'] },
+    { label: 'Weekly Summary', sub: 'Who reads the AI summary', icon: 'calendar', route: 'academy-weekly-summary', colors: ['#2E6B5A', '#1A3C33'] },
     { label: 'Academy Management', sub: 'Students, batches, attendance', icon: 'award', route: 'academy-management', colors: ['#3D2E6B', '#221A3C'] },
     { label: 'B2C Reports', sub: 'Client QHP report library', icon: 'file', route: 'b2c-reports', colors: ['#6B3A2E', '#3C211A'] },
     { label: 'Messenger', sub: 'Team and client chats', icon: 'chat', route: 'messenger', colors: ['#2E5A4A', '#1A3229'] },
