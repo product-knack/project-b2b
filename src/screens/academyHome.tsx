@@ -34,6 +34,7 @@ export function AcademyHome() {
     { label: 'Weekly Summary', sub: 'Who reads the AI summary', icon: 'calendar', route: 'academy-weekly-summary', colors: ['#2E6B5A', '#1A3C33'] },
     { label: 'Academy Management', sub: 'Students, batches, attendance', icon: 'award', route: 'academy-management', colors: ['#3D2E6B', '#221A3C'] },
     { label: 'B2C Reports', sub: 'Client QHP report library', icon: 'file', route: 'b2c-reports', colors: ['#6B3A2E', '#3C211A'] },
+    { label: 'Client Threads', sub: 'Internal team thread per client', icon: 'atSign', route: 'client-threads', colors: ['#3A2E6B', '#1F1A3C'] },
     { label: 'Messenger', sub: 'Team and client chats', icon: 'chat', route: 'messenger', colors: ['#2E5A4A', '#1A3229'] },
   ];
 

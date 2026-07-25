@@ -432,6 +432,7 @@ export const academyNav: NavGroup[] = [
     { label: 'Academy Management', icon: 'award', route: 'academy-management' },
     { label: 'B2C Reports', icon: 'file', route: 'b2c-reports' },
     { label: 'Messenger', icon: 'chat', route: 'messenger' },
+    { label: 'Client Threads', icon: 'atSign', route: 'client-threads' },
   ] },
 ];
 

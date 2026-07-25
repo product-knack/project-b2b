@@ -192,8 +192,22 @@ const SENSITIVE_ROUTES = new Set([
   'messenger', 'client-threads',
 ]);
 
+/* Each role's home screen — also the fallback for an unmapped route. Falling
+   back to the TRAINER Dashboard (the old behaviour) leaked trainer-only UI
+   (today's roster, acknowledge, emergency leave) into other workspaces. */
+export const homeRouteFor = (role: string | null | undefined) =>
+  role === 'crm' ? 'crm-dashboard'
+  : role === 'coach' ? 'coach-dashboard'
+  : role === 'ops' ? 'ops-dashboard'
+  : role === 'admin' ? 'admin-dashboard'
+  : role === 'doctor' ? 'doctor-dashboard'
+  : role === 'marketing' ? 'marketing-dashboard'
+  : role === 'academy' ? 'academy-dashboard'
+  : 'dashboard';
+
 function RouteScreen({ route }: { route: string }) {
-  const Screen = SCREENS[route] ?? Dashboard;
+  const { role } = useStore();
+  const Screen = SCREENS[route] ?? SCREENS[homeRouteFor(role)] ?? Dashboard;
   const body = (
     <ScreenErrorBoundary resetKey={route}>
       <Screen />

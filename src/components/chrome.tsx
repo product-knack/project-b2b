@@ -147,8 +147,9 @@ export function Drawer() {
     if (it.route === 'qhp-stats') return role === 'ops' || caps.data.isQhpManager; // ops sees QHP Stats by role (web parity)
     if (it.route === 'qhp') return caps.data.isQhpManager || caps.data.canConductAssessments || caps.data.canViewAllAssessments || caps.data.qhpReportCreator;
     if (it.route === 'qhp-review') return caps.data.juniorResearcher || caps.data.isHod;
-    // B2C Reports — web hardcodes this to one profile (Rajat Sharma); mirror it.
-    if (it.route === 'b2c-reports') return session?.user?.id === '196ec824-a093-4944-ae3d-3c4919ebf0df';
+    // B2C Reports — originally one hardcoded profile (Rajat Sharma). The Academy
+    // workspace links it too, so academy/admin accounts also see it.
+    if (it.route === 'b2c-reports') return session?.user?.id === '196ec824-a093-4944-ae3d-3c4919ebf0df' || role === 'academy' || role === 'admin';
     if (it.route === 'mgr-dash' || it.label === 'Managers Overview' || it.label === 'QHP Overview') return caps.data.isManager;
     if (it.label === 'Trainers Tracker') return caps.data.isTrainerManager;
     if (it.route === 'crm-esc') return caps.data.isCrmManager; // web: crm_manager spec only
