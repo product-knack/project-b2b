@@ -178,7 +178,12 @@ export type PackageGroup = { n: number; start: string; end: string | null; total
 /* Simplified-but-faithful port of useClientSessionsByCycle: packages from client_renewals
    boundaries (P1 total = first renewal's previous_package || clients.session_package),
    countable = completed+cancelled excl complimentary; physio/RLT on 'odds basic' → other.
-   NOT ported: reset-window gating + Odds-Generation shared pool. */
+   NOT ported: reset-window gating + Odds-Generation shared pool.
+   BUSINESS RULE (2026-07, if reset gating is ever ported here): on 'Odds plus',
+   'rehabilitation' sessions are part of the MAIN subscription and must NEVER be
+   diverted into the reset/additional-package bucket — only recovery and
+   red_light_therapy divert. The current no-gating behaviour already satisfies
+   this (all rehab counts toward main cycles); keep the exemption if gating lands. */
 export function useSessionsByCycle(clientId: string | null) {
   return useQuery({
     queryKey: ['client-sessions-by-cycle', clientId],
