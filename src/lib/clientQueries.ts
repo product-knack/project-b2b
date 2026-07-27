@@ -124,6 +124,16 @@ const AQUA_AEROBICS_EXERCISES: DbExercise[] = [
   'Standing Knee Tuck', 'Single Leg Raise', 'Pool Plank', 'DB Tricep Pushdown', 'Pool Crunch', 'Reverse Fly',
 ].map((n) => ({ name: n, muscle_group: 'Aqua Aerobics Activity', equipment: 'Pool', measurement_type: AQUA_MEASUREMENTS[n] ?? 'reps' }));
 
+/* Pilates REFORMER exercises — hardcoded like Aqua Aerobics, NOT in exercises_db
+   (web pilatesReformerExercises.ts verbatim). The picker shows them under a
+   Reformer tab when the modality is Pilates; Mat stays the DB list. */
+const REFORMER_DURATION = new Set(['Front prep', 'Back prep', 'Plank series', 'Side plank series']);
+export const PILATES_REFORMER_EXERCISES: DbExercise[] = [
+  'Footwork series', 'Side footwork series', 'Feet in strap', 'Side feet in strap',
+  'Mid back series', 'Front prep', 'Back prep', 'Kneeling series', 'Side kneeling series',
+  'Plank series', 'Side plank series', 'Lunge series', 'Reverse lunge series', 'Seated roll down series',
+].map((n) => ({ name: n, muscle_group: 'Reformer', equipment: 'Reformer', measurement_type: REFORMER_DURATION.has(n) ? 'duration' : 'reps' }));
+
 export function useExerciseDb(modality: string) {
   const key = (modality || 'strength').toLowerCase();
   return useQuery({

@@ -24,7 +24,7 @@ import { supabase, DEV_TRAINER_ID } from '../lib/supabase';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { QhpAssessmentForm, CoachPresenceModal, fetchHasPriorCompletedQHP } from './qhpAssessmentForm';
 import { useTodayRoster, useTrainerStats, useTrainerProfile, useTrainerMonthSessions, useTrainerLeaderboard, useManagerLeaderboard, useManagerTeam, useManagerTeamLeaves, useManagerTeamIncidents, useManagerTeamRetention, useManagerTeamLateLogs, useManagerTeamRoster, useManagerTeamPlanOverview, useManagerTeamAcks, useManagerTeamAppAdoption, useTrainerSessionBreakdown, useTrainerReferralBreakdown, useFirstSessionAlert, istTimeParts, istDayLabel, istDate, useCancelScheduledSession, useRequestReschedule, useAddMissedRemark, lbMonthBounds, lbMonthLabel, LbBounds, RosterRow, ManagerTeamMember, MgrMonthFilter, usePlanExpiryMap, PlanExpiry, useTrainerAckSummary, useRequestRoster, useRosterDistance, SESSION_MODALITIES, useMyMonthSessionBreakdown, usePilatesRunRate } from '../lib/trainerQueries';
-import { useMyClients, useClientDetail, useClientSessions, useClientPlans, useClientGoals, useClientReports, useClientBioAge, useClientProgression, useCreateWorkoutSession, useModalityGate, useWorkoutTemplates, useSaveWorkoutTemplate, useDeleteWorkoutTemplate, useClientHealthCheck, useSaveHealthData, useExerciseDb, useSessionExercises, uuidv4, HealthDataInput, useWeeklyProgressionAll, ackWeeklyReport, WeeklyProgressionRow, useApprovedPlansForLogging, usePartnerInfo, usePreviousExerciseData, checkDuplicateWorkoutToday, PlanExerciseRow, useClientDailyStats, useSaveClientHomeLocation } from '../lib/clientQueries';
+import { useMyClients, useClientDetail, useClientSessions, useClientPlans, useClientGoals, useClientReports, useClientBioAge, useClientProgression, useCreateWorkoutSession, useModalityGate, useWorkoutTemplates, useSaveWorkoutTemplate, useDeleteWorkoutTemplate, useClientHealthCheck, useSaveHealthData, useExerciseDb, useSessionExercises, uuidv4, HealthDataInput, useWeeklyProgressionAll, ackWeeklyReport, WeeklyProgressionRow, useApprovedPlansForLogging, usePartnerInfo, usePreviousExerciseData, checkDuplicateWorkoutToday, PlanExerciseRow, useClientDailyStats, useSaveClientHomeLocation, PILATES_REFORMER_EXERCISES } from '../lib/clientQueries';
 import * as Location from 'expo-location';
 import KvStorage from 'expo-sqlite/kv-store';
 import { enqueueOutbox, getIsOnline, useIsOnline, useOutbox, retryOutboxItem, removeOutboxItem, drainOutbox, submitItem, updateOutboxItem, getOutboxItem, WorkoutLogOutboxPayload, OutboxItem, useSyncedNotices, dismissSyncedNotice } from '../lib/offline';
@@ -5237,6 +5237,11 @@ export function Workout() {
   const [exercises, setExercises] = React.useState<WExercise[]>([]);
   const [pickerOpen, setPickerOpen] = React.useState(false);
   const [exSearch, setExSearch] = React.useState('');
+  // Pilates picker sub-tab: Mat = exercises_db list, Reformer = hardcoded list.
+  // Resets to Mat each time the picker opens (web parity). Taps add instantly,
+  // so selections naturally persist across tab switches.
+  const [pilatesTab, setPilatesTab] = React.useState<'mat' | 'reformer'>('mat');
+  React.useEffect(() => { if (pickerOpen) setPilatesTab('mat'); }, [pickerOpen]);
   const [customFormOpen, setCustomFormOpen] = React.useState(false);
   const [customName, setCustomName] = React.useState('');
   const [customMeasure, setCustomMeasure] = React.useState<'reps' | 'duration'>('reps');
@@ -5468,7 +5473,10 @@ export function Workout() {
     if (!n) return;
     // Boxing Padwork defaults to 1 round (web useBoxingActivityHandlers).
     const padwork = /pad ?work/i.test(n);
-    setExercises((xs) => [...xs, { name: n, measurement, body_part: bodyPart, sets: [{ reps: '', load: '', duration: '' }], notes: '', activityType, completed: isActivityModality ? true : undefined, rounds: padwork ? '1' : '', durationMin: '', collapsed: true }]);
+    // Pilates reps-based exercises (Mat AND Reformer) prefill 10 reps on the
+    // first set (web handleExercisesSelected); duration-based stay blank.
+    const prefillReps = mLower === 'pilates' && measurement === 'reps' ? '10' : '';
+    setExercises((xs) => [...xs, { name: n, measurement, body_part: bodyPart, sets: [{ reps: prefillReps, load: '', duration: '' }], notes: '', activityType, completed: isActivityModality ? true : undefined, rounds: padwork ? '1' : '', durationMin: '', collapsed: true }]);
   };
   const removeExercise = (i: number) => setExercises((xs) => xs.filter((_, k) => k !== i));
 
@@ -6603,10 +6611,32 @@ export function Workout() {
               </View>
             )}
 
+            {/* Pilates: Mat (DB) vs Reformer (hardcoded) sub-tabs */}
+            {mLower === 'pilates' ? (
+              <View style={{ flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: 999, padding: 3, marginBottom: 10 }}>
+                {(([['mat', 'Mat Workout'], ['reformer', 'Reformer Workout']]) as ['mat' | 'reformer', string][]).map(([id, lbl]) => {
+                  const active = pilatesTab === id;
+                  return active ? (
+                    <LinearGradient key={id} colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 999 }}>
+                      <Text style={{ fontFamily: F.bodyBold, fontSize: 12, color: '#fff' }}>{lbl}</Text>
+                    </LinearGradient>
+                  ) : (
+                    <Pressable key={id} onPress={() => setPilatesTab(id)} style={{ flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 999 }}>
+                      <Text style={{ fontFamily: F.bodySemi, fontSize: 12, color: C.muted }}>{lbl}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ) : null}
+
             {(() => {
               const q = exSearch.trim().toLowerCase();
-              const list = (exDbQ.data ?? []).filter((e) => !q || e.name.toLowerCase().includes(q) || (e.muscle_group ?? '').toLowerCase().includes(q));
-              const exactMatch = (exDbQ.data ?? []).some((e) => e.name.toLowerCase() === q);
+              // Reformer tab swaps the data source to the hardcoded list; Mat and
+              // every other modality keep the DB fetch. Search filters the active tab.
+              const reformer = mLower === 'pilates' && pilatesTab === 'reformer';
+              const source = reformer ? PILATES_REFORMER_EXERCISES : (exDbQ.data ?? []);
+              const list = source.filter((e) => !q || e.name.toLowerCase().includes(q) || (e.muscle_group ?? '').toLowerCase().includes(q));
+              const exactMatch = source.some((e) => e.name.toLowerCase() === q);
               const addedCounts: Record<string, number> = {};
               exercises.forEach((e) => { const k = e.name.trim().toLowerCase(); addedCounts[k] = (addedCounts[k] ?? 0) + 1; });
               // Virtualized: the DB holds 100+ exercises per modality and rendering
@@ -6614,7 +6644,7 @@ export function Workout() {
               // Same rows, same look — only windowed.
               return (
                 <FlatList
-                  data={exDbQ.isLoading ? [] : list}
+                  data={!reformer && exDbQ.isLoading ? [] : list}
                   keyExtractor={(e: any) => e.name}
                   showsVerticalScrollIndicator={false}
                   keyboardShouldPersistTaps="handled"
@@ -6634,7 +6664,7 @@ export function Workout() {
                       </View>
                     </Pressable>
                   ) : null}
-                  ListEmptyComponent={exDbQ.isLoading ? (
+                  ListEmptyComponent={!reformer && exDbQ.isLoading ? (
                     <Body style={{ color: C.muted2, textAlign: 'center', paddingVertical: 24 }}>Loading exercises…</Body>
                   ) : !q ? (
                     <Body style={{ color: C.muted2, textAlign: 'center', paddingVertical: 24 }}>No saved exercises for {modLabel}. Type a name above to add a custom one.</Body>
