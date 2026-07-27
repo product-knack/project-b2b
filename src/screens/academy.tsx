@@ -7,9 +7,10 @@ import { Serif, Body, Mono, Card, Avatar, ProgressBar } from '../components/prim
 import { Page, TitleBlock, HScroll, Badge } from './common';
 import { useAuth } from '../auth';
 import { useStore } from '../store';
+import { AcademyCalendarTab } from './academyCalendar';
 import {
   useAcademyOverview, useAcademyUsers, useSaveAcademyUser, useSoftDeleteAcademyUser, useEnrollmentCounts,
-  useAcademyBatches, useDeleteBatch, useSaveBatch, useBatchStudents, useAttendanceByBatchDate, useUpsertAttendance,
+  useAcademyBatches, useDeleteBatch, useSaveBatch, useSetBatchTeachers, useBatchStudents, useAttendanceByBatchDate, useUpsertAttendance,
   useAttendanceReport, useAssessments, useUpsertAssessmentMarks, useUpdateAssessmentMeta,
   ATT_STATUSES, AttStatus, attPct, attWeight, LOW_ATTENDANCE_PCT, istToday, istDaysAgo, prettyDate,
   defaultPassMarks, AcademyUser, AcademyBatch,
@@ -36,7 +37,7 @@ const avColors = (n: string): [string, string] => {
 };
 const attColor = (s: string) => (s === 'present' ? C.green : s === 'late' ? C.gold : s === 'leave' ? C.blue : C.red);
 
-type Tab = 'overview' | 'students' | 'teachers' | 'batches' | 'attendance' | 'assessments';
+type Tab = 'overview' | 'students' | 'teachers' | 'batches' | 'calendar' | 'attendance' | 'assessments';
 
 export function AcademyDashboard() {
   const [tab, setTab] = React.useState<Tab>('overview');
@@ -49,6 +50,7 @@ export function AcademyDashboard() {
     { key: 'students', label: 'Students', icon: 'users' },
     { key: 'teachers', label: 'Teachers', icon: 'userCircle' },
     { key: 'batches', label: 'Batches', icon: 'layers' },
+    { key: 'calendar', label: 'Calendar', icon: 'calendar' },
     { key: 'attendance', label: 'Attendance', icon: 'checks' },
     { key: 'assessments', label: 'Marks', icon: 'clipboard' },
   ];
@@ -72,6 +74,7 @@ export function AcademyDashboard() {
         : tab === 'students' ? <PeopleTab role="student" />
         : tab === 'teachers' ? <PeopleTab role="teacher" />
         : tab === 'batches' ? <BatchesTab onAttendance={jumpToAttendance} />
+        : tab === 'calendar' ? <AcademyCalendarTab />
         : tab === 'attendance' ? <AttendanceTab presetBatchId={attBatchId} />
         : <AssessmentsTab />}
     </Page>
