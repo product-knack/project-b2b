@@ -9,7 +9,7 @@ import Svg, { Ellipse } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { C, F, hexA } from '../theme';
 import { Icon } from '../icons';
-import { useStore } from '../store';
+import { useStore, homeRouteFor } from '../store';
 
 const MARK = require('../../assets/odds-mark.png');
 export const WORDMARK = require('../../assets/odds-wordmark.png');
@@ -81,14 +81,7 @@ export function OddsWordmark({ height = 24 }: { height?: number }) {
 export function OddsAiBar() {
   const { openAi, route, role, go } = useStore();
   const insets = useSafeAreaInsets();
-  const homeRoute =
-    role === 'crm' ? 'crm-dashboard'
-    : role === 'coach' ? 'coach-dashboard'
-    : role === 'ops' ? 'ops-dashboard'
-    : role === 'admin' ? 'admin-dashboard'
-    : role === 'doctor' ? 'doctor-dashboard'
-    : role === 'marketing' ? 'marketing-dashboard'
-    : 'dashboard';
+  const homeRoute = homeRouteFor(role);
   const isHome = route === homeRoute;
   return (
     <View pointerEvents="box-none" style={{ paddingBottom: insets.bottom + 6, paddingTop: 6, alignItems: 'center', backgroundColor: 'transparent' }}>

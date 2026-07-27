@@ -1,5 +1,19 @@
 import React, { createContext, useContext, useMemo, useState, useCallback } from 'react';
 
+/* THE canonical role -> home-route map. Every 'go home' path (back-fallback,
+   floating Home button, hardware back, router fallback, post-login redirect)
+   must use this — per-site copies kept drifting and dumped non-trainer roles
+   onto the trainer dashboard. */
+export const homeRouteFor = (role: string | null | undefined): string =>
+  role === 'crm' ? 'crm-dashboard'
+  : role === 'coach' ? 'coach-dashboard'
+  : role === 'ops' ? 'ops-dashboard'
+  : role === 'admin' ? 'admin-dashboard'
+  : role === 'doctor' ? 'doctor-dashboard'
+  : role === 'marketing' ? 'marketing-dashboard'
+  : role === 'academy' ? 'academy-dashboard'
+  : 'dashboard';
+
 export type Role = 'trainer' | 'crm' | 'coach' | 'ops' | 'admin' | 'doctor' | 'marketing' | 'academy';
 export type SheetKind = 'ack' | 'leave' | 'schedule' | null;
 export type CrmDialog =
@@ -135,14 +149,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     () =>
       setS((prev) => {
         if (prev.history.length === 0) {
-          const home =
-            prev.role === 'crm' ? 'crm-dashboard'
-            : prev.role === 'coach' ? 'coach-dashboard'
-            : prev.role === 'ops' ? 'ops-dashboard'
-            : prev.role === 'admin' ? 'admin-dashboard'
-            : prev.role === 'doctor' ? 'doctor-dashboard'
-            : prev.role === 'marketing' ? 'marketing-dashboard'
-            : 'dashboard';
+          const home = homeRouteFor(prev.role);
           if (prev.route === home || prev.route === 'signin') return prev;
           return { ...prev, route: home, navDir: 'back', drawerOpen: false, sheet: null };
         }

@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState, useLayoutEffect } from 'react';
 import { View, PanResponder, Animated, Easing, StyleSheet, Dimensions, BackHandler } from 'react-native';
 import { C } from './theme';
-import { useStore } from './store';
+import { useStore, homeRouteFor } from './store';
 import { useAuth } from './auth';
 import { Header, Drawer } from './components/chrome';
 import { ScreenErrorBoundary } from './components/errorBoundary';
@@ -196,19 +196,6 @@ const SENSITIVE_ROUTES = new Set([
   'messenger', 'client-threads',
 ]);
 
-/* Each role's home screen — also the fallback for an unmapped route. Falling
-   back to the TRAINER Dashboard (the old behaviour) leaked trainer-only UI
-   (today's roster, acknowledge, emergency leave) into other workspaces. */
-export const homeRouteFor = (role: string | null | undefined) =>
-  role === 'crm' ? 'crm-dashboard'
-  : role === 'coach' ? 'coach-dashboard'
-  : role === 'ops' ? 'ops-dashboard'
-  : role === 'admin' ? 'admin-dashboard'
-  : role === 'doctor' ? 'doctor-dashboard'
-  : role === 'marketing' ? 'marketing-dashboard'
-  : role === 'academy' ? 'academy-dashboard'
-  : 'dashboard';
-
 function RouteScreen({ route }: { route: string }) {
   const { role } = useStore();
   const Screen = SCREENS[route] ?? SCREENS[homeRouteFor(role)] ?? Dashboard;
@@ -372,15 +359,7 @@ export function Router() {
       const s = backState.current;
       if (s.aiOpen) { closeAi(); return true; }
       if (s.drawerOpen) { closeDrawer(); return true; }
-      const home =
-        s.role === 'crm' ? 'crm-dashboard'
-        : s.role === 'coach' ? 'coach-dashboard'
-        : s.role === 'ops' ? 'ops-dashboard'
-        : s.role === 'admin' ? 'admin-dashboard'
-        : s.role === 'doctor' ? 'doctor-dashboard'
-        : s.role === 'marketing' ? 'marketing-dashboard'
-        : s.role === 'academy' ? 'academy-dashboard'
-        : 'dashboard';
+      const home = homeRouteFor(s.role);
       if (s.route === home || s.route === 'signin') return false; // default: background the app
       back(); // pops history, or falls back to the dashboard when the stack is empty
       return true;
@@ -402,7 +381,7 @@ export function Router() {
         go('messenger', true);
         return;
       }
-      go(accountRole === 'crm' ? 'crm-dashboard' : accountRole === 'coach' ? 'coach-dashboard' : accountRole === 'ops' ? 'ops-dashboard' : accountRole === 'admin' ? 'admin-dashboard' : accountRole === 'doctor' ? 'doctor-dashboard' : accountRole === 'marketing' ? 'marketing-dashboard' : accountRole === 'academy' ? 'academy-dashboard' : 'dashboard', true);
+      go(homeRouteFor(accountRole), true);
     }
   }, [loading, session, accountRole, launchChecked]);
 
