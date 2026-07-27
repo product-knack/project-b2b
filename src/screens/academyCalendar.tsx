@@ -58,8 +58,9 @@ export function AcademyCalendarTab() {
   const q = useAcademyBatches();
   const setTeachersM = useSetBatchTeachers();
   const teachersQ = useAcademyUsers('teacher', false);
-  const [weekOffset, setWeekOffset] = React.useState(0);
-  const [dayIdx, setDayIdx] = React.useState(() => (new Date(Date.now() + 330 * 60_000).getUTCDay() + 6) % 7);
+  const [monthDate, setMonthDate] = React.useState(new Date());
+  const istTodayYmd = new Date(Date.now() + 330 * 60_000).toISOString().slice(0, 10);
+  const [calSel, setCalSel] = React.useState<string | null>(istTodayYmd);
   const [teacherFilter, setTeacherFilter] = React.useState<string>('all');
   const [courseFilter, setCourseFilter] = React.useState<string>('all');
   const [showInactive, setShowInactive] = React.useState(false);
@@ -67,17 +68,24 @@ export function AcademyCalendarTab() {
   const [selTeachers, setSelTeachers] = React.useState<string[]>([]);
   const [selPrimary, setSelPrimary] = React.useState<string | null>(null);
 
-  // Monday-start week in IST, as YYYY-MM-DD strings.
-  const weekDates = React.useMemo(() => {
-    const nowIst = new Date(Date.now() + 330 * 60_000);
-    const monday = new Date(Date.UTC(nowIst.getUTCFullYear(), nowIst.getUTCMonth(), nowIst.getUTCDate() - ((nowIst.getUTCDay() + 6) % 7) + weekOffset * 7));
-    return Array.from({ length: 7 }, (_, i) => new Date(monday.getTime() + i * 864e5).toISOString().slice(0, 10));
-  }, [weekOffset]);
+  const shiftMonth = (d: number) => { setMonthDate((prev) => { const n = new Date(prev); n.setMonth(n.getMonth() + d); return n; }); setCalSel(null); };
+  const goToday = () => { setMonthDate(new Date()); setCalSel(istTodayYmd); };
+
+  // Every date of the visible month as YYYY-MM-DD.
+  const y = monthDate.getFullYear(), mo = monthDate.getMonth();
+  const daysInMonth = new Date(y, mo + 1, 0).getDate();
+  const p2 = (n: number) => String(n).padStart(2, '0');
+  const monthDates = React.useMemo(
+    () => Array.from({ length: daysInMonth }, (_, i) => `${y}-${p2(mo + 1)}-${p2(i + 1)}`),
+    [y, mo, daysInMonth]
+  );
+  // Weekday key ('Mon'...) for a YYYY-MM-DD date.
+  const dayKeyOf = (ymd: string) => CAL_DAY_KEYS[(new Date(`${ymd}T00:00:00Z`).getUTCDay() + 6) % 7];
 
   const batches = q.data ?? [];
   const courses = React.useMemo(() => [...new Set(batches.map((b) => b.course_name).filter(Boolean))].sort(), [batches]);
 
-  // Expand every batch's schedule.days into this week's class instances.
+  // Expand every batch's schedule.days across the whole visible month.
   const { byDay, conflictCount } = React.useMemo(() => {
     const instances: ClassInstance[] = [];
     batches
@@ -88,8 +96,8 @@ export function AcademyCalendarTab() {
         const days = b.schedule?.days ?? [];
         const range = parseTimeRange(b.schedule?.time);
         const primary = b.teachers.find((t) => t.isPrimary) ?? b.teachers[0];
-        weekDates.forEach((date, i) => {
-          if (!days.includes(CAL_DAY_KEYS[i])) return;
+        monthDates.forEach((date) => {
+          if (!days.includes(dayKeyOf(date))) return;
           if (b.start_date && date < b.start_date) return;
           if (b.end_date && date > b.end_date) return;
           instances.push({
@@ -118,7 +126,7 @@ export function AcademyCalendarTab() {
     });
     byDay.forEach((list) => list.sort((a, b) => (a.start ?? 9999) - (b.start ?? 9999)));
     return { byDay, conflictCount: conflicts };
-  }, [batches, weekDates, teacherFilter, courseFilter, showInactive]);
+  }, [batches, monthDates, teacherFilter, courseFilter, showInactive]);
 
   const openReassign = (ins: ClassInstance) => {
     setOpenClass(ins);
@@ -141,32 +149,29 @@ export function AcademyCalendarTab() {
     });
   };
 
-  const selDate = weekDates[dayIdx];
-  const dayList = byDay.get(selDate) ?? [];
-  const weekLabel = `${prettyDate(weekDates[0])} – ${prettyDate(weekDates[6])}`;
+  const dayList = calSel ? (byDay.get(calSel) ?? []) : [];
+  const monthLabel = monthDate.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
 
   return (
     <View style={{ gap: 11 }}>
-      {/* Week nav */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, borderRadius: 13, backgroundColor: 'rgba(0,0,0,0.22)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)' }}>
-        <Pressable onPress={() => setWeekOffset((w) => w - 1)} hitSlop={8} style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: 'rgba(255,255,255,0.05)', alignItems: 'center', justifyContent: 'center' }}>
-          <Icon name="chevLeft" size={13} color={C.ink3} strokeWidth={2.3} />
+      {/* Month nav — roster-calendar style */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 11, paddingHorizontal: 13, gap: 8, borderRadius: 16, backgroundColor: 'rgba(0,0,0,0.22)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)' }}>
+        <Pressable onPress={() => shiftMonth(-1)} hitSlop={8} style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: 'rgba(255,255,255,0.05)', alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name="chevLeft" size={14} color={C.ink3} strokeWidth={2.3} />
         </Pressable>
         <View style={{ flex: 1, alignItems: 'center' }}>
-          <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: '#fff' }}>{weekLabel}</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
-            {weekOffset !== 0 ? (
-              <Pressable onPress={() => setWeekOffset(0)} hitSlop={6}><Mono style={{ fontSize: 8.5, color: ACC }}>JUMP TO THIS WEEK</Mono></Pressable>
-            ) : <Mono style={{ fontSize: 8.5, color: C.muted3 }}>THIS WEEK · IST</Mono>}
-            {conflictCount > 0 ? (
-              <View style={{ paddingVertical: 2, paddingHorizontal: 7, borderRadius: 999, backgroundColor: hexA(C.red, 0.16), borderWidth: 1, borderColor: hexA(C.red, 0.45) }}>
-                <Text style={{ fontFamily: F.bodyBold, fontSize: 8.5, color: C.red }}>{conflictCount} CONFLICT{conflictCount === 1 ? '' : 'S'}</Text>
-              </View>
-            ) : null}
-          </View>
+          <Text style={{ fontFamily: F.bodyBold, fontSize: 14, color: '#fff' }}>{monthLabel}</Text>
+          {conflictCount > 0 ? (
+            <View style={{ marginTop: 3, paddingVertical: 2, paddingHorizontal: 8, borderRadius: 999, backgroundColor: hexA(C.red, 0.16), borderWidth: 1, borderColor: hexA(C.red, 0.45) }}>
+              <Text style={{ fontFamily: F.bodyBold, fontSize: 8.5, color: C.red }}>{conflictCount} CONFLICT{conflictCount === 1 ? '' : 'S'} THIS MONTH</Text>
+            </View>
+          ) : null}
         </View>
-        <Pressable onPress={() => setWeekOffset((w) => w + 1)} hitSlop={8} style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: 'rgba(255,255,255,0.05)', alignItems: 'center', justifyContent: 'center' }}>
-          <Icon name="chevRight" size={13} color={C.ink3} strokeWidth={2.3} />
+        <Pressable onPress={goToday} style={{ paddingVertical: 6, paddingHorizontal: 10, borderRadius: 999, backgroundColor: hexA(ACC, 0.12), borderWidth: 1, borderColor: hexA(ACC, 0.4) }}>
+          <Text style={{ fontFamily: F.bodyBold, fontSize: 10.5, color: ACC }}>Today</Text>
+        </Pressable>
+        <Pressable onPress={() => shiftMonth(1)} hitSlop={8} style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: 'rgba(255,255,255,0.05)', alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name="chevRight" size={14} color={C.ink3} strokeWidth={2.3} />
         </Pressable>
       </View>
 
@@ -194,31 +199,56 @@ export function AcademyCalendarTab() {
         })}
       </HScroll>
 
-      {/* Day strip */}
-      <View style={{ flexDirection: 'row', gap: 5 }}>
-        {weekDates.map((date, i) => {
-          const on = i === dayIdx;
-          const list = byDay.get(date) ?? [];
-          const hasConf = list.some((c) => c.conflicted);
-          return (
-            <Pressable key={date} onPress={() => setDayIdx(i)} style={{ flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 11, backgroundColor: on ? hexA(ACC, 0.16) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: on ? hexA(ACC, 0.5) : hasConf ? hexA(C.red, 0.3) : 'rgba(255,255,255,0.08)', gap: 2 }}>
-              <Text style={{ fontFamily: on ? F.bodyBold : F.bodySemi, fontSize: 9.5, color: on ? ACC : C.muted2 }}>{CAL_DAY_KEYS[i]}</Text>
-              <Mono style={{ fontSize: 8, color: on ? ACC : C.muted3 }}>{date.slice(8)}</Mono>
-              {list.length > 0 ? (
-                <View style={{ minWidth: 15, paddingHorizontal: 3, borderRadius: 8, backgroundColor: hexA(hasConf ? C.red : ACC, 0.2), alignItems: 'center' }}>
-                  <Text style={{ fontFamily: F.mono, fontSize: 8, color: hasConf ? C.red : ACC }}>{list.length}</Text>
-                </View>
-              ) : <View style={{ height: 13 }} />}
-            </Pressable>
-          );
-        })}
+      {/* Month grid — roster-calendar style: day cells with class-count chips */}
+      <View style={{ padding: 14, borderRadius: 16, backgroundColor: 'rgba(0,0,0,0.25)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)' }}>
+        <View style={{ flexDirection: 'row', marginBottom: 7 }}>
+          {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((w, i) => (
+            <Text key={i} style={{ flex: 1, textAlign: 'center', fontFamily: F.mono, fontSize: 9, color: C.muted3 }}>{w}</Text>
+          ))}
+        </View>
+        {(() => {
+          const firstWeekday = new Date(y, mo, 1).getDay();
+          const cells: (number | null)[] = [];
+          for (let i = 0; i < firstWeekday; i++) cells.push(null);
+          for (let day = 1; day <= daysInMonth; day++) cells.push(day);
+          while (cells.length % 7 !== 0) cells.push(null);
+          const weeks: (number | null)[][] = [];
+          for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+          return weeks.map((wk, wi) => (
+            <View key={wi} style={{ flexDirection: 'row', marginBottom: 5 }}>
+              {wk.map((day, di) => {
+                const k = day ? `${y}-${p2(mo + 1)}-${p2(day)}` : '';
+                const list = day ? byDay.get(k) ?? [] : [];
+                const sel = day != null && k === calSel;
+                const isToday = day != null && k === istTodayYmd;
+                const hasConf = list.some((c) => c.conflicted);
+                const dotCol = hasConf ? C.red : ACC;
+                return (
+                  <Pressable key={di} disabled={!day} onPress={() => day && setCalSel(sel ? null : k)} style={{ flex: 1, alignItems: 'center', gap: 3, paddingVertical: 3 }}>
+                    <View style={{ width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: sel ? ACC : 'transparent', borderWidth: isToday && !sel ? 1.5 : 0, borderColor: hexA(ACC, 0.55) }}>
+                      <Text style={{ fontFamily: sel || isToday ? F.bodyBold : F.body, fontSize: 12, color: sel ? '#0B0E14' : isToday ? ACC : day ? C.ink3 : 'transparent' }}>{day ?? 0}</Text>
+                    </View>
+                    <View style={{ height: 12, alignItems: 'center' }}>
+                      {list.length ? (
+                        <View style={{ paddingHorizontal: 5, borderRadius: 7, backgroundColor: hexA(dotCol, 0.18) }}>
+                          <Text style={{ fontFamily: F.mono, fontSize: 8.5, color: dotCol }}>{list.length}</Text>
+                        </View>
+                      ) : null}
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </View>
+          ));
+        })()}
       </View>
 
       <Body style={{ fontSize: 9.5, color: C.muted3 }}>Teacher changes here apply to the entire batch going forward, every scheduled day.</Body>
 
-      {/* Selected day timeline */}
+      {/* Selected day classes */}
       {q.isPending ? <ActivityIndicator color={ACC} style={{ paddingVertical: 24 }} />
-        : dayList.length === 0 ? <Body style={{ fontSize: 12.5, color: C.muted3, textAlign: 'center', paddingVertical: 26 }}>No classes on {prettyDate(selDate)}.</Body>
+        : !calSel ? <Body style={{ fontSize: 11.5, color: C.muted3, textAlign: 'center' }}>Tap a day to see its classes.</Body>
+        : dayList.length === 0 ? <Body style={{ fontSize: 12.5, color: C.muted3, textAlign: 'center', paddingVertical: 26 }}>No classes on {prettyDate(calSel)}.</Body>
         : dayList.map((ins) => (
           <Pressable key={ins.key} onPress={() => openReassign(ins)} style={{ flexDirection: 'row', borderRadius: 15, overflow: 'hidden', backgroundColor: 'rgba(0,0,0,0.22)', borderWidth: 1, borderColor: ins.conflicted ? hexA(C.red, 0.45) : hexA(ins.color, 0.25) }}>
             <View style={{ width: 4, backgroundColor: ins.conflicted ? C.red : ins.color }} />
