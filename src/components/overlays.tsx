@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { C, F, hexA, ORANGE_GRAD } from '../theme';
 import { Icon } from '../icons';
 import { useStore } from '../store';
+import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import { useAuth } from '../auth';
 import { DEV_TRAINER_ID } from '../lib/supabase';
 import { useAckSessions, istTimeParts } from '../lib/trainerQueries';
@@ -25,6 +26,7 @@ function SheetShell({
   fixedHeight?: boolean;
 }) {
   const insets = useSafeAreaInsets();
+  const kb = useKeyboardHeight(); // lift the sheet above the keyboard (edge-to-edge defeats adjustResize)
   // fixedHeight gives the sheet a definite height so inner ScrollViews can
   // actually scroll (with maxHeight alone they get clipped, not scrollable).
   const sizeStyle = fixedHeight ? { height: `${maxHeightPct}%` as const } : { maxHeight: `${maxHeightPct}%` as const };
@@ -55,7 +57,7 @@ function SheetShell({
           Pressable — a ScrollView nested inside a Pressable loses scroll gestures on Android. */}
       <View style={{ flex: 1, justifyContent: 'flex-end' }}>
         <Pressable onPress={onClose} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)' }} />
-        <Animated.View style={[styles.sheet, sizeStyle, { paddingBottom: insets.bottom + 20, transform: [{ translateY }] }]}>
+        <Animated.View style={[styles.sheet, sizeStyle, { paddingBottom: kb > 0 ? kb + 16 : insets.bottom + 20, transform: [{ translateY }] }]}>
           {/* Drag zone — enlarged tap/drag target around the grabber. */}
           <View {...pan.panHandlers} style={{ alignItems: 'center', paddingVertical: 8, marginTop: -6, marginBottom: 8 }}>
             <View style={[styles.grabber, { marginBottom: 0 }]} />

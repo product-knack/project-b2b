@@ -3,6 +3,7 @@ import { View, Text, Pressable, TextInput, ActivityIndicator, Modal, ScrollView,
 import { C, F, hexA } from '../theme';
 import { Icon } from '../icons';
 import { Serif, Body, Mono, Card, Avatar } from '../components/primitives';
+import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import { Page, TitleBlock, Badge } from './common';
 import {
   useClientBasicInfo, useClientSessionMetrics, useGenerationMemberMap,
@@ -37,10 +38,11 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   return <View style={{ gap: 5 }}><Mono style={{ fontSize: 8.5, letterSpacing: 0.8, color: C.mono2 }}>{label}</Mono>{children}</View>;
 }
 function SheetShell({ title, sub, onClose, children }: { title: string; sub?: string | null; onClose: () => void; children: React.ReactNode }) {
+  const kb = useKeyboardHeight();
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.62)', justifyContent: 'flex-end' }}>
-        <View style={{ maxHeight: '92%', backgroundColor: '#0E0A09', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 14, paddingBottom: 22 }}>
+        <View style={{ maxHeight: '92%', backgroundColor: '#0E0A09', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 14, paddingBottom: kb > 0 ? kb + 14 : 22 }}>
           <View style={{ width: 40, height: 4, borderRadius: 99, backgroundColor: 'rgba(255,255,255,0.2)', alignSelf: 'center', marginBottom: 12 }} />
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9, marginBottom: 12 }}>
             <View style={{ flex: 1 }}>

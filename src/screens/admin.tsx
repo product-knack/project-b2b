@@ -4,6 +4,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { C, F, hexA } from '../theme';
 import { Icon, IconName } from '../icons';
 import { Serif, Body, Mono, Card, CountUp, Avatar, ProgressBar } from '../components/primitives';
+import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import { Page, GreetingHeader, Badge } from './common';
 import { FeatureTour, ADMIN_TOUR, TourLauncher } from '../components/featureTour';
 import { useSidebarProfile } from '../lib/navQueries';
@@ -156,10 +157,11 @@ function BarStrip({ data, color, format }: { data: BarPoint[]; color: string; fo
 
 /* Bottom-sheet shell for the breakdown drill-downs. */
 function SheetShell({ title, sub, onClose, children }: { title: string; sub?: string; onClose: () => void; children: React.ReactNode }) {
+  const kb = useKeyboardHeight();
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.62)', justifyContent: 'flex-end' }}>
-        <View style={{ maxHeight: '90%', backgroundColor: '#0E0A09', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 14, paddingBottom: 22 }}>
+        <View style={{ maxHeight: '90%', backgroundColor: '#0E0A09', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 14, paddingBottom: kb > 0 ? kb + 14 : 22 }}>
           <View style={{ width: 40, height: 4, borderRadius: 99, backgroundColor: 'rgba(255,255,255,0.2)', alignSelf: 'center', marginBottom: 12 }} />
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9, marginBottom: 12 }}>
             <View style={{ flex: 1 }}>

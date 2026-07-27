@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, Pressable, ScrollView, RefreshControl, Animated, Easing, Platform } from 'react-native';
+import { View, Text, Pressable, ScrollView, RefreshControl, Animated, Easing, Platform, Keyboard, TextInput, Dimensions } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 import { getIsOnline } from '../lib/offline';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -151,6 +151,35 @@ export const Page = React.forwardRef<ScrollView, { children: React.ReactNode; ga
   // Expose the ScrollView so screens can imperatively scrollTo a section.
   React.useImperativeHandle(ref, () => scrollRef.current as ScrollView, []);
   const restored = React.useRef(false);
+
+  // ---- Keyboard awareness, ON for every page (Android) ----
+  // The manifest's adjustResize is defeated by edge-to-edge, so Android pages got
+  // NO keyboard handling unless a screen hand-rolled listeners — focused inputs
+  // sat behind the keyboard. Page now (a) pads the scroll content by the keyboard
+  // height and (b) auto-scrolls the focused TextInput just above the keyboard.
+  // iOS is handled natively via automaticallyAdjustKeyboardInsets below.
+  const [kbH, setKbH] = React.useState(0);
+  const offsetRef = React.useRef(0);
+  React.useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const show = Keyboard.addListener('keyboardDidShow', (e: any) => {
+      const h = e.endCoordinates?.height ?? 0;
+      setKbH(h);
+      const input: any = (TextInput as any).State?.currentlyFocusedInput?.();
+      if (!input || !scrollRef.current) return;
+      requestAnimationFrame(() => {
+        try {
+          input.measureInWindow((_x: number, y: number, _w: number, ih: number) => {
+            const kbTop = Dimensions.get('window').height - h;
+            const overlap = y + ih + 24 - kbTop; // 24px breathing room above the keyboard
+            if (overlap > 0) scrollRef.current?.scrollTo({ y: offsetRef.current + overlap, animated: true });
+          });
+        } catch { /* input unmounted mid-measure */ }
+      });
+    });
+    const hide = Keyboard.addListener('keyboardDidHide', () => setKbH(0));
+    return () => { show.remove(); hide.remove(); };
+  }, []);
   const onRefresh = React.useCallback(async () => {
     setRefreshing(true);
     // OFFLINE: refetching can only fail — errors would replace the cached (SQLite)
@@ -174,6 +203,7 @@ export const Page = React.forwardRef<ScrollView, { children: React.ReactNode; ga
     }
   }, [scrollKey]);
   const onScroll = React.useCallback((e: any) => {
+    offsetRef.current = e.nativeEvent.contentOffset.y; // live offset for the kb auto-scroll
     if (scrollKey) scrollMemory.set(scrollKey, e.nativeEvent.contentOffset.y);
   }, [scrollKey]);
   return (
@@ -181,14 +211,15 @@ export const Page = React.forwardRef<ScrollView, { children: React.ReactNode; ga
       <ScrollView
         ref={scrollRef}
         showsVerticalScrollIndicator={false}
-        onScroll={scrollKey ? onScroll : undefined}
+        onScroll={onScroll}
         onContentSizeChange={scrollKey ? onContentSizeChange : undefined}
-        scrollEventThrottle={scrollKey ? 64 : undefined}
-        // Input-heavy forms: on iOS this scrolls the focused input above the keyboard.
-        automaticallyAdjustKeyboardInsets={kbAware}
-        keyboardShouldPersistTaps={kbAware ? 'handled' : undefined}
+        scrollEventThrottle={64}
+        // iOS: native inset adjustment scrolls the focused input above the keyboard.
+        automaticallyAdjustKeyboardInsets
+        // First tap on buttons must work while the keyboard is open, everywhere.
+        keyboardShouldPersistTaps="handled"
         // Capped + centered on wide screens (tablet/web); no effect on phones.
-      contentContainerStyle={{ paddingHorizontal: 18, paddingTop: pt, paddingBottom: pb, gap, width: '100%', maxWidth: 640, alignSelf: 'center' }}
+      contentContainerStyle={{ paddingHorizontal: 18, paddingTop: pt, paddingBottom: pb + kbH, gap, width: '100%', maxWidth: 640, alignSelf: 'center' }}
         refreshControl={
           // The native spinner is hidden (transparent on iOS, pushed off-screen on
           // Android) — the RefreshPill overlay below is the visible loader.
