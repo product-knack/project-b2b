@@ -426,6 +426,7 @@ export const marketingNav: NavGroup[] = [
 export const academyNav: NavGroup[] = [
   { label: 'Academy', items: [
     { label: 'Dashboard', icon: 'grid', route: 'academy-dashboard' },
+    { label: 'QHP Report Review', icon: 'clipboard', route: 'qhp-review' },
     { label: 'QHP Analyser', icon: 'chart', route: 'academy-qhp-analyser' },
     { label: 'Daily Goals', icon: 'target', route: 'academy-daily-goals' },
     { label: 'Weekly Summary', icon: 'calendar', route: 'academy-weekly-summary' },
