@@ -8,6 +8,8 @@ import { Page, TitleBlock, Badge, HScroll } from './common';
 import { useAuth } from '../auth';
 import { useMyCapabilities } from '../lib/capabilities';
 import { PdfPreview } from '../components/PdfPreview';
+import { PhysioHodStatusBadge, PhysioHodNotesThread, PHYSIO_ACC } from '../components/physioHodThread';
+import { usePushToPhysioHod, useQhpDetailsRealtime, pushStatus, PHYSIO_NOTE_MAX } from '../lib/physioHodQueries';
 import {
   useQhpReviewQueue, useSignAsSenior, useSignAsHod, useHoldReport, useQhpReportMissing,
   reviewPdfUrl, stageOf, type QhpReviewRow, type ReviewNote,
@@ -69,6 +71,11 @@ function ReviewSheet({ row, onClose }: { row: QhpReviewRow; onClose: () => void 
   const [showHold, setShowHold] = React.useState(false);
   const [holdMsg, setHoldMsg] = React.useState('');
   const [err, setErr] = React.useState<string | null>(null);
+  // Push to Physio HOD (Academy HOD only — web page-level gate)
+  const pushM = usePushToPhysioHod();
+  const [showPush, setShowPush] = React.useState(false);
+  const [pushNote, setPushNote] = React.useState('');
+  const physioStatus = pushStatus(row.physioPush);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -128,6 +135,52 @@ function ReviewSheet({ row, onClose }: { row: QhpReviewRow; onClose: () => void 
             ) : null}
 
             <NotesThread notes={row.notes} />
+
+            {/* ---- Push to Physio HOD (rehab opinion) ---- */}
+            <View style={{ padding: 12, borderRadius: 12, backgroundColor: hexA(PHYSIO_ACC, 0.05), borderWidth: 1, borderColor: hexA(PHYSIO_ACC, 0.25), gap: 9 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Icon name="heart" size={13} color={PHYSIO_ACC} strokeWidth={2.1} />
+                <Mono style={{ flex: 1, fontSize: 9, letterSpacing: 1, color: C.mono2 }}>PHYSIO HOD · REHAB OPINION</Mono>
+                <PhysioHodStatusBadge push={row.physioPush} />
+              </View>
+              {caps.data.isHod ? (
+                showPush ? (
+                  <View style={{ gap: 8 }}>
+                    <TextInput
+                      value={pushNote} onChangeText={(t) => setPushNote(t.slice(0, PHYSIO_NOTE_MAX))}
+                      placeholder="Optional note for the Physio HOD…" placeholderTextColor={C.muted3} multiline
+                      style={{ minHeight: 56, borderRadius: 11, backgroundColor: 'rgba(0,0,0,0.3)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', padding: 11, color: '#fff', fontFamily: F.body, fontSize: 12.5, textAlignVertical: 'top' }}
+                    />
+                    <View style={{ flexDirection: 'row', gap: 8 }}>
+                      <Pressable onPress={() => setShowPush(false)} disabled={pushM.isPending} style={{ flex: 1, alignItems: 'center', paddingVertical: 11, borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }}>
+                        <Text style={{ fontFamily: F.bodySemi, fontSize: 12, color: C.muted }}>Cancel</Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => { setErr(null); pushM.mutate({ id: row.id, note: pushNote }, { onSuccess: () => { setShowPush(false); setPushNote(''); }, onError: fail }); }}
+                        disabled={pushM.isPending}
+                        style={{ flex: 1, alignItems: 'center', paddingVertical: 11, borderRadius: 11, backgroundColor: hexA(PHYSIO_ACC, 0.16), borderWidth: 1, borderColor: hexA(PHYSIO_ACC, 0.5) }}
+                      >
+                        <Text style={{ fontFamily: F.bodyBold, fontSize: 12, color: PHYSIO_ACC }}>{pushM.isPending ? 'Pushing…' : 'Confirm push'}</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                ) : (
+                  <Pressable
+                    onPress={() => setShowPush(true)}
+                    disabled={physioStatus === 'pending'}
+                    style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 11, borderRadius: 11, backgroundColor: hexA(PHYSIO_ACC, physioStatus === 'pending' ? 0.05 : 0.13), borderWidth: 1, borderColor: hexA(PHYSIO_ACC, physioStatus === 'pending' ? 0.2 : 0.45), opacity: physioStatus === 'pending' ? 0.6 : 1 }}
+                  >
+                    <Icon name="heart" size={13} color={PHYSIO_ACC} strokeWidth={2.2} />
+                    <Text style={{ fontFamily: F.bodyBold, fontSize: 12, color: PHYSIO_ACC }}>
+                      {physioStatus === 'pending' ? 'Waiting on Physio HOD' : physioStatus === 'seen' ? 'Push again' : 'Push to Physio HOD'}
+                    </Text>
+                  </Pressable>
+                )
+              ) : physioStatus === 'none' ? (
+                <Body style={{ fontSize: 10.5, color: C.muted3 }}>Not pushed to the Physio HOD.</Body>
+              ) : null}
+              {physioStatus !== 'none' ? <PhysioHodNotesThread qhpDetailsId={row.id} notes={row.physioNotes as any} /> : null}
+            </View>
 
             {/* Sign-off history */}
             <View style={{ padding: 12, borderRadius: 12, backgroundColor: 'rgba(0,0,0,0.22)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)', gap: 8 }}>
@@ -203,6 +256,7 @@ export function QhpReviewCenter() {
   const canHod = caps.data.isHod;
   const allowed = canSenior || canHod;
   const q = useQhpReviewQueue(allowed);
+  useQhpDetailsRealtime(); // physio pushes/notes and sign-offs refresh live
   const missingQ = useQhpReportMissing(allowed);
   const [tab, setTab] = React.useState<TabId>('mytask');
   const [open, setOpen] = React.useState<QhpReviewRow | null>(null);
@@ -345,7 +399,7 @@ export function QhpReviewCenter() {
           )}
         </>
       )}
-      {open ? <ReviewSheet row={open} onClose={() => setOpen(null)} /> : null}
+      {open ? <ReviewSheet row={rows.find((r) => r.id === open.id) ?? open} onClose={() => setOpen(null)} /> : null}
     </Page>
   );
 }

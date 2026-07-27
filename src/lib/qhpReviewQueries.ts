@@ -25,12 +25,13 @@ export type QhpReviewRow = {
   seniorSigned: boolean; seniorName: string | null; seniorAt: string | null;
   hodSigned: boolean; hodName: string | null; hodAt: string | null;
   held: boolean; heldAt: string | null; notes: ReviewNote[];
+  physioPush: any[]; physioNotes: any[];
 };
 export const stageOf = (r: QhpReviewRow): ReviewStage => (!r.seniorSigned ? 'pending_senior' : !r.hodSigned ? 'pending_hod' : 'fully_signed');
 
 const SELECT = `
   id, client_id, coach_assessment_id, created_at, pdf_storage_path, pdf_filename,
-  report_created_by, signed_by_senior_researcher, signed_by_hod,
+  report_created_by, signed_by_senior_researcher, signed_by_hod, physio_hod_push, physio_hod_notes,
   senior_signed_at, hod_signed_at, review_status, held_at, held_by, review_notes,
   clients:client_id ( first_name, last_name ),
   creator:report_created_by ( first_name, last_name ),
@@ -62,6 +63,8 @@ export function useQhpReviewQueue(enabled: boolean) {
         hodSigned: !!r.signed_by_hod, hodName: r.hod ? nm(r.hod) : null, hodAt: r.hod_signed_at ?? null,
         held: r.review_status === 'on_hold', heldAt: r.held_at ?? null,
         notes: Array.isArray(r.review_notes) ? (r.review_notes as ReviewNote[]) : [],
+        physioPush: Array.isArray(r.physio_hod_push) ? r.physio_hod_push : [],
+        physioNotes: Array.isArray(r.physio_hod_notes) ? r.physio_hod_notes : [],
       }));
     },
   });

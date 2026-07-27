@@ -35,6 +35,8 @@ export type Capabilities = {
   isCrmManager: boolean;
   /* Senior Analyst client overview (web: profiles.senior_analyst) */
   seniorAnalyst: boolean;
+  /* Rehab Recommendation queue (web: role_specialization includes 'physio_hod') */
+  isPhysioHod: boolean;
   /* Pilates Run Rate card (web: role_specialization includes 'pilates-head') */
   isPilatesHead: boolean;
 };
@@ -53,6 +55,7 @@ const EMPTY: Capabilities = {
   isTrainerManager: false,
   isCrmManager: false,
   seniorAnalyst: false,
+  isPhysioHod: false,
   isPilatesHead: false,
 };
 
@@ -85,6 +88,7 @@ export function useMyCapabilities(): { data: Capabilities; isLoading: boolean } 
         isTrainerManager: Array.isArray(spec) ? spec.includes('trainer-manager') : typeof spec === 'string' && spec.includes('trainer-manager'),
         isCrmManager: Array.isArray(spec) ? spec.includes('crm_manager') : typeof spec === 'string' && spec.includes('crm_manager'),
         seniorAnalyst: (data as any)?.senior_analyst === true,
+        isPhysioHod: Array.isArray(spec) ? spec.includes('physio_hod') : typeof spec === 'string' && spec.includes('physio_hod'),
         isPilatesHead: Array.isArray(spec) ? spec.includes('pilates-head') : typeof spec === 'string' && spec.includes('pilates-head'),
       };
     },

@@ -52,6 +52,7 @@ import { OpsEscalations } from './screens/opsEscalations';
 import { AdminDashboard } from './screens/admin';
 import { DoctorDashboard, DoctorSessions, DoctorClients, DoctorAllClients, DoctorRoster, DoctorProtocolApprovals } from './screens/doctor';
 import { DoctorClientDetail } from './screens/doctorClientDetail';
+import { DoctorRehabRecommendation } from './screens/doctorRehabRecommendation';
 import { AdminRenewals } from './screens/adminRenewals';
 import { AdminRequests } from './screens/adminRequests';
 import { AdminIncidents } from './screens/adminIncidents';
@@ -145,6 +146,7 @@ const SCREENS: Record<string, React.ComponentType> = {
   'doctor-all-clients': DoctorAllClients,
   'doctor-roster': DoctorRoster,
   'doctor-protocol-approvals': DoctorProtocolApprovals,
+  'doctor-rehab-recommendation': DoctorRehabRecommendation,
   'admin-renewals': AdminRenewals,
   'admin-requests': AdminRequests,
   'admin-incidents': AdminIncidents,
@@ -183,7 +185,7 @@ const SENSITIVE_ROUTES = new Set([
   // CRM — client detail (medical history, diagnoses, reports), health/QHP/blood pages
   'crm-client', 'crm-qhp', 'crm-blood', 'crm-health', 'crm-assessment',
   // Doctor — everything clinical (protocols, physio sessions, counselling, findings)
-  'doctor-client-detail', 'doctor-sessions', 'doctor-protocol-approvals',
+  'doctor-client-detail', 'doctor-sessions', 'doctor-protocol-approvals', 'doctor-rehab-recommendation',
   // Coach — QHP assessments + progression/age metrics
   'coach-assessments', 'coach-client-overview', 'coach-progression',
   // Ops / Admin / Marketing surfaces that expose health data

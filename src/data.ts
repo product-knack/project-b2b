@@ -441,6 +441,7 @@ export const academyNav: NavGroup[] = [
 
 export const doctorNav: NavGroup[] = [
   { label: 'Workspace', items: [
+    { label: 'Rehab Recommendation', icon: 'heart', route: 'doctor-rehab-recommendation' },
     { label: 'Dashboard', icon: 'grid', route: 'doctor-dashboard' },
     { label: 'Sessions', icon: 'activity', route: 'doctor-sessions' },
     { label: 'My Clients', icon: 'users', route: 'doctor-clients' },

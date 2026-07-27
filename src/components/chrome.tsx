@@ -157,6 +157,7 @@ export function Drawer() {
     if (it.route === 'workout-analyst') return caps.data.workoutAnalyst;
     if (it.route === 'plans-analyst') return caps.data.workoutComplianceAnalyst;
     if (it.route === 'academy-senior-analyst') return caps.data.seniorAnalyst;
+    if (it.route === 'doctor-rehab-recommendation') return caps.data.isPhysioHod;
     // Doctor HOD-only surfaces — the web hardcodes the Head Doctor uuid (doc §0).
     if (it.route === 'doctor-all-clients' || it.route === 'doctor-roster' || it.route === 'doctor-protocol-approvals') {
       return session?.user?.id === '30df5c2b-0f40-4736-9f41-7cbc830a191a';
