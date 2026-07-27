@@ -154,6 +154,10 @@ export function AcademyQhpAnalyser() {
   const [range, setRange] = React.useState<RangeKey>('30d');
   const [sortByTurn, setSortByTurn] = React.useState(false);
   const [preview, setPreview] = React.useState<QhpAnalyserRow | null>(null);
+  // Pagination: 40 rows per page, reset whenever any filter changes.
+  const PAGE = 40;
+  const [visible, setVisible] = React.useState(PAGE);
+  React.useEffect(() => setVisible(PAGE), [search, status, range, sortByTurn]);
 
   const rows = q.data ?? [];
   const stats = React.useMemo(() => {
@@ -242,7 +246,7 @@ export function AcademyQhpAnalyser() {
       {q.isPending ? <ActivityIndicator color={ACC} style={{ paddingVertical: 30 }} />
         : q.isError ? <Body style={{ fontSize: 12, color: C.red, textAlign: 'center', paddingVertical: 20 }}>{(q.error as Error).message}</Body>
         : filtered.length === 0 ? <Body style={{ fontSize: 12.5, color: C.muted3, textAlign: 'center', paddingVertical: 30 }}>No assessments match these filters.</Body>
-        : filtered.slice(0, 150).map((r) => {
+        : filtered.slice(0, visible).map((r) => {
           const done = r.status === 'done';
           const badgeCol = done ? C.green : r.isOverdue ? C.red : C.gold;
           const badgeText = done ? 'Done' : r.isOverdue ? 'Overdue' : 'Pending';
@@ -293,8 +297,15 @@ export function AcademyQhpAnalyser() {
             </View>
           );
         })}
-      {filtered.length > 150 ? (
-        <Body style={{ fontSize: 10.5, color: C.muted3, textAlign: 'center' }}>Showing the first 150 of {filtered.length}. Narrow the range or search to see more.</Body>
+      {filtered.length > visible ? (
+        <Pressable onPress={() => setVisible((v) => v + PAGE)} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 12, borderRadius: 13, borderWidth: 1.5, borderStyle: 'dashed', borderColor: hexA(ACC, 0.35), backgroundColor: hexA(ACC, 0.05) }}>
+          <Icon name="chevDown" size={14} color={ACC} strokeWidth={2.4} />
+          <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: ACC }}>
+            Load {Math.min(PAGE, filtered.length - visible)} more · {visible} of {filtered.length} shown
+          </Text>
+        </Pressable>
+      ) : filtered.length > PAGE ? (
+        <Mono style={{ fontSize: 9, color: C.muted3, textAlign: 'center' }}>ALL {filtered.length} SHOWN</Mono>
       ) : null}
 
       {/* PDF preview */}
