@@ -9,7 +9,7 @@ import { useAuth } from '../auth';
 import { useStore } from '../store';
 import {
   useAcademyOverview, useAcademyUsers, useSaveAcademyUser, useSoftDeleteAcademyUser, useEnrollmentCounts,
-  useAcademyBatches, useDeleteBatch, useBatchStudents, useAttendanceByBatchDate, useUpsertAttendance,
+  useAcademyBatches, useDeleteBatch, useSaveBatch, useBatchStudents, useAttendanceByBatchDate, useUpsertAttendance,
   useAttendanceReport, useAssessments, useUpsertAssessmentMarks, useUpdateAssessmentMeta,
   ATT_STATUSES, AttStatus, attPct, attWeight, LOW_ATTENDANCE_PCT, istToday, istDaysAgo, prettyDate,
   defaultPassMarks, AcademyUser, AcademyBatch,
@@ -315,6 +315,8 @@ function BatchesTab({ onAttendance }: { onAttendance: (batchId: string) => void 
   const q = useAcademyBatches();
   const delM = useDeleteBatch();
   const [rosterFor, setRosterFor] = React.useState<AcademyBatch | null>(null);
+  // 'new' opens an empty form; a batch opens it prefilled for editing.
+  const [formFor, setFormFor] = React.useState<'new' | AcademyBatch | null>(null);
 
   const confirmDelete = (b: AcademyBatch) =>
     Alert.alert(
@@ -325,6 +327,14 @@ function BatchesTab({ onAttendance }: { onAttendance: (batchId: string) => void 
 
   return (
     <View style={{ gap: 11 }}>
+      {/* Create Batch */}
+      <Pressable onPress={() => setFormFor('new')} style={{ borderRadius: 13, overflow: 'hidden' }}>
+        <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 12 }}>
+          <Icon name="plus" size={15} color="#fff" strokeWidth={2.6} />
+          <Text style={{ fontFamily: F.bodyBold, fontSize: 13.5, color: '#fff' }}>Create Batch</Text>
+        </LinearGradient>
+      </Pressable>
+
       {q.isPending ? <ActivityIndicator color={ACC} style={{ paddingVertical: 26 }} />
         : (q.data ?? []).length === 0 ? <Body style={{ fontSize: 12.5, color: C.muted3, textAlign: 'center', paddingVertical: 26 }}>No batches yet.</Body>
         : (q.data ?? []).map((b) => {
@@ -374,6 +384,9 @@ function BatchesTab({ onAttendance }: { onAttendance: (batchId: string) => void 
                   <Icon name="checks" size={11} color={C.green} strokeWidth={2.2} />
                   <Text style={{ fontFamily: F.bodySemi, fontSize: 11, color: C.green }}>Attendance</Text>
                 </Pressable>
+                <Pressable onPress={() => setFormFor(b)} style={{ paddingVertical: 9, paddingHorizontal: 13, borderRadius: 11, backgroundColor: hexA(ACC, 0.1), borderWidth: 1, borderColor: hexA(ACC, 0.32) }}>
+                  <Icon path="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" size={12} color={ACC} strokeWidth={2.1} />
+                </Pressable>
                 <Pressable onPress={() => confirmDelete(b)} style={{ paddingVertical: 9, paddingHorizontal: 13, borderRadius: 11, backgroundColor: hexA(C.red, 0.08), borderWidth: 1, borderColor: hexA(C.red, 0.28) }}>
                   <Icon path="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14ZM10 11v6M14 11v6" size={12} color={C.red} strokeWidth={2.1} />
                 </Pressable>
@@ -400,7 +413,190 @@ function BatchesTab({ onAttendance }: { onAttendance: (batchId: string) => void 
           </View>
         </View>
       </Modal>
+
+      <BatchFormSheet value={formFor} onClose={() => setFormFor(null)} />
     </View>
+  );
+}
+
+/* ---------- Create / Edit batch (web BatchFormDialog port) ---------- */
+const WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const BATCH_STATUSES = ['active', 'completed', 'cancelled'] as const;
+const ymdOk = (s: string) => !s || /^\d{4}-\d{2}-\d{2}$/.test(s);
+
+function BatchFormSheet({ value, onClose }: { value: 'new' | AcademyBatch | null; onClose: () => void }) {
+  const teachersQ = useAcademyUsers('teacher', false);
+  const saveM = useSaveBatch();
+  const isEdit = value !== 'new' && value != null;
+  const [course, setCourse] = React.useState('');
+  const [name, setName] = React.useState('');
+  const [teacherIds, setTeacherIds] = React.useState<string[]>([]);
+  const [primaryId, setPrimaryId] = React.useState<string | null>(null);
+  const [startDate, setStartDate] = React.useState('');
+  const [endDate, setEndDate] = React.useState('');
+  const [days, setDays] = React.useState<Set<string>>(new Set());
+  const [time, setTime] = React.useState('');
+  const [status, setStatus] = React.useState<string>('active');
+  const [kb, setKb] = React.useState(0);
+  React.useEffect(() => {
+    const s = Keyboard.addListener('keyboardDidShow', (e) => setKb(e.endCoordinates.height));
+    const h = Keyboard.addListener('keyboardDidHide', () => setKb(0));
+    return () => { s.remove(); h.remove(); };
+  }, []);
+  React.useEffect(() => {
+    if (!value) return;
+    if (value === 'new') {
+      setCourse(''); setName(''); setTeacherIds([]); setPrimaryId(null);
+      setStartDate(''); setEndDate(''); setDays(new Set()); setTime(''); setStatus('active');
+    } else {
+      setCourse(value.course_name); setName(value.batch_name);
+      setTeacherIds(value.teachers.map((t) => t.id));
+      setPrimaryId(value.teachers.find((t) => t.isPrimary)?.id ?? value.teachers[0]?.id ?? null);
+      setStartDate(value.start_date ?? ''); setEndDate(value.end_date ?? '');
+      setDays(new Set(value.schedule?.days ?? [])); setTime(value.schedule?.time ?? '');
+      setStatus(value.status || 'active');
+    }
+  }, [value]);
+
+  // Tap toggles membership; tap the star on a selected teacher to make them primary.
+  const toggleTeacher = (id: string) => {
+    setTeacherIds((ids) => {
+      const has = ids.includes(id);
+      const next = has ? ids.filter((x) => x !== id) : [...ids, id];
+      setPrimaryId((p) => {
+        if (has && p === id) return next[0] ?? null;   // removed the primary → first remaining
+        if (!has && !p) return id;                     // first teacher added becomes primary
+        return p;
+      });
+      return next;
+    });
+  };
+
+  const canSave = !!course.trim() && !!name.trim() && teacherIds.length > 0 && !!primaryId && ymdOk(startDate) && ymdOk(endDate) && !saveM.isPending;
+  const save = () => {
+    if (!canSave) return;
+    saveM.mutate(
+      {
+        id: isEdit ? (value as AcademyBatch).id : null,
+        payload: {
+          course_name: course.trim(), batch_name: name.trim(),
+          start_date: startDate || null, end_date: endDate || null,
+          schedule: { days: [...days], time: time.trim() },
+          status,
+        },
+        teacherIds, primaryId,
+      },
+      {
+        onSuccess: () => { Alert.alert(isEdit ? 'Batch updated' : 'Batch created', `"${course.trim()} · ${name.trim()}" saved.`); onClose(); },
+        onError: (e: any) => Alert.alert('Could not save batch', e?.message ?? 'Try again'),
+      }
+    );
+  };
+
+  if (!value) return null;
+  return (
+    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' }}>
+        <Pressable style={{ flex: 1 }} onPress={onClose} />
+        <View style={{ maxHeight: '92%', backgroundColor: '#12131A', borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 1, borderColor: hexA(ACC, 0.18), paddingHorizontal: 18, paddingTop: 16, paddingBottom: kb > 0 ? kb + 14 : 26 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+            <View style={{ flex: 1 }}>
+              <Serif style={{ fontSize: 19 }}>{isEdit ? 'Edit Batch' : 'Create Batch'}</Serif>
+              <Body style={{ fontSize: 11, color: C.muted2 }}>Define course, teachers and schedule</Body>
+            </View>
+            <Pressable onPress={onClose} hitSlop={10} style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center', justifyContent: 'center' }}>
+              <Icon name="close" size={13} color={C.muted2} strokeWidth={2.3} />
+            </Pressable>
+          </View>
+          <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingBottom: 8 }}>
+            <View style={{ flexDirection: 'row', gap: 9 }}>
+              <View style={{ flex: 1, gap: 5 }}>
+                <Mono style={{ fontSize: 9, letterSpacing: 1, color: C.mono2 }}>COURSE *</Mono>
+                <TextInput value={course} onChangeText={setCourse} placeholder="e.g. CSPS" placeholderTextColor={C.muted3} style={inputStyle} />
+              </View>
+              <View style={{ flex: 1, gap: 5 }}>
+                <Mono style={{ fontSize: 9, letterSpacing: 1, color: C.mono2 }}>BATCH NAME *</Mono>
+                <TextInput value={name} onChangeText={setName} placeholder="e.g. July '26" placeholderTextColor={C.muted3} style={inputStyle} />
+              </View>
+            </View>
+
+            <View style={{ gap: 6 }}>
+              <Mono style={{ fontSize: 9, letterSpacing: 1, color: C.mono2 }}>TEACHERS * · TAP TO SELECT, TAP ★ FOR PRIMARY</Mono>
+              {teachersQ.isPending ? <ActivityIndicator color={ACC} style={{ paddingVertical: 8 }} /> : (
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}>
+                  {(teachersQ.data ?? []).map((t) => {
+                    const on = teacherIds.includes(t.id);
+                    const prim = primaryId === t.id;
+                    return (
+                      <Pressable key={t.id} onPress={() => toggleTeacher(t.id)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 7, paddingHorizontal: 11, borderRadius: 999, backgroundColor: on ? hexA(prim ? ACC : C.gold, 0.14) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: on ? hexA(prim ? ACC : C.gold, 0.5) : 'rgba(255,255,255,0.1)' }}>
+                        {on ? (
+                          <Pressable onPress={() => setPrimaryId(t.id)} hitSlop={8}>
+                            <Icon name="crown" size={11} color={prim ? ACC : 'rgba(255,255,255,0.35)'} strokeWidth={2.2} />
+                          </Pressable>
+                        ) : null}
+                        <Text style={{ fontFamily: on ? F.bodyBold : F.bodySemi, fontSize: 11.5, color: on ? (prim ? ACC : C.gold) : C.muted }}>{t.name}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              )}
+              <Body style={{ fontSize: 9.5, color: C.muted3 }}>The primary teacher is the batch's main contact and calendar colour.</Body>
+            </View>
+
+            <View style={{ flexDirection: 'row', gap: 9 }}>
+              <View style={{ flex: 1, gap: 5 }}>
+                <Mono style={{ fontSize: 9, letterSpacing: 1, color: C.mono2 }}>START DATE</Mono>
+                <TextInput value={startDate} onChangeText={setStartDate} placeholder="YYYY-MM-DD" placeholderTextColor={C.muted3} autoCorrect={false} style={[inputStyle, { fontFamily: F.mono }, !ymdOk(startDate) ? { borderColor: hexA(C.red, 0.5) } : null]} />
+              </View>
+              <View style={{ flex: 1, gap: 5 }}>
+                <Mono style={{ fontSize: 9, letterSpacing: 1, color: C.mono2 }}>END DATE</Mono>
+                <TextInput value={endDate} onChangeText={setEndDate} placeholder="YYYY-MM-DD" placeholderTextColor={C.muted3} autoCorrect={false} style={[inputStyle, { fontFamily: F.mono }, !ymdOk(endDate) ? { borderColor: hexA(C.red, 0.5) } : null]} />
+              </View>
+            </View>
+
+            <View style={{ gap: 6 }}>
+              <Mono style={{ fontSize: 9, letterSpacing: 1, color: C.mono2 }}>DAYS</Mono>
+              <View style={{ flexDirection: 'row', gap: 6 }}>
+                {WEEK.map((d) => {
+                  const on = days.has(d);
+                  return (
+                    <Pressable key={d} onPress={() => setDays((prev) => { const n = new Set(prev); on ? n.delete(d) : n.add(d); return n; })} style={{ flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: 10, backgroundColor: on ? hexA(C.green, 0.14) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: on ? hexA(C.green, 0.5) : 'rgba(255,255,255,0.09)' }}>
+                      <Text style={{ fontFamily: on ? F.bodyBold : F.bodySemi, fontSize: 10, color: on ? C.green : C.muted2 }}>{d}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+
+            <View style={{ gap: 5 }}>
+              <Mono style={{ fontSize: 9, letterSpacing: 1, color: C.mono2 }}>TIME (E.G. 10:00-12:00)</Mono>
+              <TextInput value={time} onChangeText={setTime} placeholder="10:00-12:00" placeholderTextColor={C.muted3} autoCorrect={false} style={inputStyle} />
+            </View>
+
+            <View style={{ gap: 6 }}>
+              <Mono style={{ fontSize: 9, letterSpacing: 1, color: C.mono2 }}>STATUS</Mono>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                {BATCH_STATUSES.map((s) => {
+                  const on = status === s;
+                  const col = s === 'active' ? C.green : s === 'completed' ? C.blue : C.red;
+                  return (
+                    <Pressable key={s} onPress={() => setStatus(s)} style={{ flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 11, backgroundColor: on ? hexA(col, 0.14) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: on ? hexA(col, 0.45) : 'rgba(255,255,255,0.09)' }}>
+                      <Text style={{ fontFamily: on ? F.bodyBold : F.bodySemi, fontSize: 11.5, color: on ? col : C.muted, textTransform: 'capitalize' }}>{s}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+
+            <Pressable onPress={save} disabled={!canSave} style={{ borderRadius: 13, overflow: 'hidden', opacity: canSave ? 1 : 0.5, marginTop: 4 }}>
+              <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ alignItems: 'center', paddingVertical: 14 }}>
+                <Text style={{ fontFamily: F.bodyBold, fontSize: 14, color: '#fff' }}>{saveM.isPending ? 'Saving…' : isEdit ? 'Save changes' : 'Create Batch'}</Text>
+              </LinearGradient>
+            </Pressable>
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
