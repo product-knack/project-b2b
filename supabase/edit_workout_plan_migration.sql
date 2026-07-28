@@ -84,9 +84,10 @@ BEGIN
     _plan_name, _plan_description, _duration_weeks,
     r.body_part, r.exercise_name, r.set_number, r.tempo, r.rest_period, r.rm_percentage,
     r.reps_target, r.load_target, r.super_set_group, r.exercise_notes, r.duration,
-    r.activity_type, r.sub_activity, r.rir_target, r.order_index, r.measurement_type
+    (r.activity_type)::activity_type, r.sub_activity, r.rir_target, r.order_index, r.measurement_type
   -- Types verified against the live table (2026-07-28): int = rest_period,
   -- reps_target, rir_target, order_index; numeric = rm_percentage, load_target;
+  -- activity_type is an ENUM ('Constant'/'Custom' — cast above, live-probed);
   -- everything else text (set_number is TEXT by design).
   FROM jsonb_to_recordset(_exercises) AS r(
     body_part text, exercise_name text, set_number text, tempo text, rest_period int,
