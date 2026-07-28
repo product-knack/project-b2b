@@ -69,16 +69,8 @@ export function SignIn() {
   // Role dropdown — the workspace is still decided by the ACCOUNT's real
   // profiles.role after authentication; picking a role only prefills the form.
   const ROLE_OPTS = [['crm', 'CRM', 'userCircle'], ['trainer', 'Trainer', 'dumbbell'], ['coach', 'Coach', 'crown'], ['ops', 'Operations', 'layers'], ['admin', 'Admin', 'shield'], ['doctor', 'Doctor', 'heart'], ['marketing', 'Marketing', 'trend'], ['academy', 'Academy', 'award']] as const;
-  // TESTING ONLY — remove before a public release (these ship inside the binary).
-  const TEST_LOGINS: Partial<Record<(typeof ROLE_OPTS)[number][0], { email: string; password: string }>> = {
-    academy: { email: 'prateekbarbora@oddsfitness.com', password: 'Prateek@123' },
-  };
   const [fill, setFill] = React.useState<(typeof ROLE_OPTS)[number][0]>('trainer');
-  const pickRole = (id: (typeof ROLE_OPTS)[number][0]) => {
-    setFill(id);
-    const t = TEST_LOGINS[id];
-    if (t) { setEmail(t.email); setPassword(t.password); }
-  };
+  const pickRole = (id: (typeof ROLE_OPTS)[number][0]) => setFill(id);
   const [rolePickerOpen, setRolePickerOpen] = React.useState(false);
   const [showPw, setShowPw] = React.useState(false);
   const [authErr, setAuthErr] = React.useState<string | null>(null);
@@ -5270,6 +5262,12 @@ export function Workout() {
   const healthLoading = healthQ.isLoading && healthQ.fetchStatus === 'fetching';
 
   const [healthOpen, setHealthOpen] = React.useState(false);
+  // Same Android new-arch rule as the pair picker: dismiss the keyboard and let
+  // it settle BEFORE unmounting a Modal that holds a focused TextInput.
+  const closeHealthSheet = React.useCallback(() => {
+    Keyboard.dismiss();
+    setTimeout(() => setHealthOpen(false), 80);
+  }, []);
   const [kbH, setKbH] = React.useState(0);
   React.useEffect(() => {
     const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
@@ -5294,16 +5292,16 @@ export function Workout() {
       // Same required fields as online; the data rides along in the outbox
       // payload and syncs right before the workout log.
       setOfflineHealth(payload);
-      setHealthOpen(false);
+      closeHealthSheet();
       return;
     }
     try {
       await saveHealthM.mutateAsync(payload);
-      setHealthOpen(false);
+      closeHealthSheet();
     } catch (e: any) {
       if (/network request failed|network error|failed to fetch|fetch failed|timeout/i.test(String(e?.message))) {
         setOfflineHealth(payload);
-        setHealthOpen(false);
+        closeHealthSheet();
       }
       /* other errors shown in dialog */
     }
@@ -5376,6 +5374,13 @@ export function Workout() {
   const [pairNames, setPairNames] = React.useState<{ primary: { id: string; name: string }; second: { id: string; name: string } } | null>(null);
   const [pairPickerOpen, setPairPickerOpen] = React.useState(false);
   const [pairSearch, setPairSearch] = React.useState('');
+  // Never unmount the picker Modal while its TextInput still has focus: on
+  // Android's new architecture that combination crashes the app. Dismiss the
+  // keyboard, let it settle for a frame or two, THEN close.
+  const closePairPicker = React.useCallback(() => {
+    Keyboard.dismiss();
+    setTimeout(() => { setPairPickerOpen(false); setPairSearch(''); }, 80);
+  }, []);
   const myClientsQ = useMyClients(trainerId);
   // Which leg is on screen: 'second' after client A saved and the form switched.
   const pairLeg: 'first' | 'second' = pairNames && partnerPlan && !partnerPlan.next ? 'second' : 'first';
@@ -5896,11 +5901,14 @@ export function Workout() {
             ) : null}
           </View>
         ) : null}
-      {/* Parallel-client picker (web ParallelWorkoutTabs "+ Add Client") */}
-      <Modal visible={pairPickerOpen} transparent animationType="slide" onRequestClose={() => setPairPickerOpen(false)}>
+      {/* Parallel-client picker (web ParallelWorkoutTabs "+ Add Client").
+          Closing MUST dismiss the keyboard first and unmount the Modal a beat
+          later — tearing down a Modal that still contains the focused TextInput
+          hard-crashes Android on the new architecture. */}
+      <Modal visible={pairPickerOpen} transparent animationType="slide" onRequestClose={closePairPicker}>
         <View style={{ flex: 1, justifyContent: 'flex-end' }}>
-          <Pressable onPress={() => setPairPickerOpen(false)} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)' }} />
-          <View style={{ maxHeight: '78%', backgroundColor: C.sheetBg, borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 12, paddingBottom: insets.bottom + 16 }}>
+          <Pressable onPress={closePairPicker} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)' }} />
+          <View style={{ maxHeight: '78%', backgroundColor: C.sheetBg, borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 12, paddingBottom: kbH > 0 ? kbH + 14 : insets.bottom + 16 }}>
             <View style={{ alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.14)', marginBottom: 12 }} />
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 }}>
               <View style={{ width: 34, height: 34, borderRadius: 12, backgroundColor: hexA(C.purple, 0.14), alignItems: 'center', justifyContent: 'center' }}>
@@ -5910,7 +5918,7 @@ export function Workout() {
                 <Serif style={{ fontSize: 18 }}>Add Parallel Client</Serif>
                 <Body style={{ fontSize: 11, color: C.muted2 }}>Log a second session alongside {clientName.split(' ')[0]} — one shared package session.</Body>
               </View>
-              <Pressable onPress={() => setPairPickerOpen(false)} style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center', justifyContent: 'center' }}>
+              <Pressable onPress={closePairPicker} hitSlop={8} style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center', justifyContent: 'center' }}>
                 <Icon name="close" size={13} color="#B8B2AC" strokeWidth={2.3} />
               </Pressable>
             </View>
@@ -5921,11 +5929,11 @@ export function Workout() {
             <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
               {(myClientsQ.data ?? [])
                 .filter((c) => c.client_id !== selectedClientId)
-                .filter((c) => !pairSearch.trim() || c.full_name.toLowerCase().includes(pairSearch.trim().toLowerCase()))
+                .filter((c) => !pairSearch.trim() || (c.full_name ?? '').toLowerCase().includes(pairSearch.trim().toLowerCase()))
                 .map((c) => (
                   <Pressable
                     key={c.client_id}
-                    onPress={() => { startPair({ id: c.client_id, name: c.full_name }); setPairPickerOpen(false); }}
+                    onPress={() => { Keyboard.dismiss(); startPair({ id: c.client_id, name: c.full_name }); setTimeout(() => { setPairPickerOpen(false); setPairSearch(''); }, 80); }}
                     style={{ flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' }}
                   >
                     <Avatar initial={initials(c.full_name)} size={34} colors={['#7C8FE8', '#9A7BEA']} fontSize={12} />
@@ -6527,8 +6535,8 @@ export function Workout() {
       </Modal>
 
       {/* Health data dialog */}
-      <Modal visible={healthOpen} transparent animationType="slide" onRequestClose={() => setHealthOpen(false)}>
-        <Pressable onPress={() => !saveHealthM.isPending && setHealthOpen(false)} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' }}>
+      <Modal visible={healthOpen} transparent animationType="slide" onRequestClose={closeHealthSheet}>
+        <Pressable onPress={() => !saveHealthM.isPending && closeHealthSheet()} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' }}>
           <Pressable onPress={() => {}} style={{ maxHeight: Math.min(winH * 0.9, winH - kbH - insets.top - 12), backgroundColor: '#0E0A09', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 14, paddingBottom: (kbH > 0 ? 12 : insets.bottom + 18), marginBottom: kbH }}>
             <View style={{ width: 40, height: 4, borderRadius: 99, backgroundColor: 'rgba(255,255,255,0.2)', alignSelf: 'center', marginBottom: 16 }} />
             <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 16 }}>
@@ -6544,7 +6552,7 @@ export function Workout() {
                 <Serif style={{ fontSize: 20 }}>Log Health Data</Serif>
                 <Body style={{ fontSize: 11.5, color: C.muted2, marginTop: 3, lineHeight: 16 }}>{clientName} hasn't logged last night's sleep or yesterday's nutrition. Enter it on their behalf.</Body>
               </View>
-              <Pressable onPress={() => setHealthOpen(false)} style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center', justifyContent: 'center' }}>
+              <Pressable onPress={closeHealthSheet} style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center', justifyContent: 'center' }}>
                 <Icon name="close" size={14} color="#B8B2AC" strokeWidth={2.3} />
               </Pressable>
             </View>
