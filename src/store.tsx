@@ -60,6 +60,12 @@ type Store = {
   workoutScheduleId: string | null;
   /** When set, the Workout form edits this queued (unsynced) outbox log in place. */
   editingOutboxId: string | null;
+  /** When set, the Create Plan screen opens in EDIT mode for this plan (only the
+      signed-in trainer's own rows of a possibly-shared plan). */
+  editingPlan: {
+    planId: string; planName: string; planDescription: string;
+    durationWeeks: number; modality: string; rows: any[];
+  } | null;
   openWorkout: (clientId: string, name: string, modality: string, scheduleId: string | null) => void;
   navDir: 'push' | 'back';
   aiOpen: boolean;
@@ -121,6 +127,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     clientInitialTab: null as string | null,
     workoutScheduleId: null as string | null,
     editingOutboxId: null as string | null,
+    editingPlan: null as any,
     openChatId: null as string | null,
     crmSection: null as string | null,
     threadViewOpen: false,

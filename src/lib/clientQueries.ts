@@ -1314,11 +1314,15 @@ export function useClientPlans(clientId: string | null) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('workout_plan_exercises')
-        .select('id, plan_id, plan_name, plan_description, plan_duration_weeks, modality, status, approved_at, created_at, order_index, body_part, exercise_name, set_number, tempo, rest_period, rm_percentage, reps_target, load_target, super_set_group, exercise_notes, activity_type, sub_activity, duration')
+        .select('id, plan_id, plan_name, plan_description, plan_duration_weeks, modality, status, approved_at, created_at, order_index, body_part, exercise_name, set_number, tempo, rest_period, rm_percentage, reps_target, load_target, super_set_group, exercise_notes, activity_type, sub_activity, duration, trainer_id, measurement_type, rir_target')
         .eq('client_id', clientId)
         .order('created_at', { ascending: true })
         .order('order_index', { ascending: true });
       if (error) throw new Error(error.message);
+      // Shared plans (two trainers, same modality, one plan_id): each row is
+      // stamped with its author's trainer_id so the edit feature can scope to
+      // "my exercises only" (web parity).
+      const myId = (await supabase.auth.getSession()).data.session?.user?.id ?? null;
 
       const now = Date.now();
       const map = new Map<string, any>();
@@ -1336,10 +1340,27 @@ export function useClientPlans(clientId: string | null) {
             approved_at: r.approved_at ?? null,
             created_at: r.created_at ?? null,
             expired: approved > 0 ? approved + 45 * 864e5 < now : false,
+            /** true when the signed-in trainer authored at least one row */
+            mine: false,
+            /** status/approved_at of the signed-in trainer's own rows (a shared
+                plan can be approved for one trainer and pending for the other) */
+            my_status: null as string | null,
+            my_approved_at: null as string | null,
+            shared: false,
             exercises: [] as any[],
           });
         }
-        map.get(pid).exercises.push({
+        const plan = map.get(pid);
+        if (myId && r.trainer_id === myId) {
+          plan.mine = true;
+          if (plan.my_status == null) {
+            plan.my_status = r.status ?? null;
+            plan.my_approved_at = r.approved_at ?? null;
+          }
+        } else if (r.trainer_id) {
+          plan.shared = true;
+        }
+        plan.exercises.push({
           id: r.id,
           body_part: r.body_part ?? null,
           exercise_name: r.exercise_name ?? null,
@@ -1354,6 +1375,10 @@ export function useClientPlans(clientId: string | null) {
           activity_type: r.activity_type ?? null,
           sub_activity: r.sub_activity ?? null,
           duration: r.duration ?? null,
+          trainer_id: r.trainer_id ?? null,
+          measurement_type: r.measurement_type ?? null,
+          rir_target: r.rir_target ?? null,
+          order_index: r.order_index ?? 0,
         });
       }
       // Newest plan first.
@@ -1881,4 +1906,167 @@ export async function ackWeeklyReport(rowId: string, acks: string[], trainerId: 
     .update({ trainer_acknowledgements: newAcks })
     .eq('id', rowId);
   if (error) throw new Error(error.message);
+}
+
+/* ============================================================================
+   Plan editing (web parity): a trainer may edit a plan while it is
+   pending_review / needs_revision / rejected (always), or while it is APPROVED
+   and fewer than 4 workouts have been logged against it.
+   Count = DISTINCT workout sessions (not days) for the client, modality
+   matched ('Strength Training' normalizes to 'Strength'), session_date >=
+   approved_at. KNOWN cross-platform quirk kept for parity: counting is by
+   modality, not plan_id, so two same-modality approved plans share counts.
+   The edit itself goes through the edit_workout_plan RPC, which re-runs this
+   exact check SERVER-SIDE in the same transaction (raises PLAN_LOCKED:<n>) —
+   so an offline edit that syncs late can never bypass the lock.
+   ========================================================================== */
+export const PLAN_EDIT_MAX_WORKOUTS = 4;
+export const normalizePlanModality = (m: string | null | undefined) =>
+  m === 'Strength Training' ? 'Strength' : (m ?? '');
+
+export function usePlanEditValidation(plan: { planId: string | null; clientId: string | null; modality: string | null; approvedAt: string | null; status: string | null }) {
+  const { planId, clientId, modality, approvedAt, status } = plan;
+  const q = useQuery({
+    queryKey: ['plan-edit-validation', planId, clientId, modality, approvedAt],
+    enabled: !!clientId && !!modality && !!approvedAt && status === 'approved',
+    staleTime: 30_000,
+    queryFn: async (): Promise<number> => {
+      const { data, error } = await supabase
+        .from('workout_exercises')
+        .select('session_id')
+        .eq('client_id', clientId!)
+        .eq('modality', normalizePlanModality(modality))
+        .gte('session_date', approvedAt!)
+        .not('session_date', 'is', null);
+      if (error) throw new Error(error.message);
+      return new Set(((data ?? []) as any[]).map((r) => r.session_id).filter(Boolean)).size;
+    },
+  });
+  const workoutCount = q.data ?? 0;
+  const alwaysEditable = status === 'pending_review' || status === 'needs_revision' || status === 'rejected';
+  const canEdit = alwaysEditable || (status === 'approved' && workoutCount < PLAN_EDIT_MAX_WORKOUTS);
+  return {
+    canEdit,
+    workoutCount,
+    remainingEdits: Math.max(0, PLAN_EDIT_MAX_WORKOUTS - workoutCount),
+    isApprovedGate: status === 'approved',
+    isLoading: q.isLoading,
+  };
+}
+
+/* Per-set row shape the RPC expects (types match the live table). */
+export type PlanEditExerciseRow = {
+  body_part: string; exercise_name: string; set_number: string | null;
+  tempo: string | null; rest_period: number | null; rm_percentage: number | null;
+  reps_target: number | null; load_target: number | null; super_set_group: string | null;
+  exercise_notes: string | null; duration: string | null; activity_type: string | null;
+  sub_activity: string | null; rir_target: number | null; order_index: number;
+  measurement_type: string | null;
+};
+export type WorkoutPlanEditInput = {
+  planId: string; clientId: string; planName: string; planDescription: string; durationWeeks: number;
+  exercises: PlanEditExerciseRow[];
+};
+
+/* Build the per-set RPC rows from the same form state the create flow uses.
+   Mirrors submitWorkoutPlan's three modality branches minus the plan meta
+   (the RPC forces plan/trainer/client/modality server-side). */
+export function buildPlanExerciseRows(input: {
+  modality: string;
+  bodyParts: PlanBodyPartInput[];
+  yoga: PlanYogaInput[];
+  boxing: { selected: PlanBoxingSelection[]; custom: PlanBoxingCustom[]; padwork: boolean };
+}): PlanEditExerciseRow[] {
+  const { modality, bodyParts, yoga, boxing } = input;
+  const blank: Omit<PlanEditExerciseRow, 'body_part' | 'exercise_name' | 'set_number' | 'order_index'> = {
+    tempo: null, rest_period: null, rm_percentage: null, reps_target: null, load_target: null,
+    super_set_group: null, exercise_notes: null, duration: null, activity_type: null,
+    sub_activity: null, rir_target: null, measurement_type: null,
+  };
+  if (modality === 'Yoga') {
+    return yoga
+      .filter((a) => a.name.trim())
+      .map((a, i) => ({
+        ...blank, body_part: 'Yoga Activities', exercise_name: a.name.trim(),
+        sub_activity: a.name.trim(), activity_type: 'Constant', set_number: '1', order_index: i,
+      }));
+  }
+  if (modality === 'Boxing') {
+    const rows: PlanEditExerciseRow[] = [];
+    let oi = 0;
+    if (boxing.padwork) rows.push({ ...blank, body_part: 'Boxing Activity', exercise_name: 'Pad work', activity_type: 'Custom', set_number: '1', order_index: oi++ });
+    for (const c of boxing.custom) {
+      if (!c.category.trim() || !c.name.trim()) continue;
+      rows.push({ ...blank, body_part: 'Boxing Activity', exercise_name: c.category.trim(), sub_activity: c.name.trim(), activity_type: 'Custom', set_number: '1', order_index: oi++ });
+    }
+    for (const s of boxing.selected) {
+      rows.push({ ...blank, body_part: 'Boxing Activity', exercise_name: s.category, sub_activity: s.exercise, activity_type: 'Constant', set_number: '1', order_index: oi++ });
+    }
+    return rows;
+  }
+  // Strength-style — one row per set. NOTE: free-text loads ("Body Weight") are
+  // dropped to null here because the RPC types load_target as numeric.
+  let oi = 0;
+  return bodyParts.flatMap((bp) =>
+    bp.exercises
+      .filter((ex) => ex.name.trim())
+      .flatMap((ex) => {
+        const isDuration = ex.measurement === 'duration';
+        return ex.sets.map((set, si) => {
+          const loadNum = set.load.trim() === '' ? null : Number(set.load);
+          return {
+            ...blank,
+            body_part: bp.body_part.trim(),
+            exercise_name: ex.name.trim(),
+            set_number: String(si + 1),
+            tempo: set.tempo.trim() || null,
+            rest_period: set.rest.trim() ? parseInt(set.rest, 10) || null : null,
+            rm_percentage: set.rm.trim() ? parseFloat(set.rm) || null : null,
+            reps_target: isDuration ? null : set.reps.trim() ? parseInt(set.reps, 10) || null : null,
+            super_set_group: set.ss.trim() || null,
+            exercise_notes: set.notes.trim() || null,
+            load_target: isDuration || loadNum === null || isNaN(loadNum) ? null : loadNum,
+            rir_target: set.rir.trim() ? parseInt(set.rir, 10) || null : null,
+            duration: isDuration ? (set.duration.trim() || null) : null,
+            measurement_type: ex.measurement,
+            order_index: oi++,
+          };
+        });
+      })
+  );
+}
+
+/* Friendly copy for a server-rejected edit — shown online AND when a queued
+   offline edit fails at sync time on Home -> Waiting to Sync. */
+const planLockedMessage = (raw: string) => {
+  const m = /PLAN_LOCKED:(\d+)/.exec(raw);
+  return m
+    ? `Plan locked: ${m[1]} workouts were logged before this edit synced. The edit was not applied.`
+    : null;
+};
+
+/* One RPC = one transaction: server re-validates the 4-workout lock, then
+   delete+reinsert atomically — and only ever touches the calling trainer's own
+   rows, so a shared plan's other trainer keeps their exercises. */
+export async function submitWorkoutPlanEdit(input: WorkoutPlanEditInput) {
+  const { error } = await supabase.rpc('edit_workout_plan', {
+    _plan_id: input.planId,
+    _plan_name: input.planName.trim(),
+    _plan_description: input.planDescription.trim() || null,
+    _duration_weeks: input.durationWeeks,
+    _exercises: input.exercises,
+  });
+  if (error) throw new Error(planLockedMessage(error.message) ?? error.message);
+}
+
+export function useEditWorkoutPlan() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: submitWorkoutPlanEdit,
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ['client-plans'] });
+      qc.invalidateQueries({ queryKey: ['plan-edit-validation'] });
+      qc.invalidateQueries({ queryKey: ['approved-plans'] });
+    },
+  });
 }

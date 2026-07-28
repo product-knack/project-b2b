@@ -11,8 +11,9 @@ import { useAuth } from '../auth';
 import {
   usePlanExerciseDb, useBoxingPlanExercises, useCreateWorkoutPlan, emptyPlanSet, DbExercise, uuidv4,
   PlanBodyPartInput, PlanExerciseInput, PlanSetInput, PlanYogaInput, PlanBoxingCustom, WorkoutPlanCreateInput,
+  useEditWorkoutPlan, buildPlanExerciseRows, WorkoutPlanEditInput,
 } from '../lib/clientQueries';
-import { enqueueOutbox, getIsOnline, useIsOnline } from '../lib/offline';
+import { enqueueOutbox, getIsOnline, useIsOnline, getOutbox, updateOutboxItem } from '../lib/offline';
 
 /* ============ CREATE WORKOUT PLAN ============
    Mirrors the web app's Create Workout Plan form end-to-end (client, plan meta,
@@ -63,23 +64,83 @@ function DashedBtn({ text, onPress, small }: { text: string; onPress: () => void
   );
 }
 
+/* ---- EDIT MODE prefill: reverse the create submit's row mapping ----
+   Rows are the signed-in trainer's OWN rows of the plan (a shared plan's other
+   trainer's exercises never enter the form), already sorted by order_index. */
+const numStr = (v: any) => (v === null || v === undefined ? '' : String(v));
+function prefillStrength(rows: any[]): PlanBodyPartInput[] {
+  const order: string[] = [];
+  const byBp: Record<string, { name: string; exs: Map<string, PlanExerciseInput> }> = {};
+  for (const r of rows) {
+    const bp = (r.body_part ?? '').trim() || 'Workout';
+    if (!byBp[bp]) { byBp[bp] = { name: bp, exs: new Map() }; order.push(bp); }
+    const exName = r.exercise_name ?? '';
+    let ex = byBp[bp].exs.get(exName);
+    if (!ex) {
+      ex = { name: exName, measurement: r.measurement_type === 'duration' ? 'duration' : 'reps', sets: [] };
+      byBp[bp].exs.set(exName, ex);
+    }
+    ex.sets.push({
+      reps: numStr(r.reps_target), load: numStr(r.load_target), duration: r.duration ?? '',
+      rest: numStr(r.rest_period), tempo: r.tempo ?? '', rm: numStr(r.rm_percentage),
+      rir: numStr(r.rir_target), ss: r.super_set_group ?? '', notes: r.exercise_notes ?? '',
+    });
+  }
+  const out = order.map((bp) => ({ body_part: bp, exercises: Array.from(byBp[bp].exs.values()) }));
+  return out.length ? out : [{ body_part: '', exercises: [] }];
+}
+function prefillYoga(rows: any[]): PlanYogaInput[] {
+  const acts = rows
+    .filter((r) => (r.exercise_name ?? '').trim())
+    .map((r) => ({ name: r.exercise_name as string, type: (r.activity_type === 'Custom' ? 'Custom' : 'Constant') as 'Constant' | 'Custom' }));
+  return acts.length ? acts : [{ name: '', type: 'Constant' }];
+}
+function prefillBoxing(rows: any[]) {
+  let padwork = false;
+  const boxSel: Record<string, string> = {};
+  const boxCustom: PlanBoxingCustom[] = [];
+  for (const r of rows) {
+    if (r.exercise_name === 'Pad work') { padwork = true; continue; }
+    if (r.activity_type === 'Custom') boxCustom.push({ category: r.exercise_name ?? '', name: r.sub_activity ?? '' });
+    else if (r.sub_activity) boxSel[r.sub_activity] = r.exercise_name ?? '';
+  }
+  return { padwork, boxSel, boxCustom };
+}
+
 export function CreatePlan() {
-  const { selectedClientId, selectedClientName, back, canGoBack, go } = useStore();
+  const { selectedClientId, selectedClientName, back, canGoBack, go, editingPlan, set: setStore } = useStore();
+  // The edit param is one-shot: clear it on unmount so the next plain
+  // "Create Plan" visit can never resurrect a stale edit session.
+  React.useEffect(() => () => setStore({ editingPlan: null }), []); // eslint-disable-line react-hooks/exhaustive-deps
   // RLS on workout_plan_exercises requires trainer_id = auth.uid(), so the plan
   // must be created as the signed-in user — never the dev fallback trainer id.
   const { session } = useAuth();
   const trainerId = session?.user?.id ?? '';
   const insets = useSafeAreaInsets();
   const createM = useCreateWorkoutPlan();
+  const editM = useEditWorkoutPlan();
   const clientName = selectedClientName ?? 'Client';
 
+  // EDIT MODE: snapshot the store param once — the form owns the state after.
+  // Only the trainer's own rows arrive here; modality is locked (web parity).
+  const [editing] = React.useState(editingPlan);
+  const isEdit = !!editing;
+  const editBoxing = React.useMemo(
+    () => (editing && editing.modality === 'Boxing' ? prefillBoxing(editing.rows) : null),
+    [editing]
+  );
+
   /* ---- plan meta ---- */
-  const [planName, setPlanName] = React.useState('');
-  const [desc, setDesc] = React.useState('');
-  const [modality, setModality] = React.useState<PlanModality | null>(null);
+  const [planName, setPlanName] = React.useState(editing?.planName ?? '');
+  const [desc, setDesc] = React.useState(editing?.planDescription ?? '');
+  const [modality, setModality] = React.useState<PlanModality | null>(editing ? (editing.modality as PlanModality) : null);
 
   /* ---- strength-style builder ---- */
-  const [bodyParts, setBodyParts] = React.useState<PlanBodyPartInput[]>([{ body_part: '', exercises: [] }]);
+  const [bodyParts, setBodyParts] = React.useState<PlanBodyPartInput[]>(() =>
+    editing && editing.modality !== 'Yoga' && editing.modality !== 'Boxing'
+      ? prefillStrength(editing.rows)
+      : [{ body_part: '', exercises: [] }]
+  );
   const [openSet, setOpenSet] = React.useState<string | null>(null); // "bpi-exi-si" of the expanded advanced row
   const isStrengthStyle = !!modality && modality !== 'Yoga' && modality !== 'Boxing';
   const poolQ = usePlanExerciseDb(isStrengthStyle ? modality : null);
@@ -96,13 +157,15 @@ export function CreatePlan() {
   const [customPool, setCustomPool] = React.useState<DbExercise[]>([]);
 
   /* ---- yoga ---- */
-  const [yoga, setYoga] = React.useState<PlanYogaInput[]>([{ name: '', type: 'Constant' }]);
+  const [yoga, setYoga] = React.useState<PlanYogaInput[]>(() =>
+    editing && editing.modality === 'Yoga' ? prefillYoga(editing.rows) : [{ name: '', type: 'Constant' }]
+  );
 
   /* ---- boxing ---- */
   const boxingDbQ = useBoxingPlanExercises();
-  const [boxSel, setBoxSel] = React.useState<Record<string, string>>({}); // exercise -> category
-  const [boxCustom, setBoxCustom] = React.useState<PlanBoxingCustom[]>([]);
-  const [padwork, setPadwork] = React.useState(false);
+  const [boxSel, setBoxSel] = React.useState<Record<string, string>>(editBoxing?.boxSel ?? {}); // exercise -> category
+  const [boxCustom, setBoxCustom] = React.useState<PlanBoxingCustom[]>(editBoxing?.boxCustom ?? []);
+  const [padwork, setPadwork] = React.useState(editBoxing?.padwork ?? false);
   const [openBoxCat, setOpenBoxCat] = React.useState<string | null>(null);
 
   const [done, setDone] = React.useState(false);
@@ -135,19 +198,69 @@ export function CreatePlan() {
     : modality === 'Boxing' ? boxSelCount + (padwork ? 1 : 0) + boxCustom.filter((c) => c.category.trim() && c.name.trim()).length
     : bodyParts.reduce((n, bp) => n + bp.exercises.filter((e) => e.name.trim()).length, 0);
 
-  const missingHint = createM.isPending || done ? null
+  const busy = createM.isPending || editM.isPending;
+  const missingHint = busy || done ? null
     : !planName.trim() ? 'Give the plan a name'
     : !modality ? 'Pick a modality'
     : !hasContent ? (modality === 'Yoga' ? 'Add at least one activity' : modality === 'Boxing' ? 'Select or add at least one activity' : 'Add at least one exercise')
     : modality !== 'Yoga' && modality !== 'Boxing' && strengthUnnamedSection ? 'Name each workout section (e.g. Chest, Push)'
     : null;
-  const canSubmit = !!selectedClientId && !!trainerId && !missingHint && !createM.isPending && !done;
+  const canSubmit = !!selectedClientId && !!trainerId && !missingHint && !busy && !done;
 
   const goBack = () => (canGoBack ? back() : go('client'));
   const guardedBack = () => (hasChanges && !done ? setExitConfirm(true) : goBack());
 
   const submit = async () => {
     if (!canSubmit) return;
+    if (editing) {
+      // EDIT MODE — one atomic RPC replaces only THIS trainer's rows of the
+      // plan. The server re-validates the 4-workout lock in the same
+      // transaction, so a stale/queued edit can never slip past it.
+      const input: WorkoutPlanEditInput = {
+        planId: editing.planId,
+        clientId: selectedClientId as string,
+        planName,
+        planDescription: desc,
+        durationWeeks: editing.durationWeeks,
+        exercises: buildPlanExerciseRows({
+          modality: editing.modality,
+          bodyParts,
+          yoga,
+          boxing: {
+            selected: Object.entries(boxSel).map(([exercise, category]) => ({ category, exercise })),
+            custom: boxCustom,
+            padwork,
+          },
+        }),
+      };
+      const editLabel = `Edit plan · ${planName.trim()} · ${clientName}`;
+      const finishOfflineEdit = async () => {
+        // Re-editing while a queued edit is still pending replaces that item —
+        // one plan, one queued edit, last version wins. Items mid-sync are left
+        // alone (a new item is queued instead; edits apply in order).
+        const existing = getOutbox().find((i) => i.kind === 'edit-plan' && i.payload?.planId === editing.planId && i.status !== 'syncing');
+        if (existing) await updateOutboxItem(existing.id, { label: editLabel, payload: input });
+        else await enqueueOutbox('edit-plan', editLabel, input);
+        setSavedOffline(true);
+        setDone(true);
+        setTimeout(goBack, 900);
+      };
+      if (!getIsOnline()) {
+        await finishOfflineEdit();
+        return;
+      }
+      try {
+        await editM.mutateAsync(input);
+        setDone(true);
+        setTimeout(goBack, 900);
+      } catch (e: any) {
+        if (/network request failed|network error|failed to fetch|fetch failed|timeout/i.test(String(e?.message))) {
+          await finishOfflineEdit();
+        }
+        /* server rejections (incl. "Plan locked") surface below */
+      }
+      return;
+    }
     // planId is generated on-device so an offline retry can never duplicate the plan.
     const input: WorkoutPlanCreateInput = {
       trainerId,
@@ -259,8 +372,10 @@ export function CreatePlan() {
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 13 }}>
           <IconChip icon="file" color={C.orange} />
           <View style={{ flex: 1 }}>
-            <Serif style={{ fontSize: 24 }}>Create Plan</Serif>
-            <Body style={{ fontSize: 12.5, color: C.muted, marginTop: 1 }}>Goes to the CRM for review before it reaches the client</Body>
+            <Serif style={{ fontSize: 24 }}>{isEdit ? 'Edit Plan' : 'Create Plan'}</Serif>
+            <Body style={{ fontSize: 12.5, color: C.muted, marginTop: 1 }}>
+              {isEdit ? 'Saving resubmits the plan to the CRM for review' : 'Goes to the CRM for review before it reaches the client'}
+            </Body>
           </View>
         </View>
 
@@ -272,7 +387,7 @@ export function CreatePlan() {
               <Body style={{ fontSize: 15, fontFamily: F.bodySemi, color: '#fff' }}>{clientName}</Body>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 }}>
                 <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: C.blue }} />
-                <Body style={{ fontSize: 11.5, color: C.muted }}>New training plan</Body>
+                <Body style={{ fontSize: 11.5, color: C.muted }}>{isEdit ? 'Editing training plan' : 'New training plan'}</Body>
               </View>
             </View>
           </View>
@@ -281,7 +396,17 @@ export function CreatePlan() {
             <TextInput value={planName} onChangeText={setPlanName} placeholder="e.g. Push Day, Leg Day, Full Body" placeholderTextColor={C.muted3} style={inputStyle} />
           </View>
           <View>
-            {label('MODALITY *')}
+            {label(isEdit ? 'MODALITY (LOCKED)' : 'MODALITY *')}
+            {isEdit ? (
+              // Web parity: the modality of an existing plan can never change.
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 10, paddingHorizontal: 11, borderRadius: 13, backgroundColor: hexA(C.orange, 0.08), borderWidth: 1, borderColor: hexA(C.orange, 0.3) }}>
+                <View style={{ width: 30, height: 30, borderRadius: 10, backgroundColor: hexA(C.orange, 0.14), alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon name={(MODALITY_META as any)[editing!.modality]?.icon ?? 'dumbbell'} size={15} color={C.orange} strokeWidth={2} />
+                </View>
+                <Text style={{ flex: 1, fontFamily: F.bodyBold, fontSize: 13, color: C.orange }}>{editing!.modality}</Text>
+                <Icon path="M5 11h14a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1M8 11V7a4 4 0 0 1 8 0v4" size={14} color={C.muted2} strokeWidth={2} />
+              </View>
+            ) : (
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
               {MODALITIES.map((m) => {
                 const meta = MODALITY_META[m];
@@ -299,6 +424,7 @@ export function CreatePlan() {
                 );
               })}
             </View>
+            )}
           </View>
           <View>
             {label('VALIDITY')}
@@ -588,10 +714,14 @@ export function CreatePlan() {
           </>
         )}
 
-        {createM.isError ? (
+        {createM.isError || editM.isError ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12, borderRadius: 12, backgroundColor: hexA(C.red, 0.08), borderWidth: 1, borderColor: hexA(C.red, 0.28) }}>
             <Icon name="alert" size={14} color={C.red} strokeWidth={2.2} />
-            <Body style={{ flex: 1, fontSize: 12, color: '#E0A090' }}>Couldn't create plan: {(createM.error as Error).message}</Body>
+            <Body style={{ flex: 1, fontSize: 12, color: '#E0A090' }}>
+              {editM.isError
+                ? `Couldn't save changes: ${(editM.error as Error).message}`
+                : `Couldn't create plan: ${(createM.error as Error).message}`}
+            </Body>
           </View>
         ) : null}
       </Page>
@@ -621,7 +751,9 @@ export function CreatePlan() {
             <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 15, borderRadius: 14 }}>
               <Icon name="checks" path={done ? 'M20 6 9 17l-5-5' : undefined} size={16} color="#fff" strokeWidth={2.6} />
               <Text style={{ fontFamily: F.bodyBold, fontSize: 14.5, color: '#fff' }}>
-                {createM.isPending ? 'Creating…' : done ? (savedOffline ? 'Saved on device ✓' : 'Sent for review!') : 'Create Plan'}
+                {busy ? (isEdit ? 'Saving…' : 'Creating…')
+                  : done ? (savedOffline ? 'Saved on device ✓' : isEdit ? 'Resubmitted for review!' : 'Sent for review!')
+                  : isEdit ? 'Save & Resubmit' : 'Create Plan'}
               </Text>
             </LinearGradient>
           </Pressable>

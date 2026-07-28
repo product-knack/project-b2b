@@ -3,7 +3,7 @@ import Storage from 'expo-sqlite/kv-store';
 import NetInfo from '@react-native-community/netinfo';
 import type { QueryClient } from '@tanstack/react-query';
 import { onlineManager } from '@tanstack/react-query';
-import { submitWorkoutLog, submitHealthData, submitWorkoutPlan, WorkoutLogInput, WorkoutPlanCreateInput, HealthDataInput } from './clientQueries';
+import { submitWorkoutLog, submitHealthData, submitWorkoutPlan, submitWorkoutPlanEdit, WorkoutLogInput, WorkoutPlanCreateInput, WorkoutPlanEditInput, HealthDataInput } from './clientQueries';
 import { submitChatMessage } from './chatQueries';
 import { submitLocationLog, LocationLogPayload } from './locationLog';
 
@@ -17,7 +17,7 @@ const OUTBOX_KEY = 'outbox:v1';
 
 export type OutboxItem = {
   id: string;
-  kind: 'workout-log' | 'create-plan' | 'chat-message' | 'location-log';
+  kind: 'workout-log' | 'create-plan' | 'edit-plan' | 'chat-message' | 'location-log';
   label: string;          // human line for the pending-sync UI
   createdAt: string;      // ORIGINAL device timestamp at submit time
   status: 'pending' | 'syncing' | 'failed';
@@ -191,6 +191,14 @@ async function processItem(item: OutboxItem): Promise<void> {
     const p = item.payload as WorkoutPlanCreateInput;
     await submitWorkoutPlan(p);
     qcRef?.invalidateQueries({ queryKey: ['client-plans', p.clientId] });
+  } else if (item.kind === 'edit-plan') {
+    // The RPC re-validates the 4-workout lock server-side at THIS moment, so a
+    // queued edit that syncs after the 4th workout fails here with the friendly
+    // "Plan locked" message and stays on Home -> Waiting to Sync for review.
+    const p = item.payload as WorkoutPlanEditInput;
+    await submitWorkoutPlanEdit(p);
+    qcRef?.invalidateQueries({ queryKey: ['client-plans', p.clientId] });
+    qcRef?.invalidateQueries({ queryKey: ['plan-edit-validation'] });
   } else if (item.kind === 'chat-message') {
     const p = item.payload as { id: string; conversationId: string; senderId: string; text: string };
     await submitChatMessage(p);

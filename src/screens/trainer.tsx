@@ -24,7 +24,7 @@ import { supabase, DEV_TRAINER_ID } from '../lib/supabase';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { QhpAssessmentForm, CoachPresenceModal, fetchHasPriorCompletedQHP } from './qhpAssessmentForm';
 import { useTodayRoster, useTrainerStats, useTrainerProfile, useTrainerMonthSessions, useTrainerLeaderboard, useManagerLeaderboard, useManagerTeam, useManagerTeamLeaves, useManagerTeamIncidents, useManagerTeamRetention, useManagerTeamLateLogs, useManagerTeamRoster, useManagerTeamPlanOverview, useManagerTeamAcks, useManagerTeamAppAdoption, useTrainerSessionBreakdown, useTrainerReferralBreakdown, useFirstSessionAlert, istTimeParts, istDayLabel, istDate, useCancelScheduledSession, useRequestReschedule, useAddMissedRemark, lbMonthBounds, lbMonthLabel, LbBounds, RosterRow, ManagerTeamMember, MgrMonthFilter, usePlanExpiryMap, PlanExpiry, useTrainerAckSummary, useRequestRoster, useRosterDistance, SESSION_MODALITIES, useMyMonthSessionBreakdown, usePilatesRunRate } from '../lib/trainerQueries';
-import { useMyClients, useClientDetail, useClientSessions, useClientPlans, useClientGoals, useClientReports, useClientBioAge, useClientProgression, useCreateWorkoutSession, useModalityGate, useWorkoutTemplates, useSaveWorkoutTemplate, useDeleteWorkoutTemplate, useClientHealthCheck, useSaveHealthData, useExerciseDb, useSessionExercises, uuidv4, HealthDataInput, useWeeklyProgressionAll, ackWeeklyReport, WeeklyProgressionRow, useApprovedPlansForLogging, usePartnerInfo, usePreviousExerciseData, checkDuplicateWorkoutToday, PlanExerciseRow, useClientDailyStats, useSaveClientHomeLocation, PILATES_REFORMER_EXERCISES } from '../lib/clientQueries';
+import { useMyClients, useClientDetail, useClientSessions, useClientPlans, useClientGoals, useClientReports, useClientBioAge, useClientProgression, useCreateWorkoutSession, useModalityGate, useWorkoutTemplates, useSaveWorkoutTemplate, useDeleteWorkoutTemplate, useClientHealthCheck, useSaveHealthData, useExerciseDb, useSessionExercises, uuidv4, HealthDataInput, useWeeklyProgressionAll, ackWeeklyReport, WeeklyProgressionRow, useApprovedPlansForLogging, usePartnerInfo, usePreviousExerciseData, checkDuplicateWorkoutToday, PlanExerciseRow, useClientDailyStats, useSaveClientHomeLocation, PILATES_REFORMER_EXERCISES, usePlanEditValidation, normalizePlanModality, PLAN_EDIT_MAX_WORKOUTS } from '../lib/clientQueries';
 import * as Location from 'expo-location';
 import KvStorage from 'expo-sqlite/kv-store';
 import { enqueueOutbox, getIsOnline, useIsOnline, useOutbox, retryOutboxItem, removeOutboxItem, drainOutbox, submitItem, updateOutboxItem, getOutboxItem, WorkoutLogOutboxPayload, OutboxItem, useSyncedNotices, dismissSyncedNotice } from '../lib/offline';
@@ -3598,8 +3598,58 @@ function AiWeeklyReportTab({ clientId }: { clientId: string | null }) {
   );
 }
 
+/* Edit affordance for one plan card (web parity: WorkoutPlanCard).
+   Pending / needs-revision / rejected plans are always editable; approved plans
+   only while they are the trainer's most recent plan for that modality AND
+   fewer than 4 workouts have been logged since approval. Gating uses the
+   trainer's OWN rows' status (a shared plan can be approved for one trainer and
+   pending for the other). */
+function PlanEditAction({ plan, clientId, isMostRecent, onEdit }: { plan: any; clientId: string; isMostRecent: boolean; onEdit: () => void }) {
+  const myStatus = (plan.my_status ?? plan.status ?? '') as string;
+  const validation = usePlanEditValidation({
+    planId: plan.plan_id,
+    clientId,
+    modality: plan.modality ?? null,
+    approvedAt: plan.my_approved_at ?? plan.approved_at ?? null,
+    status: myStatus,
+  });
+  const alwaysEditable = myStatus === 'pending_review' || myStatus === 'needs_revision' || myStatus === 'rejected';
+  const approved = myStatus === 'approved';
+  const canEdit = alwaysEditable || (approved && isMostRecent && validation.canEdit);
+  const blockedReason = canEdit ? null
+    : approved && !isMostRecent ? 'Only the most recent plan for each modality can be edited.'
+    : approved && !validation.canEdit ? `Cannot edit: ${validation.workoutCount} workouts completed using this plan. Plans can only be edited within the first ${PLAN_EDIT_MAX_WORKOUTS} workouts.`
+    : null;
+  if (!canEdit && !blockedReason) return null;
+  return (
+    <View style={{ gap: 8 }}>
+      {canEdit ? (
+        <Pressable onPress={onEdit} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 11, borderRadius: 12, borderWidth: 1, borderColor: hexA(C.orange, 0.4), backgroundColor: hexA(C.orange, 0.09) }}>
+        <Icon path="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" size={14} color={C.orange} strokeWidth={2.2} />
+          <Text style={{ fontFamily: F.bodyBold, fontSize: 13, color: C.orange }}>Edit Plan</Text>
+          {approved && !validation.isLoading ? (
+            <View style={{ paddingVertical: 2.5, paddingHorizontal: 8, borderRadius: 999, backgroundColor: hexA(C.orange, 0.16) }}>
+              <Text style={{ fontFamily: F.mono, fontSize: 10.5, color: C.orange }}>{validation.remainingEdits} left</Text>
+            </View>
+          ) : null}
+        </Pressable>
+      ) : (
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8, padding: 11, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.03)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' }}>
+          <Icon path="M5 11h14a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1M8 11V7a4 4 0 0 1 8 0v4" size={14} color={C.muted2} strokeWidth={2} />
+          <Body style={{ flex: 1, fontSize: 11.5, color: C.muted2, lineHeight: 16 }}>{blockedReason}</Body>
+        </View>
+      )}
+      {plan.shared ? (
+        <Body style={{ fontSize: 10.5, color: C.muted3 }}>Shared plan: editing only changes the exercises you added. The other trainer's exercises stay untouched.</Body>
+      ) : null}
+    </View>
+  );
+}
+
 export function ClientDetail() {
-  const { go, selectedClientId, selectedClientName, clientInitialTab } = useStore();
+  const { go, set, selectedClientId, selectedClientName, clientInitialTab } = useStore();
+  const { session } = useAuth();
+  const myTrainerId = session?.user?.id ?? null;
   const clientId = selectedClientId;
   const detailQ = useClientDetail(clientId);
   const sessionsQ = useClientSessions(clientId);
@@ -4659,7 +4709,7 @@ export function ClientDetail() {
               <Serif style={{ fontSize: 19 }}>Training Plans</Serif>
               <Body style={{ fontSize: 11.5, color: C.muted, marginTop: 1 }}>{planSummary}</Body>
             </View>
-            <Pressable onPress={() => go('create-plan')}>
+            <Pressable onPress={() => { set({ editingPlan: null }); go('create-plan'); }}>
               <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 9, paddingHorizontal: 13, borderRadius: 999 }}>
                 <Icon name="plus" size={13} color="#fff" strokeWidth={2.8} />
                 <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: '#fff' }}>Create Plan</Text>
@@ -4691,6 +4741,27 @@ export function ClientDetail() {
                 const key = ex.body_part || 'General';
                 (groups[key] = groups[key] || []).push(ex);
               }
+              // Edit gating (web parity): "most recent plan for this modality"
+              // is judged among MY plans only — plans are already newest-first.
+              const modKey = normalizePlanModality(p.modality);
+              const isMostRecent =
+                (plansQ.data ?? []).find((x: any) => x.mine && normalizePlanModality(x.modality) === modKey)?.plan_id === p.plan_id;
+              const startEdit = () => {
+                const myRows = (p.exercises ?? [])
+                  .filter((ex: any) => ex.trainer_id === myTrainerId)
+                  .sort((a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0));
+                set({
+                  editingPlan: {
+                    planId: p.plan_id,
+                    planName: p.plan_name ?? '',
+                    planDescription: p.plan_description ?? '',
+                    durationWeeks: p.plan_duration_weeks ?? 6,
+                    modality: p.modality ?? 'Strength Training',
+                    rows: myRows,
+                  },
+                });
+                go('create-plan');
+              };
               return (
                 <View key={p.plan_id ?? i} style={{ borderRadius: 14, backgroundColor: 'rgba(0,0,0,0.25)', borderWidth: 1, borderColor: hexA(c, 0.2), overflow: 'hidden' }}>
                   <Pressable onPress={() => setOpenPlan(isOpen ? null : p.plan_id)} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 13 }}>
@@ -4707,6 +4778,11 @@ export function ClientDetail() {
                   {isOpen ? (
                     <View style={{ paddingHorizontal: 13, paddingBottom: 13, gap: 12, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)', paddingTop: 12 }}>
                       {p.plan_description ? <Body style={{ fontSize: 12.5, color: C.muted2 }}>{p.plan_description}</Body> : null}
+                      {p.mine && clientId ? (
+                        <PlanEditAction plan={p} clientId={clientId} isMostRecent={isMostRecent} onEdit={startEdit} />
+                      ) : !p.mine && p.shared ? (
+                        <Body style={{ fontSize: 10.5, color: C.muted3 }}>Added by another trainer. Only the trainer who added these exercises can edit them.</Body>
+                      ) : null}
                       {exCount === 0 ? (
                         <Body style={{ fontSize: 12.5, color: C.muted3 }}>No exercises in this plan.</Body>
                       ) : (
@@ -5876,7 +5952,7 @@ export function Workout() {
               <Body style={{ fontSize: 12.5, color: C.ink3, lineHeight: 18 }}>
                 You've logged {gate.loggedCount} {modLabel} sessions for {clientName} without an approved training plan. An approved {modLabel} plan is required to log more.
               </Body>
-              <Pressable onPress={() => go('create-plan')}>
+              <Pressable onPress={() => { set({ editingPlan: null }); go('create-plan'); }}>
                 <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 11, borderRadius: 12 }}>
                   <Icon name="plus" size={14} color="#fff" strokeWidth={2.8} />
                   <Text style={{ fontFamily: F.bodyBold, fontSize: 13, color: '#fff' }}>Create Training Plan</Text>
