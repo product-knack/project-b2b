@@ -5316,29 +5316,59 @@ export function Workout() {
     setPairNames(null);
     AsyncStorage.removeItem(PARALLEL_STORE_KEY).catch(() => {});
   };
-  // Tap the second-client tab (before the first leg is saved) → swap which client
-  // the form is currently logging. The entered exercises stay on screen and now
-  // belong to the newly active client; the other client moves to the NEXT slot.
-  const swapPair = () => {
+  // ---- Per-client form isolation (web parity via the draft layer) ----
+  // Each half of a couple keeps their OWN form. Switching tabs snapshots the
+  // outgoing client's form into their draft and loads the incoming client's
+  // draft; the incoming client only inherits the current selection (values
+  // cleared) when they have NOTHING of their own. Logging client A applies the
+  // same rule — A's exercises can never overwrite B's saved work again.
+  const draftKeyFor = (cid: string) => `workout-draft:${trainerId}:${cid}`;
+  const snapshotFormTo = (cid: string) => {
+    const meaningful = exercises.some((e) => e.name.trim()) || sessionName.trim() || remark.trim();
+    if (!meaningful || !trainerId) return;
+    KvStorage.setItem(draftKeyFor(cid), JSON.stringify({ sessionName, exercises, remark, rpe, modality, customModalityName })).catch(() => {});
+  };
+  /* Restore `cid`'s own draft if it has real content; otherwise carry the given
+     selection over with values cleared. Marks the draft-restore effect as
+     handled either way so it can't double-apply. */
+  const applyDraftOrCarry = async (cid: string, carrySource: WExercise[], carryName: string) => {
+    if (trainerId) draftCheckedRef.current = draftKeyFor(cid);
+    let d: any = null;
+    try { const raw = await KvStorage.getItem(draftKeyFor(cid)); if (raw) d = JSON.parse(raw); } catch { /* corrupt draft */ }
+    const hasOwn = d && ((Array.isArray(d.exercises) && d.exercises.length > 0) || (d.sessionName ?? '').trim() || (d.remark ?? '').trim());
+    if (hasOwn) {
+      if (d.modality && d.modality !== modality) { prevModalityRef.current = d.modality; set({ modality: d.modality }); }
+      setSessionName(d.sessionName ?? '');
+      setExercises(Array.isArray(d.exercises) ? d.exercises : []);
+      setRemark(d.remark ?? '');
+      setRpe(d.rpe ?? null);
+      if (d.customModalityName) setCustomModalityName(d.customModalityName);
+      return;
+    }
+    const carried: WExercise[] = JSON.parse(JSON.stringify(carrySource)).map((e: WExercise) => ({
+      ...e,
+      collapsed: true,
+      completed: isActivityModality ? false : e.completed,
+      sets: e.sets.map((s) => ({ ...s, reps: '', load: '', duration: '' })),
+    }));
+    setSessionName(carryName);
+    setExercises(carried);
+    setRemark('');
+    setRpe(null);
+  };
+  // Tap the second-client tab (before the first leg is saved) → switch to that
+  // client's OWN form (snapshot out, restore in). No values are reassigned.
+  const swapPair = async () => {
     if (!pairNames || !partnerPlan?.next || pairLeg !== 'first') return;
-    const doSwap = () => {
-      const newPrimary = pairNames.second;
-      const newSecond = pairNames.primary;
-      setPairNames({ primary: newPrimary, second: newSecond });
-      setPartnerPlan({ groupId: partnerPlan.groupId, next: newSecond });
-      set({ selectedClientId: newPrimary.id, selectedClientName: newPrimary.name, workoutScheduleId: null });
-      // Keep the on-screen exercises; block the new client's stored draft restore
-      // so it can't overwrite what is already typed.
-      if (trainerId) draftCheckedRef.current = `workout-draft:${trainerId}:${newPrimary.id}`;
-      AsyncStorage.setItem(PARALLEL_STORE_KEY, JSON.stringify({ primaryId: newPrimary.id, primaryName: newPrimary.name, second: newSecond, groupId: partnerPlan.groupId, at: Date.now() })).catch(() => {});
-    };
-    if (exercises.some(exHasData)) {
-      Alert.alert(
-        'Switch client?',
-        `The values entered so far will now be logged for ${pairNames.second.name.split(' ')[0]} instead of ${pairNames.primary.name.split(' ')[0]}.`,
-        [{ text: 'Cancel', style: 'cancel' }, { text: 'Switch', onPress: doSwap }]
-      );
-    } else doSwap();
+    const outgoing = pairNames.primary;
+    const incoming = pairNames.second;
+    snapshotFormTo(outgoing.id);
+    draftDirtyRef.current = false; // outgoing state is snapshotted; no stray auto-save into the new key
+    setPairNames({ primary: incoming, second: outgoing });
+    setPartnerPlan({ groupId: partnerPlan.groupId, next: outgoing });
+    set({ selectedClientId: incoming.id, selectedClientName: incoming.name, workoutScheduleId: null });
+    AsyncStorage.setItem(PARALLEL_STORE_KEY, JSON.stringify({ primaryId: incoming.id, primaryName: incoming.name, second: outgoing, groupId: partnerPlan.groupId, at: Date.now() })).catch(() => {});
+    await applyDraftOrCarry(incoming.id, exercises, sessionName);
   };
   // Restore a stored pair for the SAME primary client within the TTL (web localStorage parity).
   React.useEffect(() => {
@@ -5620,28 +5650,20 @@ export function Workout() {
     if (editingOutboxId) set({ editingOutboxId: null });
     if (partnerPlan?.next) {
       const next = partnerPlan.next;
-      // Carry the FIRST client's exercise selection into the partner's form (couples
-      // usually do the same workout): same exercises, same set counts, but VALUES
-      // CLEARED — the partner's actual reps/loads get entered fresh (their own
-      // "Last:" placeholders show), and any carried exercise left blank is dropped
-      // by the blank-exercise popup at submit. Fully editable: add/remove/rename.
-      const carried: WExercise[] = JSON.parse(JSON.stringify(exercises.filter(exHasData))).map((e: WExercise) => ({
-        ...e,
-        collapsed: true,
-        completed: isActivityModality ? false : e.completed,
-        sets: e.sets.map((s) => ({ ...s, reps: '', load: '', duration: '' })),
-      }));
+      // Snapshot A's data-bearing selection BEFORE any state changes. The partner
+      // only inherits it (values cleared) when they have NO draft of their own —
+      // applyDraftOrCarry restores their saved work first, so logging client A
+      // can never overwrite exercises the partner already picked.
+      const carrySource: WExercise[] = exercises.filter(exHasData);
       const carriedName = sessionName;
       setTimeout(() => {
         // Second leg of the partner pair: same shared group id, no schedule slot.
         setPartnerPlan({ groupId: partnerPlan.groupId, next: null });
         setPartnerAsked(true);
         set({ selectedClientId: next.id, selectedClientName: next.name, workoutScheduleId: null });
-        setSessionName(carriedName); setExercises(carried); setRemark(''); setRpe(null); setDone(false); setSavedOffline(false); setSyncError(null);
+        setDone(false); setSavedOffline(false); setSyncError(null);
         aerobicsPopulatedRef.current = null;
-        // The carried list IS the partner's starting state — skip their stored
-        // draft restore so it can't overwrite the carry-over.
-        if (trainerId) draftCheckedRef.current = `workout-draft:${trainerId}:${next.id}`;
+        applyDraftOrCarry(next.id, carrySource, carriedName);
       }, offline ? 900 : 700);
     } else {
       // Final leg saved (solo, or both halves of a pair) → the stored pair is spent.
@@ -5792,8 +5814,8 @@ export function Workout() {
             {pairNames ? (
               <Body style={{ fontSize: 10, color: C.muted3, paddingLeft: 3 }}>
                 {pairLeg === 'first'
-                  ? `Parallel session — after saving ${pairNames.primary.name.split(' ')[0]}'s log, the form switches to ${pairNames.second.name.split(' ')[0]}. The pair shares one package session.`
-                  : `Second leg — ${pairNames.primary.name.split(' ')[0]}'s exercises are pre-selected; enter ${pairNames.second.name.split(' ')[0]}'s values (add or remove exercises freely).`}
+                  ? `Parallel session — each client keeps their own form. After saving ${pairNames.primary.name.split(' ')[0]}'s log, the form switches to ${pairNames.second.name.split(' ')[0]}. The pair shares one package session.`
+                  : `Second leg — ${pairNames.primary.name.split(' ')[0]}'s own saved selection is kept (or the partner's exercises are pre-filled if they had none). Add or remove freely.`}
               </Body>
             ) : null}
           </View>
