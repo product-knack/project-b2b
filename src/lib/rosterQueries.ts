@@ -305,6 +305,19 @@ export function useCancelRosterSession() {
   });
 }
 
+/* How many upcoming sessions a client has — so the delete-roster confirmation
+   can state exactly what will be destroyed before anything is touched. */
+export async function countFutureSessions(clientId: string): Promise<number> {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const { count, error } = await supabase
+    .from('session_schedule')
+    .select('id', { count: 'exact', head: true })
+    .eq('client_id', clientId)
+    .gte('scheduled_datetime', today.toISOString());
+  if (error) throw new Error(error.message);
+  return count ?? 0;
+}
+
 /* ---------- Delete all future sessions for a client (hard delete, like web) ---------- */
 export function useDeleteFutureSessions() {
   const qc = useQueryClient();

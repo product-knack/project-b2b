@@ -8,7 +8,7 @@ import { Page, Badge, MiniAvatar, AnimChip, HScroll, TimeDial } from './common';
 import { useAuth } from '../auth';
 import {
   useMonthRoster, useRosterPeople, useBulkCreateRoster, useRescheduleRosterSession,
-  useCancelRosterSession, useDeleteFutureSessions, useInferRoster, MODALITIES, modalityColor, RosterSession, RosterConflict,
+  useCancelRosterSession, useDeleteFutureSessions, countFutureSessions, useInferRoster, MODALITIES, modalityColor, RosterSession, RosterConflict,
 } from '../lib/rosterQueries';
 import { SheetShell } from './reportDetail';
 
@@ -62,6 +62,77 @@ function FilterPickerSheet({ visible, title, options, selectedId, onPick, onClos
   );
 }
 
+/* ---------- Delete a client's ENTIRE upcoming roster in two taps ----------
+   Pick any client, see exactly how many upcoming sessions they have, confirm,
+   gone. Hard delete of future session_schedule rows only — past sessions and
+   attendance history stay untouched (same contract as the per-session sheet's
+   "Delete all future sessions"). */
+function DeleteRosterSheet({ visible, clients, onClose }: {
+  visible: boolean; clients: { id: string; name: string; n?: number }[]; onClose: () => void;
+}) {
+  const wipeM = useDeleteFutureSessions();
+  const [q, setQ] = React.useState('');
+  const [busyId, setBusyId] = React.useState<string | null>(null);
+  React.useEffect(() => { if (visible) { setQ(''); setBusyId(null); } }, [visible]);
+  const query = q.trim().toLowerCase();
+  const list = clients.filter((o) => !query || o.name.toLowerCase().includes(query));
+
+  const confirmDelete = async (c: { id: string; name: string }) => {
+    if (busyId) return;
+    Keyboard.dismiss();
+    setBusyId(c.id);
+    try {
+      const n = await countFutureSessions(c.id);
+      if (n === 0) { Alert.alert('Nothing to delete', `${c.name} has no upcoming sessions.`); return; }
+      Alert.alert(
+        'Delete this roster?',
+        `${n} upcoming session${n === 1 ? '' : 's'} for ${c.name} will be permanently deleted. Past sessions are kept. This cannot be undone.`,
+        [
+          { text: 'Keep roster', style: 'cancel' },
+          {
+            text: `Delete ${n === 1 ? 'session' : `all ${n}`}`, style: 'destructive',
+            onPress: async () => {
+              try {
+                const deleted = await wipeM.mutateAsync({ clientId: c.id });
+                onClose();
+                Alert.alert('Roster deleted', `${deleted} upcoming session${deleted === 1 ? '' : 's'} removed for ${c.name}.`);
+              } catch (e: any) { Alert.alert("Couldn't delete", e?.message ?? 'Try again.'); }
+            },
+          },
+        ]
+      );
+    } catch (e: any) {
+      Alert.alert("Couldn't check roster", e?.message ?? 'Try again.');
+    } finally { setBusyId(null); }
+  };
+
+  return (
+    <SheetShell visible={visible} onClose={onClose} accent={C.red} icon="alert" title="Delete Roster" subtitle="REMOVES A CLIENT'S UPCOMING SESSIONS">
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9, padding: 11, borderRadius: 12, backgroundColor: hexA(C.red, 0.07), borderWidth: 1, borderColor: hexA(C.red, 0.25) }}>
+        <Icon name="alert" size={14} color={C.red} strokeWidth={2.1} />
+        <Body style={{ flex: 1, fontSize: 11, color: C.muted2, lineHeight: 15 }}>Pick a client to wipe every upcoming session from their roster. You will see the exact count before anything is deleted.</Body>
+      </View>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 10, paddingHorizontal: 13, borderRadius: 13, backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' }}>
+        <Icon name="search" size={14} color={C.muted3} strokeWidth={2} />
+        <TextInput value={q} onChangeText={setQ} placeholder="Search clients…" placeholderTextColor={C.muted3} autoCorrect={false} style={{ flex: 1, fontFamily: F.body, fontSize: 13.5, color: '#fff', padding: 0 }} />
+      </View>
+      {list.slice(0, 40).map((o, i) => (
+        <Pressable key={o.id} onPress={() => confirmDelete(o)} disabled={!!busyId} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 11, borderRadius: 13, backgroundColor: 'rgba(0,0,0,0.22)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)', opacity: busyId && busyId !== o.id ? 0.5 : 1 }}>
+          <MiniAvatar initial={initials(o.name)} colors={AVS[i % AVS.length]} size={32} />
+          <View style={{ flex: 1 }}>
+            <Body numberOfLines={1} style={{ fontSize: 13, fontFamily: F.bodySemi, color: '#fff' }}>{o.name}</Body>
+            {o.n ? <Mono style={{ fontSize: 8.5, color: C.muted3, marginTop: 1 }}>{o.n} THIS MONTH</Mono> : null}
+          </View>
+          {busyId === o.id
+            ? <ActivityIndicator size="small" color={C.red} />
+            : <Icon path="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14M10 11v6M14 11v6" size={15} color={C.red} strokeWidth={2} />}
+        </Pressable>
+      ))}
+      {list.length === 0 ? <Body style={{ fontSize: 12, color: C.muted3, textAlign: 'center', paddingVertical: 14 }}>No clients match "{q.trim()}".</Body> : null}
+    </SheetShell>
+  );
+}
+
 export function CrmRoster() {
   const { session } = useAuth();
   const crmId = session?.user?.id ?? null;
@@ -74,6 +145,7 @@ export function CrmRoster() {
   const [pickTrainer, setPickTrainer] = React.useState(false);
   const [pickClient, setPickClient] = React.useState(false);
   const [createOpen, setCreateOpen] = React.useState(false);
+  const [deleteOpen, setDeleteOpen] = React.useState(false);
   const [selected, setSelected] = React.useState<RosterSession | null>(null);
 
   const rosterQ = useMonthRoster(crmId, monthOffset, trainerId);
@@ -174,6 +246,9 @@ export function CrmRoster() {
           <Serif style={{ fontSize: 24 }}>Roster Management</Serif>
           <Body style={{ fontSize: 12.5, color: C.muted, marginTop: 2 }}>Every scheduled session across your book</Body>
         </View>
+        <Pressable onPress={() => setDeleteOpen(true)} hitSlop={6} style={{ width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: hexA(C.red, 0.08), borderWidth: 1, borderColor: hexA(C.red, 0.3) }}>
+          <Icon path="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14M10 11v6M14 11v6" size={15} color={C.red} strokeWidth={2} />
+        </Pressable>
         <Pressable onPress={() => setCreateOpen(true)}>
           <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 10, paddingHorizontal: 14, borderRadius: 12 }}>
             <Icon name="calPlus" size={13} color="#fff" strokeWidth={2.4} />
@@ -342,6 +417,7 @@ export function CrmRoster() {
       <FilterPickerSheet visible={pickTrainer} title="Filter by Trainer" options={trainerOptions} selectedId={trainerId} onPick={setTrainerId} onClose={() => setPickTrainer(false)} />
       <FilterPickerSheet visible={pickClient} title="Filter by Client" options={clientOptions} selectedId={clientId} onPick={setClientId} onClose={() => setPickClient(false)} />
       <CreateRosterSheet visible={createOpen} onClose={() => setCreateOpen(false)} crmId={crmId} people={peopleQ.data} />
+      <DeleteRosterSheet visible={deleteOpen} clients={clientOptions} onClose={() => setDeleteOpen(false)} />
       <SessionActionSheet session={selected} crmId={crmId} onClose={() => setSelected(null)} />
     </Page>
   );
