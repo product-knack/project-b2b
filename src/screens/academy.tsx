@@ -8,6 +8,7 @@ import { Page, TitleBlock, HScroll, Badge } from './common';
 import { useAuth } from '../auth';
 import { useStore } from '../store';
 import { AcademyCalendarTab } from './academyCalendar';
+import { AttendanceApprovalPanel, PendingAttendanceBanner } from './academyApproval';
 import {
   useAcademyOverview, useAcademyUsers, useSaveAcademyUser, useSoftDeleteAcademyUser, useEnrollmentCounts,
   useAcademyBatches, useDeleteBatch, useSaveBatch, useSetBatchTeachers, useBatchStudents, useAttendanceByBatchDate, useUpsertAttendance,
@@ -623,11 +624,14 @@ function BatchRoster({ batchId }: { batchId: string }) {
 
 /* ---------------- Attendance ---------------- */
 function AttendanceTab({ presetBatchId }: { presetBatchId: string | null }) {
-  const [sub, setSub] = React.useState<'mark' | 'report'>('mark');
+  const [sub, setSub] = React.useState<'mark' | 'approvals' | 'report'>('mark');
+  const { session } = useAuth();
+  const adminId = session?.user?.id ?? '';
   return (
     <View style={{ gap: 12 }}>
+      <PendingAttendanceBanner onPress={() => setSub('approvals')} />
       <View style={{ flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: 999, padding: 3 }}>
-        {([['mark', 'Mark'], ['report', 'Reports']] as const).map(([id, lab]) => {
+        {([['mark', 'Mark'], ['approvals', 'Approvals'], ['report', 'Reports']] as const).map(([id, lab]) => {
           const active = sub === id;
           return active ? (
             <LinearGradient key={id} colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 999 }}>
@@ -640,7 +644,9 @@ function AttendanceTab({ presetBatchId }: { presetBatchId: string | null }) {
           );
         })}
       </View>
-      {sub === 'mark' ? <MarkAttendance presetBatchId={presetBatchId} /> : <AttendanceReports presetBatchId={presetBatchId} />}
+      {sub === 'mark' ? <MarkAttendance presetBatchId={presetBatchId} />
+        : sub === 'approvals' ? <AttendanceApprovalPanel adminId={adminId} />
+        : <AttendanceReports presetBatchId={presetBatchId} />}
     </View>
   );
 }

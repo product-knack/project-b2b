@@ -9,6 +9,7 @@ import { PdfPreview } from '../components/PdfPreview';
 import { useStore } from '../store';
 import { useAcademyBanners, useQhpAnalyser, qhpPdfUrl, QHP_OVERDUE_MS, QhpAnalyserRow } from '../lib/academyQueries';
 import { useMyCapabilities } from '../lib/capabilities';
+import { PendingAttendanceBanner } from './academyApproval';
 
 /* ============================================================================
    Academy Admin home — a lightweight launcher: three data-driven action
@@ -90,6 +91,8 @@ export function AcademyHome() {
   return (
     <Page gap={13} pt={6}>
       <TitleBlock title="Academy" sub="Research and academy tools" />
+      {/* Teacher-submitted attendance waiting for review (web PendingAttendanceBanner). */}
+      <PendingAttendanceBanner onPress={() => go('academy-management')} />
 
       {q.isPending ? (
         <ActivityIndicator color={ACC} style={{ paddingVertical: 22 }} />

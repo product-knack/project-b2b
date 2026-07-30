@@ -10,6 +10,7 @@ import { OddsWordmark } from './oddsAi';
 import { useAuth } from '../auth';
 import { useSidebarProfile, useNavBadges } from '../lib/navQueries';
 import { useMyCapabilities } from '../lib/capabilities';
+import { useMyAcademyLink } from '../lib/academyAttendanceQueries';
 
 /* ---------- Top header (logo + hamburger) ---------- */
 export function Header() {
@@ -133,7 +134,17 @@ export function Drawer() {
   const { drawerOpen, closeDrawer, role, route, go, set } = useStore();
   const { signOut, session } = useAuth();
   const insets = useSafeAreaInsets();
-  const groups = role === 'crm' ? crmNav : role === 'coach' ? coachNav : role === 'ops' ? opsNav : role === 'admin' ? adminNav : role === 'doctor' ? doctorNav : role === 'marketing' ? marketingNav : role === 'academy' ? academyNav : trainerNav;
+  const baseGroups = role === 'crm' ? crmNav : role === 'coach' ? coachNav : role === 'ops' ? opsNav : role === 'admin' ? adminNav : role === 'doctor' ? doctorNav : role === 'marketing' ? marketingNav : role === 'academy' ? academyNav : trainerNav;
+  // Web-parity sidebar injection: any app role linked in academy_users as an
+  // active teacher/student gets an Odds Academy entry — the link, not the app
+  // role, decides (a doctor or trainer can be an academy teacher).
+  const academyLink = useMyAcademyLink(session?.user?.id ?? null);
+  const groups = React.useMemo(() => {
+    const items: { label: string; icon: any; route: string }[] = [];
+    if (academyLink.data?.teacherId) items.push({ label: 'Odds Academy', icon: 'award', route: 'academy-teacher' });
+    if (academyLink.data?.studentId) items.push({ label: 'Odds Academy (Student)', icon: 'award', route: 'academy-student' });
+    return items.length ? [...baseGroups, { label: 'Odds Academy', items }] : baseGroups;
+  }, [baseGroups, academyLink.data?.teacherId, academyLink.data?.studentId]);
   const profile = useSidebarProfile();
   const badges = useNavBadges();
   const caps = useMyCapabilities();

@@ -261,9 +261,13 @@ export function useUpsertAttendance() {
     mutationFn: async (input: { batchId: string; date: string; markedBy: string | null; rows: { studentId: string; status: AttStatus; remarks?: string | null }[] }) => {
       if (!input.rows.length) return;
       // Unique index is (batch_id, student_id, date) — upsert matches it exactly.
+      // Admin direct marks are ALWAYS approved (web invariant): they never pass
+      // through the teacher pending queue, and stamp who approved them.
       const payload = input.rows.map((r) => ({
         batch_id: input.batchId, student_id: r.studentId, date: input.date,
         status: r.status, remarks: r.remarks?.trim() || null, marked_by: input.markedBy ?? null,
+        marked_by_profile_id: input.markedBy ?? null,
+        approval_status: 'approved', approved_by: input.markedBy ?? null, approved_at: new Date().toISOString(),
       }));
       const { error } = await supabase.from('academy_attendance').upsert(payload, { onConflict: 'batch_id,student_id,date' });
       if (error) throw new Error(error.message);
@@ -288,6 +292,7 @@ export function useAttendanceReport(batchId: string | null, from: string, to: st
         .from('academy_attendance')
         .select('student_id, date, status')
         .eq('batch_id', batchId!)
+        .eq('approval_status', 'approved') // reports count approved rows only (web invariant)
         .gte('date', from).lte('date', to)
         .order('date', { ascending: false })
         .limit(3000);
@@ -314,7 +319,7 @@ export function useAcademyOverview() {
       const [us, batches, att] = await Promise.all([
         supabase.from('academy_users').select('role, status'),
         supabase.from('academy_batches').select('status'),
-        supabase.from('academy_attendance').select('date, status').gte('date', weekAgo).lte('date', today),
+        supabase.from('academy_attendance').select('date, status').eq('approval_status', 'approved').gte('date', weekAgo).lte('date', today),
       ]);
       const users = (us.data ?? []) as any[];
       const students = users.filter((u) => u.role === 'student' && u.status === 'active').length;
