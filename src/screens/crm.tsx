@@ -1,3 +1,4 @@
+import { CrmRevenueForecastBanner } from './crmRevenueForecast';
 import React from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Alert, Animated, Easing, Modal, ActivityIndicator } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -316,6 +317,8 @@ export function CrmDashboard() {
         avatarUrl={sideProf.avatarUrl}
         rightAction={<TourLauncher onPress={() => setTourOpen(true)} />}
       />
+      {/* Priority renewals alert (web CRMRevenueForecastBanner) */}
+      <CrmRevenueForecastBanner />
       <FeatureTour visible={tourOpen} steps={CRM_TOUR} tourName='crm' onClose={() => setTourOpen(false)} />
       {/* Longevity unread — the 2-minute reply commitment, front and centre */}
       <LongevityUnreadAlert crmId={crmId} />

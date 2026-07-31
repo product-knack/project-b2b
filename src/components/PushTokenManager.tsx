@@ -40,6 +40,8 @@ export function PushTokenManager() {
     const convId = data.conversation_id ? String(data.conversation_id) : null;
     if (convId) { setOpenChat(convId); go('messenger'); return; }
     const t = String(data.type ?? '');
+    // Revenue-forecast pushes carry the web route — land the CRM on their list.
+    if (t === 'priority_assigned' || t === 'priority_remark_due' || data.route === '/crm/revenue-forecast') { go('crm-revenue-forecast'); return; }
     if (t === 'far_session_alert' || t === 'longevity_message' || data.route || data.session_id) go('home');
   }, [go, setOpenChat]);
   // Android FCM notification-messages tapped from background/kill sometimes

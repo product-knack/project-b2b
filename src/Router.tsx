@@ -50,6 +50,8 @@ import { OpsDashboard, OpsClients, OpsCrmPending, OpsCrmActivity, OpsBaseline, O
 import { OpsLeads } from './screens/opsLeads';
 import { OpsEscalations } from './screens/opsEscalations';
 import { AdminDashboard } from './screens/admin';
+import { AdminRevenueForecast } from './screens/adminRevenueForecast';
+import { CrmRevenueForecast } from './screens/crmRevenueForecast';
 import { DoctorDashboard, DoctorSessions, DoctorClients, DoctorAllClients, DoctorRoster, DoctorProtocolApprovals } from './screens/doctor';
 import { DoctorClientDetail } from './screens/doctorClientDetail';
 import { DoctorRehabRecommendation } from './screens/doctorRehabRecommendation';
@@ -150,6 +152,8 @@ const SCREENS: Record<string, React.ComponentType> = {
   'doctor-protocol-approvals': DoctorProtocolApprovals,
   'doctor-rehab-recommendation': DoctorRehabRecommendation,
   'admin-renewals': AdminRenewals,
+  'admin-revenue-forecast': AdminRevenueForecast,
+  'crm-revenue-forecast': CrmRevenueForecast,
   'admin-requests': AdminRequests,
   'admin-incidents': AdminIncidents,
   'admin-clients': AdminClients,

@@ -329,6 +329,7 @@ export const crmNav: NavGroup[] = [
   { label: 'Workspace', items: [
     { label: 'Dashboard', icon: 'grid', route: 'crm-dashboard' },
     { label: 'My Clients', icon: 'users', route: 'crm-clients' },
+    { label: 'Revenue Forecast', icon: 'rupee', route: 'crm-revenue-forecast' },
     { label: 'Messenger', icon: 'chat', route: 'messenger' },
     { label: 'Client Threads', icon: 'atSign', route: 'client-threads' },
   ] },
@@ -399,6 +400,7 @@ export const adminNav: NavGroup[] = [
     { label: 'Dashboard', icon: 'grid', route: 'admin-dashboard' },
     { label: 'Clients', icon: 'users', route: 'admin-clients' },
     { label: 'Renewals', icon: 'swap', route: 'admin-renewals' },
+    { label: 'Revenue Forecast', icon: 'rupee', route: 'admin-revenue-forecast' },
     { label: 'Requests', icon: 'inbox', route: 'admin-requests' },
     { label: 'Incidents', icon: 'alert', route: 'admin-incidents' },
     { label: 'Users', icon: 'userCircle', route: 'admin-users' },
