@@ -6431,11 +6431,15 @@ export function Workout() {
               <Pressable onPress={goBack} style={{ paddingVertical: 15, paddingHorizontal: 20, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }}>
                 <Text style={{ fontFamily: F.bodySemi, fontSize: 14, color: C.ink3 }}>Cancel</Text>
               </Pressable>
-              <Pressable onPress={() => (blankExercises.length ? setBlankOpen(true) : setConfirmOpen(true))} disabled={!canSubmit} style={{ flex: 1, opacity: canSubmit ? 1 : 0.5 }}>
+              <Pressable onPress={() => (blankExercises.length ? setBlankOpen(true) : setConfirmOpen(true))} disabled={!canSubmit} style={{ flex: 1, opacity: canSubmit || saving || done ? 1 : 0.5 }}>
                 <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 15, borderRadius: 14 }}>
-                  <Icon name="checks" path={done ? 'M20 6 9 17l-5-5' : undefined} size={16} color="#fff" strokeWidth={2.6} />
+                  {saving ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Icon name="checks" path={done ? 'M20 6 9 17l-5-5' : undefined} size={16} color="#fff" strokeWidth={2.6} />
+                  )}
                   <Text style={{ fontFamily: F.bodyBold, fontSize: 14.5, color: '#fff' }}>
-                    {saving ? 'Saving…' : done ? (savedOffline ? 'Saved on device ✓ syncs later' : 'Synced to server ✓') : editingOutboxId ? 'Update Pending Log' : 'Submit Workout'}
+                    {saving ? (isOnline ? 'Saving & syncing…' : 'Saving to device…') : done ? (savedOffline ? 'Saved on device ✓ syncs later' : 'Synced to server ✓') : editingOutboxId ? 'Update Pending Log' : 'Submit Workout'}
                   </Text>
                 </LinearGradient>
               </Pressable>
@@ -6555,8 +6559,9 @@ export function Workout() {
               <Pressable onPress={() => setConfirmOpen(false)} style={{ flex: 1, alignItems: 'center', paddingVertical: 13, borderRadius: 13, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' }}>
                 <Text style={{ fontFamily: F.bodySemi, fontSize: 13, color: C.ink }}>Review</Text>
               </Pressable>
-              <Pressable onPress={() => { setConfirmOpen(false); submit(); }} style={{ flex: 1, alignItems: 'center', paddingVertical: 13, borderRadius: 13, backgroundColor: hexA(C.green, 0.16), borderWidth: 1, borderColor: hexA(C.green, 0.45) }}>
-                <Text style={{ fontFamily: F.bodyBold, fontSize: 13, color: C.green }}>Confirm & Save</Text>
+              <Pressable onPress={() => { setConfirmOpen(false); submit(); }} disabled={saving} style={{ flex: 1, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 7, paddingVertical: 13, borderRadius: 13, backgroundColor: hexA(C.green, 0.16), borderWidth: 1, borderColor: hexA(C.green, 0.45), opacity: saving ? 0.6 : 1 }}>
+                {saving ? <ActivityIndicator size="small" color={C.green} /> : null}
+                <Text style={{ fontFamily: F.bodyBold, fontSize: 13, color: C.green }}>{saving ? 'Saving…' : 'Confirm & Save'}</Text>
               </Pressable>
             </View>
           </Pressable>
