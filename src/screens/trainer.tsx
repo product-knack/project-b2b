@@ -45,6 +45,7 @@ import {
   modalities, qhpTabDefs, qhpData, mgrTabDefs, mgrData, convos, events, mgrDefs,
 } from '../data';
 import { tones } from '../theme';
+import { MedicalEntrySheet } from './doctorClientDetail';
 
 const AV_GRADS: [string, string][] = [['#FB8B3A', '#EE5E16'], ['#57C98A', '#2E9A63'], ['#7C8FE8', '#4A5AC8'], ['#9A7BEA', '#6E5BD0'], ['#E0A53C', '#C07C1E'], ['#4FD1C5', '#2C8A86'], ['#F687B3', '#C2568A'], ['#F0883E', '#C05621']];
 const avColors = (s: string): [string, string] => AV_GRADS[[...(s || '?')].reduce((a, c) => a + c.charCodeAt(0), 0) % AV_GRADS.length];
@@ -7488,6 +7489,10 @@ function QhpAssessor() {
     );
   };
   const [medFor, setMedFor] = React.useState<{ id: string; name: string } | null>(null);
+  // Upload Medical History (web QHP card "Medical History" dialog) — reuses the
+  // doctor dashboard's MedicalEntrySheet (manual entry + AI upload-and-extract).
+  // Never visible at the same time as the viewer modal (Android sibling-Modal rule).
+  const [medUploadFor, setMedUploadFor] = React.useState<{ id: string; name: string } | null>(null);
   const medQ = useClientMedicalHistory(medFor?.id ?? null);
   const medRepsQ = useClientHealthReports(medFor?.id ?? null);
   const [medPreview, setMedPreview] = React.useState<HealthReportItem | null>(null);
@@ -7853,6 +7858,9 @@ function QhpAssessor() {
                       <Pressable onPress={() => setMedFor({ id: q.client_id!, name: q.client_name ?? 'Client' })} style={{ width: 38, alignItems: 'center', justifyContent: 'center', paddingVertical: 9, borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' }}>
                         <Icon name="heart" size={13} color={C.ink3} strokeWidth={2} />
                       </Pressable>
+                      <Pressable onPress={() => setMedUploadFor({ id: q.client_id!, name: q.client_name ?? 'Client' })} style={{ width: 38, alignItems: 'center', justifyContent: 'center', paddingVertical: 9, borderRadius: 11, backgroundColor: hexA(C.gold, 0.12), borderWidth: 1, borderColor: hexA(C.gold, 0.4) }}>
+                        <Icon path="M12 15V3M6 9l6-6 6 6M5 21h14" size={13} color={C.gold} strokeWidth={2.2} />
+                      </Pressable>
                       <Pressable onPress={() => { setCredsQhpCopied(false); setCredsQhpFor({ clientId: q.client_id!, name: q.client_name ?? 'Client' }); }} style={{ width: 38, alignItems: 'center', justifyContent: 'center', paddingVertical: 9, borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' }}>
                         <Icon name="copy" size={13} color={C.ink3} strokeWidth={2} />
                       </Pressable>
@@ -8005,6 +8013,10 @@ function QhpAssessor() {
       </Modal>
 
       {/* Medical History sheet */}
+      {/* Upload Medical History — same sheet the doctor dashboard uses (manual +
+          AI "Upload & Extract" into client-documents/{clientId}/findings). */}
+      <MedicalEntrySheet visible={!!medUploadFor} onClose={() => setMedUploadFor(null)} clientId={medUploadFor?.id ?? ''} doctorId={trainerId} />
+
       <Modal visible={!!medFor} transparent animationType="slide" onRequestClose={closeMedSheet}>
         <View style={{ flex: 1, justifyContent: 'flex-end' }}>
           <Pressable onPress={closeMedSheet} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)' }} />
@@ -8018,6 +8030,13 @@ function QhpAssessor() {
                 <Serif style={{ fontSize: 20 }}>Medical History</Serif>
                 <Body style={{ fontSize: 11.5, color: C.muted2, marginTop: 2 }}>Clinical record for {medFor?.name}</Body>
               </View>
+              <Pressable
+                onPress={() => { const t = medFor; closeMedSheet(); if (t) setTimeout(() => setMedUploadFor(t), 250); }}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 8, paddingHorizontal: 11, borderRadius: 11, backgroundColor: hexA(C.gold, 0.12), borderWidth: 1, borderColor: hexA(C.gold, 0.4) }}
+              >
+                <Icon path="M12 15V3M6 9l6-6 6 6M5 21h14" size={12} color={C.gold} strokeWidth={2.2} />
+                <Text style={{ fontFamily: F.bodySemi, fontSize: 11.5, color: C.gold }}>Upload</Text>
+              </Pressable>
               <Pressable onPress={closeMedSheet} style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center', justifyContent: 'center' }}>
                 <Icon name="close" size={14} color="#B8B2AC" strokeWidth={2.3} />
               </Pressable>
