@@ -1409,7 +1409,8 @@ export function Dashboard() {
 
   // Offline state + pending-sync outbox.
   const netOnline = useIsOnline();
-  const outbox = useOutbox();
+  // Screenshot-audit events sync silently — never shown in the Waiting to Sync UI.
+  const outbox = useOutbox().filter((o) => o.kind !== 'screenshot-log');
   const [outboxOpen, setOutboxOpen] = React.useState(false);
   const outboxFailed = outbox.filter((o) => o.status === 'failed').length;
   // Opportunistic sync whenever the dashboard mounts (launch + reconnect already drain).

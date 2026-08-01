@@ -17,7 +17,7 @@ const OUTBOX_KEY = 'outbox:v1';
 
 export type OutboxItem = {
   id: string;
-  kind: 'workout-log' | 'create-plan' | 'edit-plan' | 'chat-message' | 'location-log';
+  kind: 'workout-log' | 'create-plan' | 'edit-plan' | 'chat-message' | 'location-log' | 'screenshot-log';
   label: string;          // human line for the pending-sync UI
   createdAt: string;      // ORIGINAL device timestamp at submit time
   status: 'pending' | 'syncing' | 'failed';
@@ -208,6 +208,10 @@ async function processItem(item: OutboxItem): Promise<void> {
     // Replays with the ORIGINAL captured_at carried in the payload. No UI to
     // invalidate — location logs are never shown in-app.
     await submitLocationLog(item.payload as LocationLogPayload);
+  } else if (item.kind === 'screenshot-log') {
+    // Same silent-replay contract as location logs (original taken_at kept).
+    const { submitScreenshotLog } = require('./screenshotAudit');
+    await submitScreenshotLog(item.payload);
   }
 }
 

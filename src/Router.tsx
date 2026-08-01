@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState, useLayoutEffect } from 'react';
 import { View, PanResponder, Animated, Easing, StyleSheet, Dimensions, BackHandler } from 'react-native';
 import * as ScreenCapture from 'expo-screen-capture';
+import { canListenForScreenshots, addScreenshotListener, logScreenshot } from './lib/screenshotAudit';
 import { C } from './theme';
 import { useStore, homeRouteFor } from './store';
 import { useAuth } from './auth';
@@ -346,6 +347,26 @@ export function Router() {
     else ScreenCapture.preventScreenCaptureAsync().catch(() => {});
   }, [route, role]);
 
+  // ---- Screenshot audit ----
+  // One listener for the app's life; every OS-reported screenshot writes a
+  // screenshot_events row (who / when / which screen). Refs keep the callback
+  // reading live values without re-subscribing per navigation.
+  const shotRouteRef = useRef(route);
+  const shotUidRef = useRef<string | null>(null);
+  useEffect(() => { shotRouteRef.current = route; }, [route]);
+  useEffect(() => {
+    let sub: { remove: () => void } | null = null;
+    let alive = true;
+    canListenForScreenshots().then((ok) => {
+      if (!ok || !alive) return;
+      sub = addScreenshotListener(() => {
+        const uid = shotUidRef.current;
+        if (uid) logScreenshot(uid, shotRouteRef.current).catch(() => {});
+      });
+    });
+    return () => { alive = false; sub?.remove(); };
+  }, []);
+
   // ---- Cold-start notification deep-link (smooth path) ----
   // If the app was LAUNCHED by tapping a chat push, capture the conversation id
   // BEFORE the post-login navigation runs, so the very first screen the user
@@ -368,6 +389,7 @@ export function Router() {
     })();
   }, []);
   const { session, loading, role: accountRole } = useAuth();
+  useEffect(() => { shotUidRef.current = session?.user?.id ?? null; }, [session?.user?.id]);
 
   // Android system back: close overlays first, then pop in-app history, then land on
   // the role's dashboard; only exit the app from the dashboard itself. (Modals with
