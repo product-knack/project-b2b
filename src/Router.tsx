@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useState, useLayoutEffect } from 'react';
 import { View, PanResponder, Animated, Easing, StyleSheet, Dimensions, BackHandler } from 'react-native';
+import * as ScreenCapture from 'expo-screen-capture';
 import { C } from './theme';
 import { useStore, homeRouteFor } from './store';
 import { useAuth } from './auth';
@@ -334,6 +335,16 @@ function ScreenHost({ route }: { route: string }) {
 
 export function Router() {
   const { route, go, set, back, canGoBack, drawerOpen, closeDrawer, aiOpen, closeAi, role, threadViewOpen } = useStore();
+
+  // ---- Screen-capture lockdown (route-aware) ----
+  // Screenshots/recordings are blocked on every screen EXCEPT the signed-in
+  // role's home dashboard, so App Store / Play screenshots of the home page can
+  // be taken while client-facing data screens stay covered (FLAG_SECURE).
+  useEffect(() => {
+    const isHome = route === homeRouteFor(role);
+    if (isHome) ScreenCapture.allowScreenCaptureAsync().catch(() => {});
+    else ScreenCapture.preventScreenCaptureAsync().catch(() => {});
+  }, [route, role]);
 
   // ---- Cold-start notification deep-link (smooth path) ----
   // If the app was LAUNCHED by tapping a chat push, capture the conversation id
