@@ -6140,6 +6140,35 @@ export function Workout() {
             <Text style={{ fontFamily: F.bodySemi, fontSize: 11, color: C.gold }}>Templates</Text>
           </Pressable>
         </View>
+        {/* Parallel log: whose values are these + one-tap client switch. Each
+            client keeps their OWN form (drafts snapshot in/out); on the first
+            switch the partner inherits the exercise selection with values
+            cleared — remove any they do not share. After the first save the
+            saved client is locked (switching back would double-log). */}
+        {pairNames ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, borderRadius: 13, backgroundColor: hexA(C.purple, 0.07), borderWidth: 1, borderColor: hexA(C.purple, 0.3) }}>
+            <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <View style={{ width: 26, height: 26, borderRadius: 9, backgroundColor: hexA(C.orange, 0.16), alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name="user" size={13} color={C.orange} strokeWidth={2.2} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Mono style={{ fontSize: 7, letterSpacing: 0.8, color: C.muted3 }}>LOGGING FOR</Mono>
+                <Text numberOfLines={1} style={{ fontFamily: F.bodyBold, fontSize: 13, color: C.orange }}>{clientName}</Text>
+              </View>
+            </View>
+            {pairLeg === 'first' ? (
+              <Pressable onPress={swapPair} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 11, borderRadius: 11, backgroundColor: hexA(C.purple, 0.14), borderWidth: 1, borderColor: hexA(C.purple, 0.45) }}>
+                <Icon name="swap" size={13} color={C.purple} strokeWidth={2.2} />
+                <Text numberOfLines={1} style={{ fontFamily: F.bodySemi, fontSize: 11.5, color: C.purple, maxWidth: 110 }}>{pairNames.second.name.split(' ')[0]}</Text>
+              </Pressable>
+            ) : (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 8, paddingHorizontal: 11, borderRadius: 11, backgroundColor: hexA(C.green, 0.08), borderWidth: 1, borderColor: hexA(C.green, 0.3) }}>
+                <Icon name="checks" size={12} color={C.green} strokeWidth={2.4} />
+                <Text numberOfLines={1} style={{ fontFamily: F.bodySemi, fontSize: 11, color: C.green, maxWidth: 110 }}>{pairNames.primary.name.split(' ')[0]} saved</Text>
+              </View>
+            )}
+          </View>
+        ) : null}
         {exercises.map((ex, ei) => (
           <Card key={ei} colors={['rgba(46,28,18,0.4)', 'rgba(18,14,14,0.5)']} radius={20} style={{ padding: 16, gap: 12 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
