@@ -10714,10 +10714,11 @@ export function MgrDash() {
       <Mono style={{ fontSize: 12, letterSpacing: 2.1 }}>FULL STANDINGS</Mono>
       {mgrRows.map((m) => {
         const open = mgrRow === m.rank;
-        // Run rate — web RunRateSection math: target is the manager's profiles.expected_sessions
-        // over the competition window (team_start..team_end/today); hidden when no target is set.
+        // Run rate — TARGET-FREE (user decision 2026-08-01): no expected-sessions
+        // target, no required pace. Only the actual daily completion rate over the
+        // competition window and the projection it implies by the window's end.
         const rr = (() => {
-          if (!m.expected || m.expected <= 0 || !m.teamStart) return null;
+          if (!m.teamStart) return null;
           const MS = 86400000;
           const today = new Date(); today.setHours(0, 0, 0, 0);
           const startD = new Date(m.teamStart + 'T00:00:00');
@@ -10725,17 +10726,12 @@ export function MgrDash() {
           const totalDays = Math.max(1, Math.round((endD.getTime() - startD.getTime()) / MS) + 1);
           const capped = today < endD ? today : endD;
           const elapsed = Math.max(1, Math.min(totalDays, Math.round((capped.getTime() - startD.getTime()) / MS) + 1));
-          const targetPerDay = m.expected / totalDays;
           const actualPerDay = m.sess / elapsed;
-          const pacePct = targetPerDay > 0 ? (actualPerDay / targetPerDay) * 100 : 0;
-          const remaining = Math.max(0, m.expected - m.sess);
-          const completionPct = Math.min(100, (m.sess / m.expected) * 100);
-          const requiredPerDay = remaining / Math.max(1, totalDays - elapsed);
           const projected = Math.round(actualPerDay * totalDays);
-          const status = pacePct >= 100 ? 'On Pace' : pacePct >= 80 ? 'Slightly Behind' : 'Behind';
-          return { totalDays, elapsed, actualPerDay, pacePct, remaining, completionPct, requiredPerDay, projected, status, expected: m.expected };
+          const windowPct = Math.min(100, (elapsed / totalDays) * 100);
+          return { totalDays, elapsed, actualPerDay, projected, windowPct };
         })();
-        const barColor = rr ? (rr.pacePct >= 100 ? C.green : rr.pacePct >= 80 ? C.gold : C.red) : C.muted3;
+        const barColor = C.orange;
         const col = m.mc || C.muted;
         return (
           <RiseIn key={mgrDashTab + m.rank} delay={Math.min(m.rank - 1, 10) * 55}>
@@ -10761,10 +10757,10 @@ export function MgrDash() {
                 <Icon name={open ? 'chevUp' : 'chevDown'} size={17} color={C.muted} strokeWidth={2.2} />
               </View>
 
-              {/* compact progress toward target (hidden while expanded — the detail view has its own) */}
+              {/* compact window-time progress (hidden while expanded — the detail view has its own) */}
               {!open && rr ? (
                 <View style={{ marginTop: 12 }}>
-                  <ProgressBar pct={Math.round(rr.completionPct)} height={5} fill={barColor} />
+                  <ProgressBar pct={Math.round(rr.windowPct)} height={5} fill={barColor} />
                 </View>
               ) : null}
 
@@ -10778,56 +10774,49 @@ export function MgrDash() {
 
                   {rr ? (
                     <>
-                      {/* header */}
+                      {/* header — no target, no pace judgment: just the window position */}
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                         <Mono style={{ flex: 1, fontSize: 10.5, letterSpacing: 1.8, color: C.mono }}>RUN RATE</Mono>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 3, paddingHorizontal: 9, borderRadius: 999, backgroundColor: hexA(barColor, 0.14), borderWidth: 1, borderColor: hexA(barColor, 0.35) }}>
-                          <PulseDot color={barColor} />
-                          <Text style={{ fontFamily: F.bodyBold, fontSize: 10, color: barColor }}>{rr.status} · {Math.round(rr.pacePct)}%</Text>
-                        </View>
                         <Mono style={{ fontSize: 10, color: C.muted3 }}>Day {rr.elapsed} / {rr.totalDays}</Mono>
                       </View>
 
-                      {/* big figure + pace ring */}
+                      {/* big figure: sessions so far + window-time progress */}
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
                         <View style={{ flex: 1 }}>
                           <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 5 }}>
                             <Serif style={{ fontSize: 30 }}>{m.sess}</Serif>
-                            <Body style={{ fontSize: 13, color: C.muted2, marginBottom: 4 }}>/ {rr.expected} expected</Body>
+                            <Body style={{ fontSize: 13, color: C.muted2, marginBottom: 4 }}>sessions in {rr.elapsed} day{rr.elapsed === 1 ? '' : 's'}</Body>
                           </View>
                           <View style={{ marginTop: 8 }}>
-                            <ProgressBar pct={Math.round(rr.completionPct)} height={7} fill={barColor} />
+                            <ProgressBar pct={Math.round(rr.windowPct)} height={7} fill={barColor} />
                           </View>
-                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
-                            <Mono style={{ fontSize: 9.5, color: C.muted2 }}>{Math.round(rr.completionPct)}% complete</Mono>
-                            <Mono style={{ fontSize: 9.5, color: barColor }}>{rr.remaining} left · proj. {rr.projected}</Mono>
-                          </View>
+                          <Mono style={{ fontSize: 9.5, color: C.muted2, marginTop: 6 }}>{Math.round(rr.windowPct)}% of the window elapsed</Mono>
                         </View>
-                        <View style={{ width: 62, height: 62, borderRadius: 31, borderWidth: 5, borderColor: hexA(barColor, 0.85), alignItems: 'center', justifyContent: 'center', backgroundColor: hexA(barColor, 0.08) }}>
-                          <Text style={{ fontFamily: F.bodyBold, fontSize: 13, color: barColor }}>{Math.round(rr.pacePct)}%</Text>
-                          <Mono style={{ fontSize: 7.5, color: C.muted3 }}>PACE</Mono>
+                        <View style={{ alignItems: 'center', paddingVertical: 10, paddingHorizontal: 14, borderRadius: 16, backgroundColor: hexA(barColor, 0.08), borderWidth: 1, borderColor: hexA(barColor, 0.35) }}>
+                          <Text style={{ fontFamily: F.bodyBold, fontSize: 20, color: barColor }}>{rr.projected}</Text>
+                          <Mono style={{ fontSize: 7.5, color: C.muted3 }}>PROJECTED</Mono>
                         </View>
                       </View>
 
-                      {/* pace comparison */}
+                      {/* the projection input: today's actual completion rate */}
                       <View style={{ flexDirection: 'row', alignItems: 'center', borderRadius: 14, backgroundColor: 'rgba(0,0,0,0.25)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)', paddingVertical: 12 }}>
                         <View style={{ flex: 1, alignItems: 'center' }}>
-                          <Mono style={{ fontSize: 8.5, color: C.muted3 }}>CURRENT PACE</Mono>
+                          <Mono style={{ fontSize: 8.5, color: C.muted3 }}>DAILY RATE</Mono>
                           <Text style={{ fontFamily: F.bodyBold, fontSize: 17, color: '#fff', marginTop: 3 }}>
                             {rr.actualPerDay.toFixed(1)}<Text style={{ fontSize: 10.5, color: C.muted2, fontFamily: F.body }}>/day</Text>
                           </Text>
                         </View>
                         <Icon name="arrowRight" size={15} color={C.muted3} strokeWidth={2.2} />
                         <View style={{ flex: 1, alignItems: 'center' }}>
-                          <Mono style={{ fontSize: 8.5, color: C.muted3 }}>NEEDED PACE</Mono>
-                          <Text style={{ fontFamily: F.bodyBold, fontSize: 17, color: C.orange, marginTop: 3 }}>
-                            {rr.requiredPerDay.toFixed(1)}<Text style={{ fontSize: 10.5, color: C.muted2, fontFamily: F.body }}>/day</Text>
+                          <Mono style={{ fontSize: 8.5, color: C.muted3 }}>PROJECTED BY END</Mono>
+                          <Text style={{ fontFamily: F.bodyBold, fontSize: 17, color: barColor, marginTop: 3 }}>
+                            {rr.projected}<Text style={{ fontSize: 10.5, color: C.muted2, fontFamily: F.body }}> sessions</Text>
                           </Text>
                         </View>
                       </View>
                     </>
                   ) : (
-                    <Body style={{ fontSize: 11, color: C.muted3 }}>No expected-sessions target set for this manager — run rate unavailable.</Body>
+                    <Body style={{ fontSize: 11, color: C.muted3 }}>No competition window set for this manager — run rate unavailable.</Body>
                   )}
 
                   {/* inline meta */}
