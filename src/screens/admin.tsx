@@ -1,3 +1,4 @@
+import { AdminIncentiveAlert } from './adminPerformance';
 import React from 'react';
 import { View, Text, Pressable, TextInput, ActivityIndicator, Animated, Easing, Modal, ScrollView } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -374,6 +375,9 @@ export function AdminDashboard() {
         rightAction={<TourLauncher onPress={() => setTourOpen(true)} />}
       />
       <FeatureTour visible={tourOpen} steps={ADMIN_TOUR} tourName='admin' onClose={() => setTourOpen(false)} />
+
+      {/* CRM incentive requests waiting for review (web CRMIncentiveRequestsAlert) */}
+      <AdminIncentiveAlert onPress={() => { set({ adminPerfTab: 'requests' }); go('admin-performance'); }} />
 
       {/* Revenue — the headline metric, first thing on the page, rises in on entry */}
       <RiseIn delay={0}>

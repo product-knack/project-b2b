@@ -56,6 +56,8 @@ type Store = {
   clientInitialTab: string | null;
   /** Deep-link target tab for the admin Requests page (consumed on mount). */
   adminRequestsTab: string | null;
+  /** Deep-link target tab for the admin Performance page (consumed on mount). */
+  adminPerfTab: string | null;
   openClient: (id: string, name: string, tab?: string) => void;
   workoutScheduleId: string | null;
   /** When set, the Workout form edits this queued (unsynced) outbox log in place. */
@@ -123,6 +125,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     aiOpen: false,
     selectedClientId: null as string | null,
     adminRequestsTab: null as string | null,
+    adminPerfTab: null as string | null,
     selectedClientName: null as string | null,
     clientInitialTab: null as string | null,
     workoutScheduleId: null as string | null,

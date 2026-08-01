@@ -423,19 +423,24 @@ export function useCrmIncentives(crmId: string | null) {
     enabled: !!crmId,
     staleTime: 300_000,
     queryFn: async (): Promise<IncentiveData> => {
-      const [evR, refR] = await Promise.all([
+      const [evR, refR, allEvR, pendR] = await Promise.all([
         supabase.from('incentive_events').select('id, event_type, event_date, new_value, reference_id, reference_table, client:client_id(first_name, last_name)').eq('user_id', crmId).order('event_date', { ascending: false }).limit(30),
-        supabase.from('referrals').select('id, status, referred_client_name').eq('referrer_id', crmId),
+        supabase.from('referrals').select('id, referred_client_name').eq('referrer_id', crmId),
+        supabase.from('incentive_events').select('id, event_type').eq('user_id', crmId),
+        // New architecture: pending = my pending rows in crm_incentive_request.
+        supabase.from('crm_incentive_request').select('id', { count: 'exact', head: true }).eq('requested_by', crmId).eq('request_type', 'referral').eq('status', 'pending'),
       ]);
       const refs = (refR.data ?? []) as any[];
       const events = (evR.data ?? []) as any[];
+      const allEvents = (allEvR.data ?? []) as any[];
       const refName = new Map(refs.map((r) => [r.id, r.referred_client_name]));
       return {
-        approvedReferrals: refs.filter((r) => r.status === 'approved').length,
-        pendingReferrals: refs.filter((r) => r.status === 'pending').length,
-        crossSells: events.filter((e) => e.event_type === 'cross_sell').length,
-        packageUpgrades: events.filter((e) => e.event_type === 'package_upgrade').length,
-        subscriptionUpgrades: events.filter((e) => e.event_type === 'subscription_upgrade').length,
+        // Approved referrals come from the ledger (covers legacy + new eras).
+        approvedReferrals: allEvents.filter((e) => e.event_type === 'referral').length,
+        pendingReferrals: pendR.count ?? 0,
+        crossSells: allEvents.filter((e) => e.event_type === 'cross_sell').length,
+        packageUpgrades: allEvents.filter((e) => e.event_type === 'package_upgrade').length,
+        subscriptionUpgrades: allEvents.filter((e) => e.event_type === 'subscription_upgrade').length,
         events: events.map((e) => ({
           id: e.id, type: String(e.event_type || 'event').replace(/_/g, ' '), date: e.event_date,
           clientName: fullName(e.client) ?? (e.reference_table === 'referrals' ? refName.get(e.reference_id) ?? null : null),

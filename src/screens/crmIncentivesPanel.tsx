@@ -8,8 +8,9 @@ import { Badge, MiniAvatar, AnimChip } from './common';
 import { useAuth } from '../auth';
 import { useCrmClientList } from '../lib/crmClientQueries';
 import {
-  useMyIncentives, usePendingIncentiveRequests, useIncentiveLeaderboard,
+  useMyIncentives, useMyIncentiveRequests, useIncentiveLeaderboard,
   useRaiseIncentiveRequest, EVENT_META,
+  currentIncentiveMonthValue, todayDateValue, formatIncentiveMonth, formatIncentiveDate,
 } from '../lib/incentiveQueries';
 import { SheetShell } from './reportDetail';
 
@@ -33,7 +34,7 @@ export function IncentivesPanel({ crmId, overview }: {
   const [tab, setTab] = React.useState<'mine' | 'pending' | 'board'>('mine');
   const [raiseOpen, setRaiseOpen] = React.useState(false);
   const mineQ = useMyIncentives(tab === 'mine' ? crmId : crmId); // shared cache; always warm
-  const pendingQ = usePendingIncentiveRequests(crmId);
+  const pendingQ = useMyIncentiveRequests(crmId);
   const [period, setPeriod] = React.useState<'month' | 'all'>('month');
   const boardQ = useIncentiveLeaderboard(period);
   const myRank = (boardQ.data ?? []).find((r) => r.userId === crmId);
@@ -66,7 +67,7 @@ export function IncentivesPanel({ crmId, overview }: {
 
       {/* Tabs */}
       <View style={{ flexDirection: 'row', gap: 5, padding: 4, borderRadius: 12, backgroundColor: 'rgba(0,0,0,0.28)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' }}>
-        {([['mine', 'My Incentives'], ['pending', `Pending${pendingQ.data?.length ? ` · ${pendingQ.data.length}` : ''}`], ['board', 'Leaderboard']] as const).map(([id, label]) => {
+        {([['mine', 'My Incentives'], ['pending', `Requests${(pendingQ.data ?? []).filter((r) => r.status === 'pending').length ? ` · ${(pendingQ.data ?? []).filter((r) => r.status === 'pending').length}` : ''}`], ['board', 'Leaderboard']] as const).map(([id, label]) => {
           const active = tab === id;
           return (
             <AnimChip key={id} grow active={active} onPress={() => setTab(id)} style={{ alignItems: 'center', paddingVertical: 9, borderRadius: 9, overflow: 'hidden', backgroundColor: active ? 'transparent' : 'rgba(255,255,255,0.02)' }}>
@@ -95,18 +96,26 @@ export function IncentivesPanel({ crmId, overview }: {
         })
       ) : tab === 'pending' ? (
         pendingQ.isLoading ? <ActivityIndicator color={C.orange} style={{ paddingVertical: 16 }} />
-        : (pendingQ.data ?? []).length === 0 ? <Body style={{ fontSize: 12, color: C.muted3, textAlign: 'center', paddingVertical: 12 }}>Nothing awaiting approval.</Body>
+        : (pendingQ.data ?? []).length === 0 ? <Body style={{ fontSize: 12, color: C.muted3, textAlign: 'center', paddingVertical: 12 }}>No requests yet. Raise your first one above.</Body>
         : (pendingQ.data ?? []).map((r) => {
           const meta = EVENT_META[r.type] ?? EVENT_META.referral;
+          const stColor = r.status === 'approved' ? C.green : r.status === 'rejected' ? C.red : C.gold;
           return (
-            <View key={`${r.type}-${r.id}`} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 11, borderRadius: 12, backgroundColor: 'rgba(0,0,0,0.22)', borderWidth: 1, borderColor: hexA(C.gold, 0.2), borderLeftWidth: 3, borderLeftColor: hexA(meta.color, 0.8) }}>
-              <Icon name={meta.icon as any} size={14} color={meta.color} strokeWidth={2.1} />
-              <View style={{ flex: 1 }}>
-                <Body numberOfLines={1} style={{ fontSize: 13, fontFamily: F.bodySemi, color: '#fff' }}>{r.clientName}</Body>
-                <Body numberOfLines={1} style={{ fontSize: 11, color: C.muted2, marginTop: 1 }}>{r.details}</Body>
-                <Mono style={{ fontSize: 7.5, color: C.muted3, marginTop: 1 }}>{meta.label.toUpperCase()} · {istD(r.createdAt).toUpperCase()}</Mono>
+            <View key={r.id} style={{ gap: 6, padding: 11, borderRadius: 12, backgroundColor: 'rgba(0,0,0,0.22)', borderWidth: 1, borderColor: hexA(stColor, 0.22), borderLeftWidth: 3, borderLeftColor: hexA(meta.color, 0.8) }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <Icon name={meta.icon as any} size={14} color={meta.color} strokeWidth={2.1} />
+                <View style={{ flex: 1 }}>
+                  <Body numberOfLines={1} style={{ fontSize: 13, fontFamily: F.bodySemi, color: '#fff' }}>{r.clientName}</Body>
+                  <Body numberOfLines={1} style={{ fontSize: 11, color: C.muted2, marginTop: 1 }}>{r.details}</Body>
+                  <Mono style={{ fontSize: 7.5, color: C.muted3, marginTop: 1 }}>
+                    {meta.label.toUpperCase()} · {formatIncentiveMonth(r.incentiveMonth).toUpperCase()} · EVENT {formatIncentiveDate(r.incentiveDate).toUpperCase()}
+                  </Mono>
+                </View>
+                <Badge text={r.status === 'approved' ? 'Approved' : r.status === 'rejected' ? 'Rejected' : 'Pending'} color={stColor} />
               </View>
-              <Badge text="Pending" color={C.gold} />
+              {r.status === 'rejected' && r.adminNotes ? (
+                <Body style={{ fontSize: 11, color: hexA(C.red, 0.9) }}>Admin: {r.adminNotes}</Body>
+              ) : null}
             </View>
           );
         })
@@ -163,28 +172,36 @@ function RaiseRequestSheet({ visible, onClose, crmId }: { visible: boolean; onCl
   const [clientQ, setClientQ] = React.useState('');
   const [f, setF] = React.useState<Record<string, string>>({});
   const set = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }));
+  // Incentive month (YYYY-MM) + exact event date (YYYY-MM-DD) — required on every type.
+  const [month, setMonth] = React.useState(currentIncentiveMonthValue());
+  const [date, setDate] = React.useState(todayDateValue());
 
-  React.useEffect(() => { if (visible) { setKind('referral'); setClient(null); setClientQ(''); setF({}); } }, [visible]);
+  React.useEffect(() => {
+    if (visible) { setKind('referral'); setClient(null); setClientQ(''); setF({}); setMonth(currentIncentiveMonthValue()); setDate(todayDateValue()); }
+  }, [visible]);
   React.useEffect(() => { setClient(null); }, [kind]);
+  const monthOk = /^\d{4}-(0[1-9]|1[0-2])$/.test(month.trim());
+  const dateOk = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(date.trim());
 
   const q = clientQ.trim().toLowerCase();
   const clients = (clientsQ.data ?? []).filter((c) => !q || c.name.toLowerCase().includes(q));
   const needsClient = kind !== 'referral';
 
-  const valid = kind === 'referral' ? !!f.name?.trim()
+  const valid = monthOk && dateOk && (kind === 'referral' ? !!f.name?.trim()
     : kind === 'subscription_upgrade' ? !!client && !!f.next?.trim()
     : kind === 'cross_sell' ? !!client && !!f.service?.trim()
-    : !!client && !!f.newSessions?.trim() && !!f.duration?.trim();
+    : !!client && !!f.newSessions?.trim() && !!f.duration?.trim());
 
   const submit = async () => {
     if (!crmId || !valid) return;
+    const when = { month: month.trim(), date: date.trim() };
     try {
-      if (kind === 'referral') await raiseM.mutateAsync({ kind, crmId, name: f.name, phone: f.phone, email: f.email, notes: f.notes });
-      else if (kind === 'subscription_upgrade') await raiseM.mutateAsync({ kind, crmId, clientId: client!.id, previous: client!.subscription, next: f.next, reason: f.reason });
-      else if (kind === 'cross_sell') await raiseM.mutateAsync({ kind, crmId, clientId: client!.id, service: f.service, sessions: parseInt(f.sessions) || undefined, notes: f.notes });
-      else await raiseM.mutateAsync({ kind, crmId, clientId: client!.id, previousSessions: client!.package, newSessions: f.newSessions, durationMonths: f.duration });
+      if (kind === 'referral') await raiseM.mutateAsync({ kind, crmId, ...when, name: f.name, phone: f.phone, email: f.email, notes: f.notes });
+      else if (kind === 'subscription_upgrade') await raiseM.mutateAsync({ kind, crmId, ...when, clientId: client!.id, previous: client!.subscription, next: f.next, reason: f.reason });
+      else if (kind === 'cross_sell') await raiseM.mutateAsync({ kind, crmId, ...when, clientId: client!.id, service: f.service, sessions: parseInt(f.sessions) || undefined, notes: f.notes });
+      else await raiseM.mutateAsync({ kind, crmId, ...when, clientId: client!.id, previousSessions: client!.package, newSessions: f.newSessions, durationMonths: f.duration });
       onClose();
-      Alert.alert('Request raised', 'It will show under Pending until approved.');
+      Alert.alert('Request submitted', 'It goes to the admin for approval and will show under Requests.');
     } catch (e: any) { Alert.alert("Couldn't raise request", e?.message ?? 'Try again.'); }
   };
 
@@ -200,6 +217,17 @@ function RaiseRequestSheet({ visible, onClose, crmId }: { visible: boolean; onCl
             </AnimChip>
           );
         })}
+      </View>
+
+      <View style={{ flexDirection: 'row', gap: 8 }}>
+        <View style={{ flex: 1, gap: 4 }}>
+          <Mono style={{ fontSize: 8, letterSpacing: 0.7, color: monthOk ? C.muted3 : C.red }}>EVENT MONTH (YYYY-MM) *</Mono>
+          <TextInput value={month} onChangeText={setMonth} placeholder="2026-08" placeholderTextColor={C.muted3} autoCapitalize="none" style={INPUT} />
+        </View>
+        <View style={{ flex: 1, gap: 4 }}>
+          <Mono style={{ fontSize: 8, letterSpacing: 0.7, color: dateOk ? C.muted3 : C.red }}>EVENT DATE (YYYY-MM-DD) *</Mono>
+          <TextInput value={date} onChangeText={setDate} placeholder="2026-08-01" placeholderTextColor={C.muted3} autoCapitalize="none" style={INPUT} />
+        </View>
       </View>
 
       {kind === 'referral' ? (
