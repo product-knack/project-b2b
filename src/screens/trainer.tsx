@@ -4756,6 +4756,12 @@ export function ClientDetail() {
                 });
                 go('create-plan');
               };
+              // Coach asked for changes: the trainer must see WHY and get a
+              // one-tap Edit without hunting inside the expanded card (web
+              // shows both directly on the Training Programs card).
+              const myStat = (p.my_status ?? p.status ?? '') as string;
+              const quickEditable = p.mine && !!clientId && (myStat === 'pending_review' || myStat === 'needs_revision' || myStat === 'rejected');
+              const feedback = p.my_feedback ?? p.coach_feedback;
               return (
                 <View key={p.plan_id ?? i} style={{ borderRadius: 14, backgroundColor: 'rgba(0,0,0,0.25)', borderWidth: 1, borderColor: hexA(c, 0.2), overflow: 'hidden' }}>
                   <Pressable onPress={() => setOpenPlan(isOpen ? null : p.plan_id)} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 13 }}>
@@ -4767,8 +4773,22 @@ export function ClientDetail() {
                       <Body style={{ fontSize: 11.5, color: C.muted2, marginTop: 1 }}>{meta}</Body>
                     </View>
                     <Badge text={statMeta.label} color={c} />
+                    {quickEditable ? (
+                      <Pressable onPress={startEdit} hitSlop={6} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 999, backgroundColor: hexA(C.orange, 0.12), borderWidth: 1, borderColor: hexA(C.orange, 0.45) }}>
+                        <Icon path="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" size={11} color={C.orange} strokeWidth={2.2} />
+                        <Text style={{ fontFamily: F.bodyBold, fontSize: 11, color: C.orange }}>Edit</Text>
+                      </Pressable>
+                    ) : null}
                     <Icon name={isOpen ? 'chevUp' : 'chevDown'} size={16} color={C.muted} strokeWidth={2.2} />
                   </Pressable>
+                  {feedback && (myStat === 'needs_revision' || myStat === 'rejected') ? (
+                    <View style={{ flexDirection: 'row', gap: 8, marginHorizontal: 13, marginBottom: isOpen ? 10 : 13, padding: 10, borderRadius: 11, backgroundColor: hexA(C.red, 0.07), borderWidth: 1, borderColor: hexA(C.red, 0.28) }}>
+                      <Icon name="alert" size={13} color={C.red} strokeWidth={2.1} />
+                      <Body style={{ flex: 1, fontSize: 12, color: '#E0A090', lineHeight: 17 }}>
+                        <Text style={{ fontFamily: F.bodyBold, color: C.red }}>Coach feedback: </Text>{feedback}
+                      </Body>
+                    </View>
+                  ) : null}
                   {isOpen ? (
                     <View style={{ paddingHorizontal: 13, paddingBottom: 13, gap: 12, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)', paddingTop: 12 }}>
                       {p.plan_description ? <Body style={{ fontSize: 12.5, color: C.muted2 }}>{p.plan_description}</Body> : null}

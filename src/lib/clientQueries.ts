@@ -1314,7 +1314,7 @@ export function useClientPlans(clientId: string | null) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('workout_plan_exercises')
-        .select('id, plan_id, plan_name, plan_description, plan_duration_weeks, modality, status, approved_at, created_at, order_index, body_part, exercise_name, set_number, tempo, rest_period, rm_percentage, reps_target, load_target, super_set_group, exercise_notes, activity_type, sub_activity, duration, trainer_id, measurement_type, rir_target')
+        .select('id, plan_id, plan_name, plan_description, plan_duration_weeks, modality, status, approved_at, created_at, order_index, body_part, exercise_name, set_number, tempo, rest_period, rm_percentage, reps_target, load_target, super_set_group, exercise_notes, activity_type, sub_activity, duration, trainer_id, measurement_type, rir_target, coach_feedback')
         .eq('client_id', clientId)
         .order('created_at', { ascending: true })
         .order('order_index', { ascending: true });
@@ -1340,12 +1340,16 @@ export function useClientPlans(clientId: string | null) {
             approved_at: r.approved_at ?? null,
             created_at: r.created_at ?? null,
             expired: approved > 0 ? approved + 45 * 864e5 < now : false,
+            /** Coach's revision note (web "Coach Feedback" banner) — from the
+                first row; per-trainer slices carry their own in my_feedback. */
+            coach_feedback: r.coach_feedback ?? null,
             /** true when the signed-in trainer authored at least one row */
             mine: false,
             /** status/approved_at of the signed-in trainer's own rows (a shared
                 plan can be approved for one trainer and pending for the other) */
             my_status: null as string | null,
             my_approved_at: null as string | null,
+            my_feedback: null as string | null,
             shared: false,
             exercises: [] as any[],
           });
@@ -1356,6 +1360,7 @@ export function useClientPlans(clientId: string | null) {
           if (plan.my_status == null) {
             plan.my_status = r.status ?? null;
             plan.my_approved_at = r.approved_at ?? null;
+            plan.my_feedback = r.coach_feedback ?? null;
           }
         } else if (r.trainer_id) {
           plan.shared = true;
