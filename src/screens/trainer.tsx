@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, Pressable, ScrollView, FlatList, Image, Modal, TextInput, Keyboard, Platform, PanResponder, Animated, Easing, Alert, ActivityIndicator, useWindowDimensions, Linking, AppState } from 'react-native';
+import { View, Text, Pressable, ScrollView, FlatList, Image, Modal, TextInput, Keyboard, Platform, PanResponder, Animated, Easing, Alert, ActivityIndicator, useWindowDimensions, Linking, AppState, KeyboardAvoidingView, LayoutAnimation } from 'react-native';
 import { backSwipeLock } from '../gestureLock';
 import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -46,7 +46,6 @@ import {
 } from '../data';
 import { tones } from '../theme';
 import { MedicalEntrySheet } from './doctorClientDetail';
-import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 
 const AV_GRADS: [string, string][] = [['#FB8B3A', '#EE5E16'], ['#57C98A', '#2E9A63'], ['#7C8FE8', '#4A5AC8'], ['#9A7BEA', '#6E5BD0'], ['#E0A53C', '#C07C1E'], ['#4FD1C5', '#2C8A86'], ['#F687B3', '#C2568A'], ['#F0883E', '#C05621']];
 const avColors = (s: string): [string, string] => AV_GRADS[[...(s || '?')].reduce((a, c) => a + c.charCodeAt(0), 0) % AV_GRADS.length];
@@ -816,9 +815,22 @@ function RosterCard({ row, trainerName, highlight, onAddWorkout, plans, devPos }
   const cancelM = useCancelScheduledSession();
   const missedM = useAddMissedRemark();
   const [modal, setModal] = React.useState<null | 'cancel' | 'missed'>(null);
-  // Keyboard height so the remark dialog rides ABOVE the keyboard (edge-to-edge
-  // Android defeats adjustResize inside Modals).
-  const kbH = useKeyboardHeight();
+  // Android-only keyboard height for the remark dialog (edge-to-edge defeats
+  // adjustResize inside Modals; iOS uses KeyboardAvoidingView instead). The
+  // LayoutAnimation makes the late didShow reposition glide instead of jump.
+  const [kbH, setKbH] = React.useState(0);
+  React.useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const s = Keyboard.addListener('keyboardDidShow', (e: any) => {
+      LayoutAnimation.configureNext(LayoutAnimation.create(180, 'easeInEaseOut', 'opacity'));
+      setKbH(e.endCoordinates?.height ?? 0);
+    });
+    const h = Keyboard.addListener('keyboardDidHide', () => {
+      LayoutAnimation.configureNext(LayoutAnimation.create(160, 'easeInEaseOut', 'opacity'));
+      setKbH(0);
+    });
+    return () => { s.remove(); h.remove(); };
+  }, []);
   const [reschedOpen, setReschedOpen] = React.useState(false);
   const [distOpen, setDistOpen] = React.useState(false);
   const [text, setText] = React.useState('');
@@ -1095,11 +1107,9 @@ function RosterCard({ row, trainerName, highlight, onAddWorkout, plans, devPos }
       <Modal visible={modal !== null} transparent animationType="fade" onRequestClose={closeModal}>
         {/* Backdrop is deliberately NOT tappable — a stray tap outside must not
             throw away a half-typed remark. Close via Dismiss (or hardware back).
-            TOP-ANCHORED on purpose: the dialog never has to move when the
-            keyboard opens (repositioning after keyboardDidShow reads as laggy
-            drift on Android). The keyboard just slides in underneath; on small
-            screens the card body scrolls instead of hiding behind it. */}
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', alignItems: 'center', justifyContent: 'flex-start', padding: 22, paddingTop: 34, paddingBottom: kbH > 0 ? kbH + 12 : 22 }}>
+            Centered at rest; RISES with the keyboard — natively synced on iOS
+            (KeyboardAvoidingView), LayoutAnimation-eased on Android. */}
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', alignItems: 'center', justifyContent: 'center', padding: 22, paddingBottom: Platform.OS === 'android' && kbH > 0 ? kbH + 14 : 22 }}>
           <ScrollView bounces={false} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={{ width: '100%', maxWidth: 360, maxHeight: '100%', flexGrow: 0, backgroundColor: '#12100E', borderWidth: 1, borderColor: 'rgba(255,150,90,0.16)', borderRadius: 20 }} contentContainerStyle={{ padding: 20, gap: 14 }}>
             <Serif style={{ fontSize: 19 }}>{modal === 'cancel' ? (cancelPaid ? 'Paid Cancellation' : 'Cancel Session') : 'Add Missed Remark'}</Serif>
             <Body style={{ fontSize: 12.5, color: C.muted2 }}>
@@ -1164,7 +1174,7 @@ function RosterCard({ row, trainerName, highlight, onAddWorkout, plans, devPos }
               })()}
             </View>
           </ScrollView>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
