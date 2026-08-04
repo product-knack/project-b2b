@@ -46,6 +46,7 @@ import {
 } from '../data';
 import { tones } from '../theme';
 import { MedicalEntrySheet } from './doctorClientDetail';
+import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 
 const AV_GRADS: [string, string][] = [['#FB8B3A', '#EE5E16'], ['#57C98A', '#2E9A63'], ['#7C8FE8', '#4A5AC8'], ['#9A7BEA', '#6E5BD0'], ['#E0A53C', '#C07C1E'], ['#4FD1C5', '#2C8A86'], ['#F687B3', '#C2568A'], ['#F0883E', '#C05621']];
 const avColors = (s: string): [string, string] => AV_GRADS[[...(s || '?')].reduce((a, c) => a + c.charCodeAt(0), 0) % AV_GRADS.length];
@@ -815,6 +816,9 @@ function RosterCard({ row, trainerName, highlight, onAddWorkout, plans, devPos }
   const cancelM = useCancelScheduledSession();
   const missedM = useAddMissedRemark();
   const [modal, setModal] = React.useState<null | 'cancel' | 'missed'>(null);
+  // Keyboard height so the remark dialog rides ABOVE the keyboard (edge-to-edge
+  // Android defeats adjustResize inside Modals).
+  const kbH = useKeyboardHeight();
   const [reschedOpen, setReschedOpen] = React.useState(false);
   const [distOpen, setDistOpen] = React.useState(false);
   const [text, setText] = React.useState('');
@@ -882,11 +886,18 @@ function RosterCard({ row, trainerName, highlight, onAddWorkout, plans, devPos }
     ? { label: 'Upcoming', color: C.blue, hint: `Logging opens at ${winStart.time} ${winStart.ampm}` }
     : { label: 'Window closed', color: C.red, hint: `Closed at ${winEnd.time} ${winEnd.ampm} — reschedule to log this session` };
 
+  // Android new-arch rule: never unmount a Modal while its TextInput is still
+  // focused — dismiss the keyboard, let it settle, THEN close.
+  const closeModal = React.useCallback(() => {
+    Keyboard.dismiss();
+    setTimeout(() => setModal(null), 80);
+  }, []);
   const submit = async () => {
     try {
       if (modal === 'cancel') await cancelM.mutateAsync({ id: row.id, remark: text, paid: cancelPaid, image: att ?? undefined });
       else if (modal === 'missed') await missedM.mutateAsync({ id: row.id, category: missedCat ?? '', remark: text });
-      setModal(null); setText(''); setMissedCat(null); setAtt(null); setCancelPaid(false);
+      Keyboard.dismiss();
+      setTimeout(() => { setModal(null); setText(''); setMissedCat(null); setAtt(null); setCancelPaid(false); }, 80);
     } catch (e) { /* error surfaced below */ }
   };
   const busy = cancelM.isPending || missedM.isPending;
@@ -1081,9 +1092,11 @@ function RosterCard({ row, trainerName, highlight, onAddWorkout, plans, devPos }
         </Pressable>
       </Modal>
 
-      <Modal visible={modal !== null} transparent animationType="fade" onRequestClose={() => setModal(null)}>
-        <Pressable onPress={() => !busy && setModal(null)} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', alignItems: 'center', justifyContent: 'center', padding: 22 }}>
-          <Pressable onPress={() => {}} style={{ width: '100%', maxWidth: 360, backgroundColor: '#12100E', borderWidth: 1, borderColor: 'rgba(255,150,90,0.16)', borderRadius: 20, padding: 20, gap: 14 }}>
+      <Modal visible={modal !== null} transparent animationType="fade" onRequestClose={closeModal}>
+        {/* Backdrop is deliberately NOT tappable — a stray tap outside must not
+            throw away a half-typed remark. Close via Dismiss (or hardware back). */}
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', alignItems: 'center', justifyContent: 'center', padding: 22, paddingBottom: kbH > 0 ? kbH + 16 : 22 }}>
+          <View style={{ width: '100%', maxWidth: 360, backgroundColor: '#12100E', borderWidth: 1, borderColor: 'rgba(255,150,90,0.16)', borderRadius: 20, padding: 20, gap: 14 }}>
             <Serif style={{ fontSize: 19 }}>{modal === 'cancel' ? (cancelPaid ? 'Paid Cancellation' : 'Cancel Session') : 'Add Missed Remark'}</Serif>
             <Body style={{ fontSize: 12.5, color: C.muted2 }}>
               {modal === 'cancel'
@@ -1133,20 +1146,21 @@ function RosterCard({ row, trainerName, highlight, onAddWorkout, plans, devPos }
             ) : null}
             {err ? <Body style={{ fontSize: 12, color: C.red }}>{err.message}</Body> : null}
             <View style={{ flexDirection: 'row', gap: 10 }}>
-              <Pressable onPress={() => !busy && setModal(null)} style={{ flex: 1, alignItems: 'center', paddingVertical: 13, borderRadius: 13, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' }}>
+              <Pressable onPress={() => !busy && closeModal()} style={{ flex: 1, alignItems: 'center', paddingVertical: 13, borderRadius: 13, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' }}>
                 <Text style={{ fontFamily: F.bodySemi, fontSize: 13, color: C.ink }}>Dismiss</Text>
               </Pressable>
               {(() => {
                 const blocked = busy || !text.trim() || (modal === 'missed' && !missedCat);
                 return (
-                  <Pressable onPress={submit} disabled={blocked} style={{ flex: 1, alignItems: 'center', paddingVertical: 13, borderRadius: 13, backgroundColor: blocked ? 'rgba(255,255,255,0.06)' : hexA(modal === 'cancel' ? C.red : C.orange, 0.16), borderWidth: 1, borderColor: blocked ? 'rgba(255,255,255,0.08)' : hexA(modal === 'cancel' ? C.red : C.orange, 0.4) }}>
+                  <Pressable onPress={submit} disabled={blocked} style={{ flex: 1, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 7, paddingVertical: 13, borderRadius: 13, backgroundColor: blocked ? 'rgba(255,255,255,0.06)' : hexA(modal === 'cancel' ? C.red : C.orange, 0.16), borderWidth: 1, borderColor: blocked ? 'rgba(255,255,255,0.08)' : hexA(modal === 'cancel' ? C.red : C.orange, 0.4) }}>
+                    {busy ? <ActivityIndicator size="small" color={modal === 'cancel' ? C.red : C.orange} /> : null}
                     <Text style={{ fontFamily: F.bodyBold, fontSize: 13, color: blocked ? C.muted3 : modal === 'cancel' ? C.red : C.orange }}>{busy ? 'Saving…' : 'Confirm'}</Text>
                   </Pressable>
                 );
               })()}
             </View>
-          </Pressable>
-        </Pressable>
+          </View>
+        </View>
       </Modal>
     </View>
   );
