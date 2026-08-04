@@ -1094,9 +1094,13 @@ function RosterCard({ row, trainerName, highlight, onAddWorkout, plans, devPos }
 
       <Modal visible={modal !== null} transparent animationType="fade" onRequestClose={closeModal}>
         {/* Backdrop is deliberately NOT tappable — a stray tap outside must not
-            throw away a half-typed remark. Close via Dismiss (or hardware back). */}
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', alignItems: 'center', justifyContent: 'center', padding: 22, paddingBottom: kbH > 0 ? kbH + 16 : 22 }}>
-          <View style={{ width: '100%', maxWidth: 360, backgroundColor: '#12100E', borderWidth: 1, borderColor: 'rgba(255,150,90,0.16)', borderRadius: 20, padding: 20, gap: 14 }}>
+            throw away a half-typed remark. Close via Dismiss (or hardware back).
+            TOP-ANCHORED on purpose: the dialog never has to move when the
+            keyboard opens (repositioning after keyboardDidShow reads as laggy
+            drift on Android). The keyboard just slides in underneath; on small
+            screens the card body scrolls instead of hiding behind it. */}
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', alignItems: 'center', justifyContent: 'flex-start', padding: 22, paddingTop: 34, paddingBottom: kbH > 0 ? kbH + 12 : 22 }}>
+          <ScrollView bounces={false} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={{ width: '100%', maxWidth: 360, maxHeight: '100%', flexGrow: 0, backgroundColor: '#12100E', borderWidth: 1, borderColor: 'rgba(255,150,90,0.16)', borderRadius: 20 }} contentContainerStyle={{ padding: 20, gap: 14 }}>
             <Serif style={{ fontSize: 19 }}>{modal === 'cancel' ? (cancelPaid ? 'Paid Cancellation' : 'Cancel Session') : 'Add Missed Remark'}</Serif>
             <Body style={{ fontSize: 12.5, color: C.muted2 }}>
               {modal === 'cancel'
@@ -1159,7 +1163,7 @@ function RosterCard({ row, trainerName, highlight, onAddWorkout, plans, devPos }
                 );
               })()}
             </View>
-          </View>
+          </ScrollView>
         </View>
       </Modal>
     </View>
