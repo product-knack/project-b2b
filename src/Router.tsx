@@ -49,6 +49,7 @@ import { QhpAssessmentDetail } from './screens/qhpAssessmentDetail';
 import { QhpReviewCenter } from './screens/qhpReview';
 import { B2cReports } from './screens/b2cReports';
 import { OpsDashboard, OpsClients, OpsCrmPending, OpsCrmActivity, OpsBaseline, OpsTargets, OpsQhpHold } from './screens/ops';
+import { OpsSalesTracker } from './screens/opsSalesTracker';
 import { OpsLeads } from './screens/opsLeads';
 import { OpsEscalations } from './screens/opsEscalations';
 import { AdminDashboard } from './screens/admin';
@@ -142,6 +143,7 @@ const SCREENS: Record<string, React.ComponentType> = {
   'ops-activity': OpsCrmActivity,
   'ops-baseline': OpsBaseline,
   'ops-targets': OpsTargets,
+  'ops-sales-tracker': OpsSalesTracker,
   'ops-qhp-hold': OpsQhpHold,
   'ops-escalations': OpsEscalations,
   'admin-dashboard': AdminDashboard,

@@ -156,3 +156,38 @@ export function useOpsRenewalsPending(enabled: boolean) {
     },
   });
 }
+
+/* ---------------- Mechanical-score-failed (read-only; auto-closes when a score lands) ---------------- */
+export type MechScoreFailedRow = {
+  id: string; source_id: string | null; title: string | null; status: 'open' | 'completed';
+  escalated_at: string; completed_at: string | null;
+  details: {
+    client_id?: string; client_name?: string; assessment_date?: string | null;
+    coach_id?: string | null; failure_reason?: string; model_attempted?: string;
+  } | null;
+};
+export function useMechScoreFailedEscalations(enabled: boolean) {
+  return useQuery({
+    queryKey: ['ops-esc-mech-score-failed'],
+    enabled,
+    staleTime: 60_000,
+    queryFn: async (): Promise<MechScoreFailedRow[]> => {
+      const { data, error } = await supabase.from('escalations')
+        .select('id, source_id, title, status, escalated_at, completed_at, details')
+        .eq('source_type', 'mechanical_score_failed')
+        .gte('escalated_at', ESCALATIONS_SINCE)
+        .eq('status', 'open')
+        .order('escalated_at', { ascending: false });
+      if (error) throw new Error(error.message);
+      return (data ?? []) as any as MechScoreFailedRow[];
+    },
+  });
+}
+/* Shorten noisy provider errors to a human-readable cause (web shortReason). */
+export const mechShortReason = (reason?: string | null): string => {
+  if (!reason) return 'Unknown error';
+  if (/credit_balance_exhausted|no credits remaining/i.test(reason)) return 'AI credits exhausted';
+  if (/rate.?limit|429/i.test(reason)) return 'AI rate limited';
+  if (/not configured/i.test(reason)) return 'AI provider key missing';
+  return reason.length > 160 ? `${reason.slice(0, 160)}…` : reason;
+};

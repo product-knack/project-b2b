@@ -11,9 +11,9 @@ import { useSidebarProfile } from '../lib/navQueries';
 import { useLeadStats, useColdLeads, useOpsFollowUpReminders, useMyOpsProfile } from '../lib/opsLeadQueries';
 import {
   useSalesTargetsOverview, useAppendSalesTargetNote, NOTE_CATEGORIES,
-  useQhpHolds, useAddHoldReply, useCrmPendingAssignments, useOpsPaidClients,
+  useQhpHolds, useAddHoldReply, useQhpHoldHistory, useCrmPendingAssignments, useOpsPaidClients,
   useBaselineExplanation, baselineMonths,
-  type SalesTargetRow, type QhpHoldRow,
+  type SalesTargetRow, type QhpHoldRow, type QhpHoldHistoryRow,
 } from '../lib/opsQueries';
 
 /* ============ OPS workspace (web /ops/*) — obsidian/ember UI ============ */
@@ -243,7 +243,7 @@ export function OpsDashboard() {
               </View>
               <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 10 }}>
                 <CountUp value={s.activePipeline} style={{ fontSize: 42, lineHeight: 46 }} />
-                <Body style={{ flex: 1, fontSize: 11, color: C.muted, lineHeight: 15, marginBottom: 5 }}>leads in active pipeline{'\n'}New · Potential · QHP Booked</Body>
+                <Body style={{ flex: 1, fontSize: 11, color: C.muted, lineHeight: 15, marginBottom: 5 }}>leads in active pipeline{'\n'}New · QHP Booked · QHP Completed</Body>
               </View>
               <View style={{ gap: 6 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -367,35 +367,95 @@ export function OpsDashboard() {
 }
 
 /* ================= 2. PAID CLIENTS ================= */
+const CLIENT_STATUSES = [['active', 'Active', C.green], ['paused', 'Paused', C.gold], ['discontinued', 'Discontinued', C.red]] as const;
+
 export function OpsClients() {
   const q = useOpsPaidClients(true);
   const [search, setSearch] = React.useState('');
+  const [statusFilter, setStatusFilter] = React.useState<'active' | 'paused' | 'discontinued'>('active');
+  const [needsRenewal, setNeedsRenewal] = React.useState(false);
+  const [crmFilter, setCrmFilter] = React.useState('all');
   const [visible, setVisible] = React.useState(30);
   const all = q.data ?? [];
+
+  const statusCounts: Record<string, number> = { active: 0, paused: 0, discontinued: 0 };
+  all.forEach((c) => { if (c.status in statusCounts) statusCounts[c.status]++; });
+  // Needs-renewal count is computed within the selected status filter (web parity).
+  const needsRenewalCount = all.filter((c) => c.status === statusFilter && c.sessionsLeft !== null && c.sessionsLeft < 2).length;
+  const crmCounts = new Map<string, number>();
+  all.forEach((c) => { if (c.assignedCrm) crmCounts.set(c.assignedCrm, (crmCounts.get(c.assignedCrm) ?? 0) + 1); });
+  const crmOptions: [string, string, number][] = [
+    ['all', 'All CRMs', all.length],
+    ...[...crmCounts.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([name, n]) => [name, name, n] as [string, string, number]),
+  ];
+
   const term = search.trim().toLowerCase();
-  const list = term ? all.filter((c) => c.name.toLowerCase().includes(term) || (c.assignedCrm ?? '').toLowerCase().includes(term)) : all;
+  const list = all.filter((c) => {
+    if (c.status !== statusFilter) return false;
+    if (needsRenewal && (c.sessionsLeft === null || c.sessionsLeft >= 2)) return false;
+    if (crmFilter !== 'all' && c.assignedCrm !== crmFilter) return false;
+    return !term || c.name.toLowerCase().includes(term) || (c.assignedCrm ?? '').toLowerCase().includes(term);
+  });
 
   return (
     <Page gap={13}>
-      <TitleBlock title="Paid Clients" sub={q.data ? `${all.length} paying clients` : 'Roster with assigned CRM & packages'} />
+      <TitleBlock title="Paid Clients" sub={q.data ? `${list.length} of ${all.length} paid clients` : 'Roster with assigned CRM & packages'} />
+      <HScroll gap={7}>
+        {CLIENT_STATUSES.map(([id, label, col]) => {
+          const active = statusFilter === id;
+          return (
+            <Pressable key={id} onPress={() => { setStatusFilter(id); setVisible(30); }} style={{ paddingVertical: 8, paddingHorizontal: 12, borderRadius: 999, backgroundColor: active ? hexA(col, 0.16) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: active ? hexA(col, 0.5) : 'rgba(255,255,255,0.09)' }}>
+              <Text style={{ fontFamily: active ? F.bodyBold : F.bodySemi, fontSize: 11.5, color: active ? col : C.muted }}>{label} ({statusCounts[id]})</Text>
+            </Pressable>
+          );
+        })}
+        <Pressable onPress={() => { setNeedsRenewal((v) => !v); setVisible(30); }} style={{ paddingVertical: 8, paddingHorizontal: 12, borderRadius: 999, backgroundColor: needsRenewal ? hexA(C.red, 0.16) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: needsRenewal ? hexA(C.red, 0.5) : 'rgba(255,255,255,0.09)' }}>
+          <Text style={{ fontFamily: needsRenewal ? F.bodyBold : F.bodySemi, fontSize: 11.5, color: needsRenewal ? C.red : C.muted }}>Needs Renewal ({needsRenewalCount})</Text>
+        </Pressable>
+      </HScroll>
+      <HScroll gap={7}>
+        {crmOptions.map(([key, label, n]) => {
+          const active = crmFilter === key;
+          return (
+            <Pressable key={key} onPress={() => { setCrmFilter(key); setVisible(30); }} style={{ paddingVertical: 7, paddingHorizontal: 11, borderRadius: 999, backgroundColor: active ? hexA(C.orange, 0.16) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: active ? hexA(C.orange, 0.5) : 'rgba(255,255,255,0.09)' }}>
+              <Text style={{ fontFamily: active ? F.bodyBold : F.bodySemi, fontSize: 11, color: active ? C.orange : C.muted }}>{label} ({n})</Text>
+            </Pressable>
+          );
+        })}
+      </HScroll>
       <OpsSearch value={search} onChange={(v) => { setSearch(v); setVisible(30); }} placeholder="Search by client or CRM…" />
       <Err q={q} />
       {q.isLoading ? <Loading /> : list.length === 0 ? <Body style={{ fontSize: 12.5, color: C.muted3, textAlign: 'center', paddingVertical: 24 }}>No clients match.</Body> : (
         <>
-          {list.slice(0, visible).map((c) => (
+          {list.slice(0, visible).map((c, idx) => (
             <Card key={c.id} colors={['rgba(46,28,18,0.4)', 'rgba(18,14,14,0.5)']} border="rgba(255,150,90,0.1)" radius={14} style={{ padding: 12, gap: 7 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 11 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <Mono style={{ fontSize: 9, color: C.muted3, minWidth: 18, textAlign: 'right' }}>{idx + 1}</Mono>
                 <Avatar initial={c.initial} size={38} fontSize={14} colors={opsAvColors(c.name)} />
                 <View style={{ flex: 1 }}>
                   <Body numberOfLines={1} style={{ fontSize: 13.5, fontFamily: F.bodySemi, color: '#fff' }}>{c.name}</Body>
-                  <Body numberOfLines={1} style={{ fontSize: 10.5, color: C.muted2, marginTop: 1 }}>CRM {c.assignedCrm ?? '— unassigned'}</Body>
+                  <Body numberOfLines={1} style={{ fontSize: 10.5, color: C.muted2, marginTop: 1 }}>CRM: {c.assignedCrm ?? 'Not assigned'}</Body>
                 </View>
-                {c.status !== 'active' ? <Badge text={c.status} color={C.muted2} /> : null}
+                {c.status !== 'active' ? <Badge text={c.status} color={c.status === 'paused' ? C.gold : C.red} /> : null}
               </View>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 <Badge text={c.subscription} color={C.gold} />
                 {c.lastPackage ? <Badge text={c.lastPackage} color={C.blue} /> : null}
                 {c.paymentDate ? <Mono style={{ fontSize: 8.5, letterSpacing: 0.4, color: C.muted3 }}>PAID {fmtDay(c.paymentDate).toUpperCase()}</Mono> : null}
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <Mono style={{ fontSize: 8.5, letterSpacing: 0.6, color: C.muted3 }}>SESSIONS LEFT</Mono>
+                {c.sessionsLeft === null ? (
+                  <Body style={{ fontSize: 12, color: C.muted3 }}>—</Body>
+                ) : c.sessionsLeft <= 0 ? (
+                  <>
+                    <Text style={{ fontFamily: F.bodyBold, fontSize: 14, color: C.red }}>0</Text>
+                    <Badge text="NEEDS RENEWAL" color={C.red} />
+                    <Body style={{ fontSize: 10, color: C.muted2 }}>Last session: {fmtDay(c.lastCompletedAt)}</Body>
+                  </>
+                ) : (
+                  <Text style={{ fontFamily: c.sessionsLeft <= 3 ? F.bodyBold : F.body, fontSize: 13, color: c.sessionsLeft <= 3 ? C.gold : C.ink2 }}>{c.sessionsLeft}</Text>
+                )}
               </View>
             </Card>
           ))}
@@ -716,31 +776,114 @@ function HoldCard({ hold }: { hold: QhpHoldRow }) {
   );
 }
 
+/* Hold-history dates: dd-MMM-yyyy h:mm a in IST (web parity). */
+const fmtHist = (iso: string | null) => {
+  if (!iso) return '—';
+  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true }).formatToParts(new Date(iso));
+  const g = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
+  return `${g('day')}-${g('month')}-${g('year')} ${g('hour')}:${g('minute')} ${g('dayPeriod').toUpperCase()}`;
+};
+
+function HoldHistoryCard({ row }: { row: QhpHoldHistoryRow }) {
+  const oc = row.outcome === 'completed' ? C.green : row.outcome === 'rescheduled' ? C.blue : C.muted2;
+  const ocLabel = row.outcome === 'completed' ? 'Completed' : row.outcome === 'rescheduled' ? 'Rescheduled' : 'Cancelled';
+  return (
+    <Card colors={['rgba(46,28,18,0.4)', 'rgba(18,14,14,0.5)']} border={hexA(oc, 0.2)} radius={14} style={{ padding: 12, borderLeftWidth: 3, borderLeftColor: oc, gap: 7 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <Body numberOfLines={1} style={{ flex: 1, fontSize: 13.5, fontFamily: F.bodySemi, color: '#fff' }}>{row.client_name || 'Unknown client'}</Body>
+        <Badge text={ocLabel} color={oc} />
+      </View>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+        <Badge text={row.was_overdue ? 'Went overdue' : 'On time'} color={row.was_overdue ? C.red : C.muted2} />
+        {row.replies_count > 0 ? <Body style={{ fontSize: 10.5, color: C.muted2 }}>{row.replies_count} {row.replies_count === 1 ? 'reply' : 'replies'}</Body> : null}
+        <Mono style={{ fontSize: 8, letterSpacing: 0.4, color: C.muted3 }}>RESOLVED {fmtHist(row.resolved_at).toUpperCase()}</Mono>
+      </View>
+      {row.reason ? (
+        <View style={{ padding: 9, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.03)', borderLeftWidth: 2, borderLeftColor: hexA(oc, 0.6) }}>
+          <Mono style={{ fontSize: 7.5, letterSpacing: 0.6, color: C.muted3 }}>REASON FOR HOLD</Mono>
+          <Body style={{ fontSize: 11.5, color: C.ink2, lineHeight: 16, marginTop: 2 }}>{row.reason}</Body>
+        </View>
+      ) : null}
+      <View style={{ flexDirection: 'row', gap: 8 }}>
+        <View style={{ flex: 1, padding: 9, borderRadius: 10, backgroundColor: 'rgba(0,0,0,0.22)', gap: 2 }}>
+          <Mono style={{ fontSize: 7, letterSpacing: 0.5, color: C.muted3 }}>RESOLVE BY</Mono>
+          <Body style={{ fontSize: 10.5, color: C.ink2 }}>{fmtHist(row.resolving_at)}</Body>
+        </View>
+        <View style={{ flex: 1, padding: 9, borderRadius: 10, backgroundColor: 'rgba(0,0,0,0.22)', gap: 2 }}>
+          <Mono style={{ fontSize: 7, letterSpacing: 0.5, color: C.muted3 }}>HELD BY</Mono>
+          <Body numberOfLines={2} style={{ fontSize: 10.5, color: C.ink2 }}>{row.held_by_name || '—'} · {fmtHist(row.held_at)}</Body>
+        </View>
+      </View>
+    </Card>
+  );
+}
+
 export function OpsQhpHold() {
+  const [tab, setTab] = React.useState<'holds' | 'history'>('holds');
+  const [outcome, setOutcome] = React.useState<'all' | 'completed' | 'rescheduled' | 'cancelled'>('all');
   const q = useQhpHolds(true);
+  const histQ = useQhpHoldHistory(tab === 'history');
   const holds = q.data ?? [];
   const overdue = holds.filter((h) => h.is_overdue).sort((a, b) => (a.resolving_at ?? '').localeCompare(b.resolving_at ?? ''));
   const rest = holds.filter((h) => !h.is_overdue).sort((a, b) => (a.resolving_at ?? '').localeCompare(b.resolving_at ?? ''));
   const dueSoon = rest.filter((h) => h.resolving_at && (new Date(h.resolving_at).getTime() - Date.now()) / 60000 <= 720).length;
+  const hist = histQ.data ?? [];
+  const histCounts = { all: hist.length, completed: 0, rescheduled: 0, cancelled: 0 };
+  hist.forEach((r) => { histCounts[r.outcome]++; });
+  const histList = outcome === 'all' ? hist : hist.filter((r) => r.outcome === outcome);
 
   return (
     <Page gap={13}>
       <TitleBlock title="QHP Hold" sub="QHPs paused by the QHP Manager and their resolve deadlines" />
       <View style={{ flexDirection: 'row', gap: 8 }}>
-        {(([['TOTAL ON HOLD', holds.length, C.blue], ['DUE IN 12H', dueSoon, C.gold], ['OVERDUE', overdue.length, C.red]]) as [string, number, string][]).map(([lab, n, col]) => (
-          <Card key={lab} colors={['rgba(56,34,21,0.5)', 'rgba(20,16,15,0.5)']} border={hexA(col, 0.22)} radius={14} style={{ flex: 1, padding: 11, alignItems: 'center', gap: 3 }}>
-            <Text style={{ fontFamily: F.bodyBold, fontSize: 18, color: col }}>{n}</Text>
-            <Mono style={{ fontSize: 6.5, letterSpacing: 0.6, color: C.muted3 }}>{lab}</Mono>
-          </Card>
-        ))}
+        {(([['holds', `On Hold (${holds.length})`], ['history', 'Hold History']]) as ['holds' | 'history', string][]).map(([id, label]) => {
+          const active = tab === id;
+          return (
+            <Pressable key={id} onPress={() => setTab(id)} style={{ flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: 999, backgroundColor: active ? hexA(C.orange, 0.16) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: active ? hexA(C.orange, 0.5) : 'rgba(255,255,255,0.09)' }}>
+              <Text style={{ fontFamily: active ? F.bodyBold : F.bodySemi, fontSize: 12, color: active ? C.orange : C.muted }}>{label}</Text>
+            </Pressable>
+          );
+        })}
       </View>
-      <Err q={q} />
-      {q.isLoading ? <Loading /> : holds.length === 0 ? <Body style={{ fontSize: 12.5, color: C.muted3, textAlign: 'center', paddingVertical: 24 }}>No QHPs on hold. 🎉</Body> : (
+      {tab === 'holds' ? (
         <>
-          {overdue.length ? <Mono style={{ fontSize: 10, letterSpacing: 1.2, color: C.red }}>OVERDUE · {overdue.length}</Mono> : null}
-          {overdue.map((h) => <HoldCard key={h.lead_id} hold={h} />)}
-          {rest.length ? <Mono style={{ fontSize: 10, letterSpacing: 1.2, color: C.mono }}>ON HOLD · {rest.length}</Mono> : null}
-          {rest.map((h) => <HoldCard key={h.lead_id} hold={h} />)}
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            {(([['TOTAL ON HOLD', holds.length, C.blue], ['DUE IN 12H', dueSoon, C.gold], ['OVERDUE', overdue.length, C.red]]) as [string, number, string][]).map(([lab, n, col]) => (
+              <Card key={lab} colors={['rgba(56,34,21,0.5)', 'rgba(20,16,15,0.5)']} border={hexA(col, 0.22)} radius={14} style={{ flex: 1, padding: 11, alignItems: 'center', gap: 3 }}>
+                <Text style={{ fontFamily: F.bodyBold, fontSize: 18, color: col }}>{n}</Text>
+                <Mono style={{ fontSize: 6.5, letterSpacing: 0.6, color: C.muted3 }}>{lab}</Mono>
+              </Card>
+            ))}
+          </View>
+          <Err q={q} />
+          {q.isLoading ? <Loading /> : holds.length === 0 ? <Body style={{ fontSize: 12.5, color: C.muted3, textAlign: 'center', paddingVertical: 24 }}>No QHPs on hold. 🎉</Body> : (
+            <>
+              {overdue.length ? <Mono style={{ fontSize: 10, letterSpacing: 1.2, color: C.red }}>OVERDUE · {overdue.length}</Mono> : null}
+              {overdue.map((h) => <HoldCard key={h.lead_id} hold={h} />)}
+              {rest.length ? <Mono style={{ fontSize: 10, letterSpacing: 1.2, color: C.mono }}>ON HOLD · {rest.length}</Mono> : null}
+              {rest.map((h) => <HoldCard key={h.lead_id} hold={h} />)}
+            </>
+          )}
+        </>
+      ) : (
+        <>
+          <HScroll gap={7}>
+            {(([['all', 'All'], ['completed', 'Completed'], ['rescheduled', 'Rescheduled'], ['cancelled', 'Cancelled']]) as ['all' | 'completed' | 'rescheduled' | 'cancelled', string][]).map(([id, label]) => {
+              const active = outcome === id;
+              return (
+                <Pressable key={id} onPress={() => setOutcome(id)} style={{ paddingVertical: 7, paddingHorizontal: 12, borderRadius: 999, backgroundColor: active ? hexA(C.orange, 0.16) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: active ? hexA(C.orange, 0.5) : 'rgba(255,255,255,0.09)' }}>
+                  <Text style={{ fontFamily: active ? F.bodyBold : F.bodySemi, fontSize: 11, color: active ? C.orange : C.muted }}>{label} ({histCounts[id]})</Text>
+                </Pressable>
+              );
+            })}
+          </HScroll>
+          <Err q={histQ} />
+          {histQ.isLoading ? <Loading /> : histList.length === 0 ? (
+            <View style={{ alignItems: 'center', paddingVertical: 28, gap: 4 }}>
+              <Body style={{ fontSize: 13, fontFamily: F.bodySemi, color: C.ink2 }}>No resolved holds yet</Body>
+              <Body style={{ fontSize: 11, color: C.muted3, textAlign: 'center' }}>Holds appear here once the QHP is completed, rescheduled or cancelled.</Body>
+            </View>
+          ) : histList.map((r, i) => <HoldHistoryCard key={`${r.assessment_id}-${i}`} row={r} />)}
         </>
       )}
     </Page>

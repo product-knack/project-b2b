@@ -27,7 +27,8 @@ export type SalesTargetRow = {
   status: 'open' | 'won' | 'lost'; lostReason: string | null; expectedCloseDate: string | null;
   closedAt: string | null; createdAt: string; notes: any; opsNotes: OpsNote[]; stale: boolean;
 };
-export const NOTE_CATEGORIES = [['price_strategy', 'Price strategy'], ['objection_handling', 'Objection handling'], ['timing', 'Timing'], ['cross_sell', 'Cross-sell'], ['general', 'General']] as const;
+// Web parity (2026-08): cross_sell keeps its stored VALUE but displays as "Up sell".
+export const NOTE_CATEGORIES = [['price_strategy', 'Price strategy'], ['objection_handling', 'Objection handling'], ['timing', 'Timing'], ['cross_sell', 'Up sell'], ['general', 'General']] as const;
 export function useSalesTargetsOverview(enabled: boolean) {
   return useQuery({
     queryKey: ['sales-targets-overview'],
@@ -104,6 +105,33 @@ export function useAddHoldReply() {
   });
 }
 
+/* ---------------- QHP hold history (resolved holds via get_qhp_hold_history RPC) ---------------- */
+export type QhpHoldHistoryRow = {
+  assessment_id: string; lead_id: string | null; client_id: string | null; client_name: string | null;
+  reason: string | null; held_by: string | null; held_by_name: string | null; held_at: string | null;
+  resolving_at: string | null; was_overdue: boolean; replies: any[]; replies_count: number;
+  outcome: 'completed' | 'rescheduled' | 'cancelled'; resolved_at: string | null;
+  resolved_by: string | null; resolved_by_name: string | null;
+};
+export function useQhpHoldHistory(enabled: boolean) {
+  return useQuery({
+    queryKey: ['qhp-hold-history'],
+    enabled,
+    staleTime: 60_000,
+    queryFn: async (): Promise<QhpHoldHistoryRow[]> => {
+      const { data, error } = await supabase.rpc('get_qhp_hold_history');
+      if (error) throw new Error(error.message);
+      return ((data ?? []) as any[]).map((r) => ({
+        ...r,
+        replies: Array.isArray(r.replies) ? r.replies : [],
+        replies_count: Number(r.replies_count) || 0,
+        // Missing/unknown outcome coerces to cancelled (web parity).
+        outcome: r.outcome === 'completed' || r.outcome === 'rescheduled' ? r.outcome : 'cancelled',
+      }));
+    },
+  });
+}
+
 /* ---------------- CRM pending assignments (3h+ unassigned after payment) ---------------- */
 export type CrmPendingRow = { id: string; clientId: string; clientName: string; phone: string | null; email: string | null; paymentReceivedAt: string; overdue: boolean };
 export function useCrmPendingAssignments(enabled: boolean) {
@@ -130,7 +158,11 @@ export function useCrmPendingAssignments(enabled: boolean) {
 
 /* ---------------- Paid clients roster (web OpsClients) ---------------- */
 const EXCLUDED_SUBS = new Set(['staff', 'trial', 'opportunity']);
-export type OpsClientRow = { id: string; name: string; initial: string; subscription: string; status: string; assignedCrm: string | null; lastPackage: string | null; paymentDate: string | null };
+export type OpsClientRow = {
+  id: string; name: string; initial: string; subscription: string; status: string;
+  assignedCrm: string | null; lastPackage: string | null; paymentDate: string | null;
+  sessionsLeft: number | null; lastCompletedAt: string | null;
+};
 export function useOpsPaidClients(enabled: boolean) {
   return useQuery({
     queryKey: ['ops-paid-clients'],
@@ -138,28 +170,61 @@ export function useOpsPaidClients(enabled: boolean) {
     staleTime: 300_000,
     refetchInterval: false,
     queryFn: async (): Promise<OpsClientRow[]> => {
-      const all = await fetchAll((f, t) => supabase.from('clients').select('id, first_name, last_name, subscription_type, session_package, payment_date, status').not('subscription_type', 'is', null).range(f, t));
-      const clients = (all as any[]).filter((c) => !EXCLUDED_SUBS.has(String(c.subscription_type ?? '').trim().toLowerCase()));
+      const all = await fetchAll((f, t) => supabase.from('clients').select('id, first_name, last_name, subscription_type, session_package, sessions_per_cycle, payment_date, status, created_at').not('subscription_type', 'is', null).range(f, t));
+      const clients = (all as any[]).filter((c) => {
+        if (EXCLUDED_SUBS.has(String(c.subscription_type ?? '').trim().toLowerCase())) return false;
+        // Hide merged duplicate placeholder clients (web parity).
+        const fn = String(c.first_name ?? '').trim().toLowerCase();
+        const ln = String(c.last_name ?? '').trim().toLowerCase();
+        return !fn.startsWith('[merged]') && !ln.includes('(dup of');
+      });
       const ids = clients.map((c) => c.id);
       const latestRenewal = new Map<string, any>();
       const crmMap = new Map<string, string>();
+      const usage = new Map<string, { scheduled_at: string; status: string | null }[]>();
       for (const part of chunk(ids)) {
-        const [{ data: ren }, { data: tc }] = await Promise.all([
-          supabase.from('client_renewals').select('client_id, new_package, package_amount, payment_date, renewed_at').in('client_id', part).order('renewed_at', { ascending: false }),
+        const [ren, sess, { data: tc }] = await Promise.all([
+          fetchAll((f, t) => supabase.from('client_renewals').select('client_id, new_package, package_amount, package_sessions, cycle_sessions, payment_date, renewed_at').in('client_id', part).eq('request_status', 'approved').order('renewed_at', { ascending: false }).range(f, t)),
+          // Session usage RPC (completed + cancelled — cancelled counts as used).
+          // PostgREST caps RPC responses at 1000 rows, so page it like a table read.
+          fetchAll((f, t) => supabase.rpc('get_ops_client_session_usage', { _client_ids: part }).range(f, t)),
           supabase.from('trainer_clients').select('client_id, trainer_id, actively_training, profiles:trainer_id(id, first_name, last_name, role)').in('client_id', part).eq('actively_training', true),
         ]);
-        (ren ?? []).forEach((r: any) => { if (r.client_id && !latestRenewal.has(r.client_id)) latestRenewal.set(r.client_id, r); });
+        (ren as any[]).forEach((r) => { if (r.client_id && !latestRenewal.has(r.client_id)) latestRenewal.set(r.client_id, r); });
+        (sess as any[]).forEach((r) => { if (!r.client_id || !r.scheduled_at) return; const arr = usage.get(r.client_id) ?? []; arr.push(r); usage.set(r.client_id, arr); });
         (tc ?? []).forEach((r: any) => { if (r.profiles?.role === 'crm') crmMap.set(r.client_id, nm(r.profiles) || 'CRM'); });
       }
       const fmtPackage = (v: any) => { const s = String(v ?? '').trim(); if (!s) return null; return /^\d+$/.test(s) ? `${s} sessions` : s; };
       return clients.map((c) => {
         const ren = latestRenewal.get(c.id);
         const name = nm(c) || '—';
+        const rows = usage.get(c.id) ?? [];
+        // Sessions left — mirrors web remainingSessionsFor (per-cycle remaining preferred).
+        let sessionsLeft: number | null = null;
+        const pkg = ren?.package_sessions ?? (c.session_package ? parseInt(String(c.session_package), 10) : 0);
+        if (pkg && pkg > 0) {
+          const startIso = ren?.renewed_at ?? c.created_at;
+          if (!startIso) sessionsLeft = pkg;
+          else {
+            const start = new Date(startIso).getTime();
+            const used = rows.filter((s) => new Date(s.scheduled_at).getTime() >= start).length;
+            const cyc = ren?.cycle_sessions ?? c.sessions_per_cycle ?? 0;
+            if (cyc > 0) sessionsLeft = used === 0 ? cyc : used % cyc === 0 ? 0 : cyc - (used % cyc);
+            else sessionsLeft = Math.max(pkg - used, 0);
+          }
+        }
+        let lastCompletedAt: string | null = null;
+        rows.forEach((s) => {
+          if (String(s.status ?? '').toLowerCase() !== 'completed') return;
+          if (!lastCompletedAt || new Date(s.scheduled_at).getTime() > new Date(lastCompletedAt).getTime()) lastCompletedAt = s.scheduled_at;
+        });
         return {
-          id: c.id, name, initial: (name[0] ?? '?').toUpperCase(), subscription: c.subscription_type, status: c.status || 'active',
+          id: c.id, name, initial: (name[0] ?? '?').toUpperCase(), subscription: c.subscription_type,
+          status: String(c.status ?? '').toLowerCase(),
           assignedCrm: crmMap.get(c.id) ?? null,
           lastPackage: fmtPackage(ren?.new_package ?? c.session_package),
           paymentDate: ren?.payment_date ?? c.payment_date ?? null,
+          sessionsLeft, lastCompletedAt,
         };
       }).sort((a, b) => a.name.localeCompare(b.name));
     },

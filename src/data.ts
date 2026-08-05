@@ -383,6 +383,7 @@ export const opsNav: NavGroup[] = [
     { label: 'Messenger', icon: 'chat', route: 'messenger' },
   ] },
   { label: 'Sales', items: [
+    { label: 'Sales Tracker', icon: 'rupee', route: 'ops-sales-tracker' },
     { label: 'Sales Targets', icon: 'trend', route: 'ops-targets' },
     { label: 'CRM Activity', icon: 'activity', route: 'ops-activity' },
     { label: 'CRM Pending', icon: 'clipboard', route: 'ops-crm-pending' },

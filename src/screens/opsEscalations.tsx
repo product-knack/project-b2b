@@ -7,6 +7,7 @@ import { Page, TitleBlock, Badge, HScroll } from './common';
 import { useMyOpsProfile } from '../lib/opsLeadQueries';
 import {
   ESC_CATEGORIES, escCountFor, useEscCategory, useSaveQhpEscRemark, useUpdateEscalation, useOpsRenewalsPending,
+  useMechScoreFailedEscalations, mechShortReason,
   type EscCategory, type EscalationRow,
 } from '../lib/opsEscalationQueries';
 
@@ -121,7 +122,9 @@ export function OpsEscalations() {
   const activeCat = ESC_CATEGORIES.find((c) => c.key === activeKey) ?? ESC_CATEGORIES[0];
   const listQ = useEscCategory(activeCat, status, activeKey !== 'renewals');
   const renewalsQ = useOpsRenewalsPending(activeKey === 'renewals');
+  const mechQ = useMechScoreFailedEscalations(activeKey === 'qhp_overdue');
   const rows = listQ.data ?? [];
+  const mechRows = mechQ.data ?? [];
 
   return (
     <Page gap={13}>
@@ -197,6 +200,39 @@ export function OpsEscalations() {
           : listQ.isError ? <Body style={{ fontSize: 11.5, color: C.red, textAlign: 'center' }}>{(listQ.error as Error).message}</Body>
           : rows.length === 0 ? <Body style={{ fontSize: 12.5, color: C.muted3, textAlign: 'center', paddingVertical: 24 }}>No {status === 'all' ? '' : status + ' '}escalations here.</Body>
           : rows.map((row) => <EscCard key={row.id} row={row} cat={activeCat} profile={profQ.data} />)}
+
+          {/* Read-only: QHP assessments the AI scorer could not score (auto-close when a score lands). */}
+          {activeKey === 'qhp_overdue' && mechRows.length > 0 ? (
+            <Card colors={['rgba(46,28,18,0.4)', 'rgba(18,14,14,0.5)']} border={hexA(C.red, 0.22)} radius={14} style={{ padding: 12, gap: 9 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
+                <View style={{ width: 30, height: 30, borderRadius: 10, backgroundColor: hexA(C.red, 0.14), alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon name="alert" size={14} color={C.red} strokeWidth={2.1} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Body style={{ fontSize: 12.5, fontFamily: F.bodySemi, color: '#fff' }}>QHP assessments with no mechanical score</Body>
+                  <Body style={{ fontSize: 10, color: C.muted2, lineHeight: 14, marginTop: 1 }}>AI scoring failed for these assessments. They stay unscored until the cause is cleared and scoring is re-run.</Body>
+                </View>
+                <Badge text={`${mechRows.length}`} color={C.red} />
+              </View>
+              {mechRows.map((r) => (
+                <View key={r.id} style={{ padding: 10, borderRadius: 11, backgroundColor: 'rgba(0,0,0,0.22)', borderLeftWidth: 3, borderLeftColor: C.red, gap: 6 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Body numberOfLines={1} style={{ flex: 1, fontSize: 12.5, fontFamily: F.bodySemi, color: '#fff' }}>{r.details?.client_name || r.title || 'Unknown client'}</Body>
+                    <Badge text="Mechanical score failed" color={C.red} />
+                  </View>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+                    {r.details?.assessment_date ? <Mono style={{ fontSize: 8, letterSpacing: 0.4, color: C.muted3 }}>ASSESSMENT {fmtDay(r.details.assessment_date).toUpperCase()}</Mono> : null}
+                    {r.details?.model_attempted ? <Mono style={{ fontSize: 8, letterSpacing: 0.4, color: C.muted3 }}>MODEL {String(r.details.model_attempted).toUpperCase()}</Mono> : null}
+                    <Mono style={{ fontSize: 8, letterSpacing: 0.4, color: C.muted3 }}>ESCALATED {fmtAt(r.escalated_at).toUpperCase()}</Mono>
+                  </View>
+                  <View style={{ padding: 9, borderRadius: 10, backgroundColor: hexA(C.red, 0.07), borderWidth: 1, borderColor: hexA(C.red, 0.25) }}>
+                    <Body style={{ fontSize: 11, color: C.ink2, lineHeight: 15 }}>{mechShortReason(r.details?.failure_reason)}</Body>
+                  </View>
+                </View>
+              ))}
+              <Body style={{ fontSize: 10, color: C.muted3 }}>These close automatically once a score is generated.</Body>
+            </Card>
+          ) : null}
         </>
       )}
     </Page>
