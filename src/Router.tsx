@@ -340,10 +340,16 @@ export function Router() {
   const { route, go, set, back, canGoBack, drawerOpen, closeDrawer, aiOpen, closeAi, role, threadViewOpen } = useStore();
 
   // ---- Screen-capture lockdown (route-aware) ----
-  // Screenshots/recordings are blocked on every screen EXCEPT the signed-in
-  // role's home dashboard, so App Store / Play screenshots of the home page can
-  // be taken while client-facing data screens stay covered (FLAG_SECURE).
+  // TEMPORARILY DISABLED (user request 2026-08-05) so the screenshot AUDIT can
+  // be tested freely: with the block off, screenshots succeed on every screen
+  // and each one writes a screenshot_events row. Flip to true to restore the
+  // home-only lockdown (blocked everywhere except homeRouteFor(role)).
+  const SCREEN_CAPTURE_BLOCK = false;
   useEffect(() => {
+    if (!SCREEN_CAPTURE_BLOCK) {
+      ScreenCapture.allowScreenCaptureAsync().catch(() => {});
+      return;
+    }
     const isHome = route === homeRouteFor(role);
     if (isHome) ScreenCapture.allowScreenCaptureAsync().catch(() => {});
     else ScreenCapture.preventScreenCaptureAsync().catch(() => {});
