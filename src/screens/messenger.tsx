@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, Pressable, TextInput, ActivityIndicator, FlatList, ScrollView, Alert, Keyboard, Platform, Animated, Image, Linking, Vibration, Modal } from 'react-native';
+import { View, Text, Pressable, TextInput, ActivityIndicator, FlatList, ScrollView, Alert, Keyboard, Platform, Animated, Easing, LayoutAnimation, Image, Linking, Vibration, Modal } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { Audio, Video, ResizeMode } from 'expo-av';
@@ -124,6 +124,21 @@ function SwipeReplyRow({ enabled, onReply, children }: { enabled: boolean; onRep
   );
 }
 
+/* ---------- Chat-open transition: slide in from the right + fade (keyed by
+   conversation, so switching chats replays it). Exit stays instant — matching
+   the platform norm where pop-back is immediate. ---------- */
+function SlideIn({ children }: { children: React.ReactNode }) {
+  const a = React.useRef(new Animated.Value(0)).current;
+  React.useEffect(() => {
+    Animated.timing(a, { toValue: 1, duration: 260, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+  }, [a]);
+  return (
+    <Animated.View style={{ flex: 1, opacity: a, transform: [{ translateX: a.interpolate({ inputRange: [0, 1], outputRange: [64, 0] }) }] }}>
+      {children}
+    </Animated.View>
+  );
+}
+
 /* ---------- @mention rendering: highlight "@Full Name" (known members) or "@word" ---------- */
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 function MentionText({ text, names, style, highlight }: { text: string; names: string[]; style: any; highlight: string }) {
@@ -214,12 +229,21 @@ function MessageThread({ meId, conv, onBack, subtabs }: { meId: string; conv: Ch
   const applyMention = (name: string) => setDraft((d) => d.replace(/(^|\s)@\w*$/, `$1@${name} `));
 
   // Manual keyboard height — reliable on Android edge-to-edge where KeyboardAvoidingView isn't.
+  // The LayoutAnimation makes the composer GLIDE with the keyboard instead of
+  // jumping: iOS syncs to the OS-reported animation duration (willShow fires
+  // before the keyboard moves), Android eases the post-hoc reposition.
   const [kbH, setKbH] = React.useState(0);
   React.useEffect(() => {
     const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const s = Keyboard.addListener(showEvt, (e: any) => setKbH(e.endCoordinates?.height ?? 0));
-    const h = Keyboard.addListener(hideEvt, () => setKbH(0));
+    const s = Keyboard.addListener(showEvt, (e: any) => {
+      LayoutAnimation.configureNext(LayoutAnimation.create(Platform.OS === 'ios' ? (e?.duration || 250) : 200, 'easeInEaseOut', 'opacity'));
+      setKbH(e.endCoordinates?.height ?? 0);
+    });
+    const h = Keyboard.addListener(hideEvt, (e: any) => {
+      LayoutAnimation.configureNext(LayoutAnimation.create(Platform.OS === 'ios' ? (e?.duration || 220) : 180, 'easeInEaseOut', 'opacity'));
+      setKbH(0);
+    });
     return () => { s.remove(); h.remove(); };
   }, []);
   // Comfortable gap above the keyboard; safe-area inset when closed.
@@ -1426,8 +1450,8 @@ export function Messenger() {
       </Page>
     );
   }
-  if (activeClient) return <ClientChat meId={meId} client={activeClient} onBack={() => setActiveClient(null)} allowDirect={role === 'crm'} />;
-  if (active) return <MessageThread meId={meId} conv={active} onBack={() => setActive(null)} />;
+  if (activeClient) return <SlideIn key={activeClient.clientId}><ClientChat meId={meId} client={activeClient} onBack={() => setActiveClient(null)} allowDirect={role === 'crm'} /></SlideIn>;
+  if (active) return <SlideIn key={active.conversationId}><MessageThread meId={meId} conv={active} onBack={() => setActive(null)} /></SlideIn>;
   // A notification deep-link is resolving — hold a quiet loader instead of
   // flashing the contacts list before the thread opens.
   if (openChatId) {
