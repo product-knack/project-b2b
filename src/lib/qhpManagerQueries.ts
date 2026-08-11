@@ -864,52 +864,47 @@ export function useQhpTracker(enabled: boolean, workoutFilter: boolean) {
           .eq('is_active', true)
           .in('client_id', part);
         (pauses ?? []).forEach((p: any) => {
-          const start = p.pause_start ?? null;
-          const end = p.pause_end ?? null;
-          if (start && start <= todayIst && (end == null || end >= todayIst)) pausedIds.add(p.client_id);
+          // Web parity: null start = open-ended (already started), null end = ongoing.
+          const started = p.pause_start == null || p.pause_start <= todayIst;
+          const notEnded = p.pause_end == null || p.pause_end >= todayIst;
+          if (started && notEnded) pausedIds.add(p.client_id);
         });
       }
       if (pausedIds.size) clients = clients.filter((c) => !pausedIds.has(c.id));
       if (!clients.length) return [];
 
-      // 2. Completed sessions (one fetch, three uses): last-workout date,
-      //    the 45d filter, and rehab-only detection. Always carry session_type.
-      //    When the filter is on we bound to the 45d window; otherwise paginate.
-      const cut = new Date(Date.now() - QHP_VALIDITY_DAYS * 864e5).toISOString();
+      // 2. ALL completed sessions (web fetchAllRows) — three uses: last-workout
+      //    date, the 45d filter, and rehab-only detection. The 45d cutoff is a
+      //    DATE-ONLY string, compared lexically against the scheduled_at string
+      //    (exactly what the web does — a timestamp string is >= 'YYYY-MM-DD'
+      //    when its date is on/after the cutoff).
+      const cutoffStr = new Date(Date.now() - QHP_VALIDITY_DAYS * 864e5).toISOString().split('T')[0];
       const lastWorkout = new Map<string, string>();
       const recentTypes = new Map<string, string[]>(); // client -> session_types within last 45d
-      const noteSession = (s: any) => {
-        if (!lastWorkout.has(s.client_id)) lastWorkout.set(s.client_id, s.scheduled_at);
-        if (s.scheduled_at && s.scheduled_at >= cut) {
-          const arr = recentTypes.get(s.client_id) ?? [];
-          arr.push(String(s.session_type ?? '').toLowerCase());
-          recentTypes.set(s.client_id, arr);
-        }
-      };
-      if (workoutFilter) {
+      for (let page = 0; page < 40; page++) {
         const { data: sess } = await supabase
           .from('training_sessions')
           .select('client_id, scheduled_at, session_type')
           .eq('status', 'completed')
           .not('client_id', 'is', null)
-          .gte('scheduled_at', cut)
           .order('scheduled_at', { ascending: false })
-          .limit(10000);
-        (sess ?? []).forEach(noteSession);
-      } else {
-        for (let page = 0; page < 10; page++) {
-          const { data: sess } = await supabase
-            .from('training_sessions')
-            .select('client_id, scheduled_at, session_type')
-            .eq('status', 'completed')
-            .not('client_id', 'is', null)
-            .order('scheduled_at', { ascending: false })
-            .range(page * 1000, page * 1000 + 999);
-          (sess ?? []).forEach(noteSession);
-          if (!sess || sess.length < 1000) break;
-        }
+          .range(page * 1000, page * 1000 + 999);
+        (sess ?? []).forEach((s: any) => {
+          if (!s.client_id) return;
+          if (!lastWorkout.has(s.client_id)) lastWorkout.set(s.client_id, s.scheduled_at);
+          if (s.scheduled_at && String(s.scheduled_at) >= cutoffStr) {
+            const arr = recentTypes.get(s.client_id) ?? [];
+            arr.push(String(s.session_type ?? '').toLowerCase());
+            recentTypes.set(s.client_id, arr);
+          }
+        });
+        if (!sess || sess.length < 1000) break;
       }
-      const eligible = workoutFilter ? clients.filter((c) => lastWorkout.has(c.id)) : clients;
+      // Workout filter: keep clients whose LATEST completed session is within
+      // the last 45 days (date-only string compare — web parity).
+      const eligible = workoutFilter
+        ? clients.filter((c) => { const d = lastWorkout.get(c.id); return !!d && String(d) >= cutoffStr; })
+        : clients;
       if (!eligible.length) return [];
       const eligibleIds = eligible.map((c) => c.id);
 
@@ -948,7 +943,11 @@ export function useQhpTracker(enabled: boolean, workoutFilter: boolean) {
         if (done) lastQhp.set(a.client_id, a);
       });
 
-      const today = new Date(); today.setHours(0, 0, 0, 0);
+      // Web computes daysUntilDue = differenceInDays(nextDue, new Date()) — i.e.
+      // against NOW (with the current time), truncated toward zero. Using
+      // midnight-today here made every future due-date off by one, shifting
+      // clients across the due-soon / on-track / overdue boundaries.
+      const now = new Date();
       const rows: TrackerRow[] = eligible.map((c) => {
         const q = lastQhp.get(c.id);
         const isRehabOnly = rehabOnly.get(c.id) ?? false;
@@ -958,7 +957,8 @@ export function useQhpTracker(enabled: boolean, workoutFilter: boolean) {
           const due = new Date(q.assessment_date + 'T00:00:00');
           due.setDate(due.getDate() + QHP_VALIDITY_DAYS);
           nextDue = due.toISOString();
-          days = Math.floor((due.getTime() - today.getTime()) / 864e5);
+          const raw = (due.getTime() - now.getTime()) / 864e5;
+          days = raw >= 0 ? Math.floor(raw) : Math.ceil(raw); // truncate toward zero (date-fns differenceInDays)
           // Rehab-only clients WITH a QHP are never Overdue/Due Soon — the
           // dates still show, but they are forced On Track (web parity).
           status = isRehabOnly ? 'completed'
