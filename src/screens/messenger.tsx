@@ -1021,7 +1021,7 @@ function MessengerHome({ meId, onOpen, onOpenClient, tab, setTab }: { meId: stri
     try {
       const convId = await openOrCreate.mutateAsync({ otherUserId: member.userId, type: 'team' });
       qc.invalidateQueries({ queryKey: ['chat-overview', meId] });
-      onOpen({ conversationId: convId, type: 'team', title: member.name, subtitle: member.roleLabel, otherUserId: member.userId, isAnnouncements: false, memberCount: 2, lastMessage: null, lastMessageType: null, lastMessageAt: null, lastSenderId: null, unreadCount: 0, myLastReadAt: null });
+      onOpen({ conversationId: convId, type: 'team', title: member.name, subtitle: member.roleLabel, otherUserId: member.userId, isAnnouncements: false, clientId: null, memberCount: 2, lastMessage: null, lastMessageType: null, lastMessageAt: null, lastSenderId: null, unreadCount: 0, myLastReadAt: null });
     } catch (e: any) {
       Alert.alert('Could not open chat', e?.message || 'Please try again.');
     } finally { setOpening(null); }
@@ -1185,7 +1185,7 @@ function ClientChat({ meId, client, onBack, allowDirect }: { meId: string; clien
         qc.invalidateQueries({ queryKey: ['chat-overview'] });
         setDmConv({
           conversationId: id, type: 'direct', title: client.name, subtitle: 'Client', otherUserId: client.profileId,
-          isAnnouncements: false, memberCount: 2, lastMessage: null, lastMessageType: null,
+          isAnnouncements: false, clientId: null, memberCount: 2, lastMessage: null, lastMessageType: null,
           lastMessageAt: null, lastSenderId: null, unreadCount: 0, myLastReadAt: null,
         });
       })
@@ -1210,7 +1210,7 @@ function ClientChat({ meId, client, onBack, allowDirect }: { meId: string; clien
     const ex = overview.data?.find((c) => c.conversationId === g.conversationId);
     setOpenGroup(ex ?? {
       conversationId: g.conversationId, type: 'group', title: g.name, subtitle: null, otherUserId: null,
-      isAnnouncements: false, memberCount: g.members.length, lastMessage: null, lastMessageType: null,
+      isAnnouncements: false, clientId: null, memberCount: g.members.length, lastMessage: null, lastMessageType: null,
       lastMessageAt: null, lastSenderId: null, unreadCount: 0, myLastReadAt: null,
     });
   };
@@ -1379,7 +1379,7 @@ export function Messenger() {
           setActiveClient(null);
           setActive({
             conversationId: (conv as any).id, type: (conv as any).type ?? 'direct', title: title || 'Chat', subtitle: null,
-            otherUserId, isAnnouncements: (conv as any).name === 'Odds Announcements', memberCount: 0,
+            otherUserId, isAnnouncements: (conv as any).name === 'Odds Announcements', clientId: (conv as any).client_id ?? null, memberCount: 0,
             lastMessage: null, lastMessageType: null, lastMessageAt: null, lastSenderId: null, unreadCount: 0, myLastReadAt: null,
           });
         }
