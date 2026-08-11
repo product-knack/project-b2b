@@ -1504,3 +1504,44 @@ export function usePilatesRunRate(year: number, month: number, enabled: boolean)
     },
   });
 }
+
+/* ---------- Emergency leave (web EmergencyLeaveDialog contract) ----------
+   Works for ANY staff role: leave_request.trainer_id is simply the
+   requester's profile id (doctors included). After the insert, CRMs are
+   push-notified via the notify-leave-request edge function (fire-and-forget,
+   web parity - a notify failure never fails the request). */
+export function useSubmitLeaveRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      requesterId: string; requesterName: string;
+      startDate: string; startTime: string;  // 'YYYY-MM-DD' + 'HH:mm'
+      endDate: string; endTime: string;
+      reason: string;
+    }) => {
+      const reason = input.reason.trim();
+      if (!reason) throw new Error('Enter a reason for the leave.');
+      const { error } = await supabase.from('leave_request').insert({
+        trainer_id: input.requesterId,
+        start_date: input.startDate,
+        start_time: `${input.startTime}:00`,
+        end_date: input.endDate,
+        end_time: `${input.endTime}:00`,
+        reason,
+      });
+      if (error) throw new Error(error.message);
+      supabase.functions.invoke('notify-leave-request', {
+        body: {
+          trainer_name: input.requesterName || 'A team member',
+          start_date: input.startDate, start_time: input.startTime,
+          end_date: input.endDate, end_time: input.endTime,
+          reason,
+        },
+      }).catch(() => { /* notification is best-effort */ });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['active-leave-requests'] });
+      qc.invalidateQueries({ queryKey: ['manager-team-leaves'] });
+    },
+  });
+}

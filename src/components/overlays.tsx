@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, Pressable, ScrollView, Modal, StyleSheet, TextInput, Animated, PanResponder, Easing } from 'react-native';
+import { View, Text, Pressable, ScrollView, Modal, StyleSheet, TextInput, Animated, PanResponder, Easing, Keyboard, Alert } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { C, F, hexA, ORANGE_GRAD } from '../theme';
@@ -7,8 +7,8 @@ import { Icon } from '../icons';
 import { useStore } from '../store';
 import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import { useAuth } from '../auth';
-import { DEV_TRAINER_ID } from '../lib/supabase';
-import { useAckSessions, istTimeParts } from '../lib/trainerQueries';
+import { DEV_TRAINER_ID, supabase } from '../lib/supabase';
+import { useAckSessions, istTimeParts, useSubmitLeaveRequest } from '../lib/trainerQueries';
 import { Serif, Mono, Body, GradientButton, ProgressBar, IconChip } from './primitives';
 import { apprItems, bloodRows } from '../data';
 
@@ -207,44 +207,119 @@ export function AckSheet() {
   );
 }
 
-/* ---------- Emergency leave ---------- */
+/* ---------- Emergency leave (REAL — web EmergencyLeaveDialog contract) ----------
+   Inserts into leave_request as the signed-in staff member (any role, doctors
+   included) and push-notifies CRMs via notify-leave-request. */
+const todayYmd = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+const plusDaysYmd = (n: number) => {
+  const d = new Date(Date.now() + n * 864e5);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
 export function LeaveSheet() {
   const { sheet, closeSheet } = useStore();
+  const { session } = useAuth();
+  const leaveM = useSubmitLeaveRequest();
+  const [startDate, setStartDate] = React.useState(todayYmd());
+  const [startTime, setStartTime] = React.useState('09:00');
+  const [endDate, setEndDate] = React.useState(todayYmd());
+  const [endTime, setEndTime] = React.useState('18:00');
+  const [reason, setReason] = React.useState('');
+  const [pick, setPick] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    if (sheet === 'leave') {
+      setStartDate(todayYmd()); setStartTime('09:00'); setEndDate(todayYmd()); setEndTime('18:00');
+      setReason(''); setPick(null); leaveM.reset();
+    }
+  }, [sheet]); // eslint-disable-line react-hooks/exhaustive-deps
+  const applyPick = (p: string) => {
+    setPick(p);
+    setStartDate(todayYmd()); setStartTime('09:00');
+    if (p === 'Half day') { setEndDate(todayYmd()); setEndTime('13:00'); }
+    else if (p === 'Full day') { setEndDate(todayYmd()); setEndTime('18:00'); }
+    else { setEndDate(plusDaysYmd(1)); setEndTime('18:00'); }
+  };
+  const dateOk = (v: string) => /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(v.trim());
+  const timeOk = (v: string) => /^([01]\d|2[0-3]):[0-5]\d$/.test(v.trim());
+  const valid = dateOk(startDate) && dateOk(endDate) && timeOk(startTime) && timeOk(endTime)
+    && `${endDate}T${endTime}` >= `${startDate}T${startTime}` && reason.trim().length >= 3;
+  const safeClose = () => { Keyboard.dismiss(); setTimeout(closeSheet, 80); };
+  const submit = async () => {
+    if (!session?.user?.id || !valid || leaveM.isPending) return;
+    try {
+      // Requester name for the CRM push — fetched live so any role works.
+      const { data: p } = await supabase.from('profiles').select('first_name, last_name').eq('id', session.user.id).maybeSingle();
+      const name = `${p?.first_name ?? ''} ${p?.last_name ?? ''}`.replace(/\s+/g, ' ').trim();
+      await leaveM.mutateAsync({
+        requesterId: session.user.id, requesterName: name,
+        startDate: startDate.trim(), startTime: startTime.trim(),
+        endDate: endDate.trim(), endTime: endTime.trim(), reason,
+      });
+      safeClose();
+      setTimeout(() => Alert.alert('Leave request submitted', 'The CRM team has been notified.'), 200);
+    } catch { /* error surfaced below */ }
+  };
+  const fieldInput = { flex: 1, color: '#fff', fontFamily: F.body, fontSize: 13.5, padding: 0 } as const;
   return (
-    <SheetShell visible={sheet === 'leave'} onClose={closeSheet} maxHeightPct={90}>
-      <ScrollView>
+    <SheetShell visible={sheet === 'leave'} onClose={safeClose} maxHeightPct={90}>
+      <ScrollView keyboardShouldPersistTaps="handled">
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 18 }}>
           <IconChip icon="alert" color={C.red} iconSize={21} />
           <View style={{ flex: 1 }}>
             <Serif style={{ fontSize: 20 }}>Emergency Leave</Serif>
             <Body style={{ fontSize: 12.5, color: C.muted, marginTop: 1 }}>Submit a leave request</Body>
           </View>
-          <Pressable onPress={closeSheet} style={styles.closeBtn}><Icon name="close" size={15} color="#B8B2AC" strokeWidth={2.3} /></Pressable>
+          <Pressable onPress={safeClose} style={styles.closeBtn}><Icon name="close" size={15} color="#B8B2AC" strokeWidth={2.3} /></Pressable>
         </View>
         <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
-          {[['START', 'Today · 09:00'], ['END', 'Today · 18:00']].map(([l, v]) => (
-            <View key={l} style={{ flex: 1 }}>
-              <Mono style={{ fontSize: 10, letterSpacing: 1.2, color: C.mono2, marginBottom: 7 }}>{l}</Mono>
-              <View style={styles.field}>
-                <Icon name="calendar" size={15} color={C.orange} strokeWidth={2} />
-                <Body style={{ fontSize: 13.5 }}>{v}</Body>
-              </View>
+          <View style={{ flex: 1 }}>
+            <Mono style={{ fontSize: 10, letterSpacing: 1.2, color: dateOk(startDate) ? C.mono2 : C.red, marginBottom: 7 }}>START DATE</Mono>
+            <View style={styles.field}>
+              <Icon name="calendar" size={15} color={C.orange} strokeWidth={2} />
+              <TextInput value={startDate} onChangeText={(v) => { setStartDate(v); setPick(null); }} placeholder="YYYY-MM-DD" placeholderTextColor={C.muted3} autoCapitalize="none" style={fieldInput} />
             </View>
-          ))}
+          </View>
+          <View style={{ width: 96 }}>
+            <Mono style={{ fontSize: 10, letterSpacing: 1.2, color: timeOk(startTime) ? C.mono2 : C.red, marginBottom: 7 }}>TIME</Mono>
+            <View style={styles.field}>
+              <TextInput value={startTime} onChangeText={(v) => { setStartTime(v); setPick(null); }} placeholder="09:00" placeholderTextColor={C.muted3} autoCapitalize="none" style={fieldInput} />
+            </View>
+          </View>
+        </View>
+        <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
+          <View style={{ flex: 1 }}>
+            <Mono style={{ fontSize: 10, letterSpacing: 1.2, color: dateOk(endDate) ? C.mono2 : C.red, marginBottom: 7 }}>END DATE</Mono>
+            <View style={styles.field}>
+              <Icon name="calendar" size={15} color={C.orange} strokeWidth={2} />
+              <TextInput value={endDate} onChangeText={(v) => { setEndDate(v); setPick(null); }} placeholder="YYYY-MM-DD" placeholderTextColor={C.muted3} autoCapitalize="none" style={fieldInput} />
+            </View>
+          </View>
+          <View style={{ width: 96 }}>
+            <Mono style={{ fontSize: 10, letterSpacing: 1.2, color: timeOk(endTime) ? C.mono2 : C.red, marginBottom: 7 }}>TIME</Mono>
+            <View style={styles.field}>
+              <TextInput value={endTime} onChangeText={(v) => { setEndTime(v); setPick(null); }} placeholder="18:00" placeholderTextColor={C.muted3} autoCapitalize="none" style={fieldInput} />
+            </View>
+          </View>
         </View>
         <Mono style={{ fontSize: 10, letterSpacing: 1.2, color: C.mono2, marginBottom: 8 }}>QUICK PICK</Mono>
         <View style={{ flexDirection: 'row', gap: 8, marginBottom: 14 }}>
-          {['Half day', 'Full day', '2 days'].map((p, i) => (
-            <View key={p} style={{ paddingVertical: 8, paddingHorizontal: 14, borderRadius: 999, backgroundColor: i === 0 ? hexA(C.orange, 0.13) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: i === 0 ? hexA(C.orange, 0.3) : 'rgba(255,255,255,0.07)' }}>
-              <Text style={{ fontFamily: F.bodySemi, fontSize: 12.5, color: i === 0 ? C.orange : C.muted }}>{p}</Text>
-            </View>
-          ))}
+          {['Half day', 'Full day', '2 days'].map((p) => {
+            const active = pick === p;
+            return (
+              <Pressable key={p} onPress={() => applyPick(p)} style={{ paddingVertical: 8, paddingHorizontal: 14, borderRadius: 999, backgroundColor: active ? hexA(C.orange, 0.13) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: active ? hexA(C.orange, 0.3) : 'rgba(255,255,255,0.07)' }}>
+                <Text style={{ fontFamily: F.bodySemi, fontSize: 12.5, color: active ? C.orange : C.muted }}>{p}</Text>
+              </Pressable>
+            );
+          })}
         </View>
-        <Mono style={{ fontSize: 10, letterSpacing: 1.2, color: C.mono2, marginBottom: 8 }}>REASON</Mono>
+        <Mono style={{ fontSize: 10, letterSpacing: 1.2, color: C.mono2, marginBottom: 8 }}>REASON *</Mono>
         <View style={[styles.field, { minHeight: 76, alignItems: 'flex-start', paddingTop: 13 }]}>
-          <Body style={{ fontSize: 13.5, color: C.muted3 }}>Enter reason for emergency leave…</Body>
+          <TextInput value={reason} onChangeText={setReason} placeholder="Enter reason for emergency leave…" placeholderTextColor={C.muted3} multiline style={[fieldInput, { minHeight: 50, textAlignVertical: 'top' }]} />
         </View>
-        <GradientButton label="Submit Leave Request" onPress={closeSheet} style={{ marginTop: 18 }} />
+        {leaveM.isError ? <Body style={{ fontSize: 12, color: C.red, marginTop: 10 }}>{(leaveM.error as Error).message}</Body> : null}
+        <GradientButton label={leaveM.isPending ? 'Submitting…' : 'Submit Leave Request'} onPress={submit} style={{ marginTop: 18, opacity: valid && !leaveM.isPending ? 1 : 0.55 }} />
       </ScrollView>
     </SheetShell>
   );

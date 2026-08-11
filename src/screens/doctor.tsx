@@ -489,7 +489,7 @@ function DoctorTodayRoster() {
 export function DoctorDashboard() {
   const [tourOpen, setTourOpen] = React.useState(false);
   const { session } = useAuth();
-  const { go } = useStore();
+  const { go, openSheet } = useStore();
   const uid = session?.user?.id ?? null;
   const identity = useDoctorIdentity();
   const isHead = identity.data.isHeadDoctor;
@@ -532,6 +532,18 @@ export function DoctorDashboard() {
         <TourLauncher onPress={() => setTourOpen(true)} />
       </View>
       <ClientThreadsUnreadBanner />
+      {/* Emergency Leave — same global sheet the trainer dashboard uses; the
+          leave_request row simply carries the doctor's own profile id. */}
+      <Pressable onPress={() => openSheet('leave')} style={{ flexDirection: 'row', alignItems: 'center', gap: 11, padding: 12, borderRadius: 15, backgroundColor: hexA(C.red, 0.07), borderWidth: 1, borderColor: hexA(C.red, 0.3) }}>
+        <View style={{ width: 36, height: 36, borderRadius: 12, backgroundColor: hexA(C.red, 0.13), borderWidth: 1, borderColor: hexA(C.red, 0.35), alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name="alert" size={16} color={C.red} strokeWidth={2.1} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontFamily: F.bodyBold, fontSize: 13, color: '#fff' }}>Emergency Leave</Text>
+          <Body style={{ fontSize: 11, color: C.muted2, marginTop: 1 }}>Request time off - the CRM team gets notified</Body>
+        </View>
+        <Icon name="chevRight" size={15} color={C.red} strokeWidth={2.3} />
+      </Pressable>
       <FeatureTour visible={tourOpen} steps={DOCTOR_TOUR} tourName='doctor' onClose={() => setTourOpen(false)} />
 
       {/* Pending protocol approvals banner (HOD) */}
