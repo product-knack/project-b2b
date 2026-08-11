@@ -544,7 +544,10 @@ function MessageThread({ meId, conv, onBack, subtabs }: { meId: string; conv: Ch
     <View style={{ flex: 1 }}>
       {/* Header — sits directly under the global app bar (which already owns the
           safe-area inset), so NO insets.top here: that double inset was rendering
-          as a tall black band above the chat. */}
+          as a tall black band above the chat.
+          zIndex wrapper = positioning anchor for the floating members dropdown
+          (top:'100%' pins it right under header + subtabs, above the messages). */}
+      <View style={{ zIndex: 30 }}>
       <LinearGradient colors={['#241812', '#120E0D']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', gap: 11, paddingTop: 10, paddingBottom: 11, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: hexA(C.orange, 0.18), borderTopWidth: 1, borderTopColor: 'rgba(255,150,90,0.08)' }}>
         <Pressable onPress={onBack} hitSlop={10} style={{ width: 34, height: 34, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)' }}>
           <Icon name="arrowLeft" size={17} color={C.ink2} strokeWidth={2.2} />
@@ -593,24 +596,30 @@ function MessageThread({ meId, conv, onBack, subtabs }: { meId: string; conv: Ch
         </View>
       ) : null}
 
-      {/* Client-thread team panel — everyone assigned to this client, grouped by role */}
+      {/* Client-thread team panel — FLOATING dropdown pinned under the header.
+          It takes no column height, so the keyboard's layout squeeze can never
+          push it away ("members closes when keyboard opens" bug). Internally
+          scrollable and height-capped for small screens. */}
       {showMembers && membersOpen ? (
-        <View style={{ paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.07)', backgroundColor: 'rgba(8,6,6,0.96)', gap: 8 }}>
-          <Mono style={{ fontSize: 9, letterSpacing: 1, color: C.mono2 }}>CLIENT TEAM · {(membersQ.data ?? []).length} MEMBER{(membersQ.data ?? []).length === 1 ? '' : 'S'}</Mono>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}>
-            {(membersQ.data ?? []).map((m) => {
-              const rc = m.role === 'crm' ? C.gold : m.role === 'trainer' ? C.orange : m.role === 'doctor' ? C.blue : (m.role === 'admin' || m.role === 'super_admin') ? C.red : C.muted2;
-              return (
-                <View key={m.userId} style={{ flexDirection: 'row', alignItems: 'center', gap: 7, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 999, backgroundColor: hexA(rc, 0.08), borderWidth: 1, borderColor: hexA(rc, 0.28) }}>
-                  <Avatar initial={chatInitials(m.name)} size={22} colors={avatarColors(m.name)} fontSize={9} />
-                  <Text style={{ fontFamily: F.bodySemi, fontSize: 12, color: '#fff' }}>{m.name}{m.userId === meId ? ' (you)' : ''}</Text>
-                  <Text style={{ fontFamily: F.bodyBold, fontSize: 9, letterSpacing: 0.5, color: rc }}>{m.roleLabel.toUpperCase()}</Text>
-                </View>
-              );
-            })}
-          </View>
+        <View style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 30, borderBottomWidth: 1, borderBottomColor: hexA(C.purple, 0.25), backgroundColor: 'rgba(8,6,6,0.98)', shadowColor: '#000', shadowOpacity: 0.5, shadowRadius: 14, shadowOffset: { width: 0, height: 8 }, elevation: 12 }}>
+          <ScrollView bounces={false} style={{ maxHeight: 240 }} contentContainerStyle={{ paddingHorizontal: 14, paddingVertical: 12, gap: 8 }} keyboardShouldPersistTaps="handled">
+            <Mono style={{ fontSize: 9, letterSpacing: 1, color: C.mono2 }}>CLIENT TEAM · {(membersQ.data ?? []).length} MEMBER{(membersQ.data ?? []).length === 1 ? '' : 'S'}</Mono>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}>
+              {(membersQ.data ?? []).map((m) => {
+                const rc = m.role === 'crm' ? C.gold : m.role === 'trainer' ? C.orange : m.role === 'doctor' ? C.blue : (m.role === 'admin' || m.role === 'super_admin') ? C.red : C.muted2;
+                return (
+                  <View key={m.userId} style={{ flexDirection: 'row', alignItems: 'center', gap: 7, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 999, backgroundColor: hexA(rc, 0.08), borderWidth: 1, borderColor: hexA(rc, 0.28) }}>
+                    <Avatar initial={chatInitials(m.name)} size={22} colors={avatarColors(m.name)} fontSize={9} />
+                    <Text style={{ fontFamily: F.bodySemi, fontSize: 12, color: '#fff' }}>{m.name}{m.userId === meId ? ' (you)' : ''}</Text>
+                    <Text style={{ fontFamily: F.bodyBold, fontSize: 9, letterSpacing: 0.5, color: rc }}>{m.roleLabel.toUpperCase()}</Text>
+                  </View>
+                );
+              })}
+            </View>
+          </ScrollView>
         </View>
       ) : null}
+      </View>
 
       {/* Messages (inverted: newest at bottom, scroll up loads older) */}
       {thread.isLoading ? (
