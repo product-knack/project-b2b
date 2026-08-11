@@ -67,6 +67,25 @@ export function SignIn() {
   const { signIn } = useAuth();
   const [email, setEmail] = React.useState<string>('');
   const [password, setPassword] = React.useState<string>('');
+  // Keyboard-aware sign-in: on edge-to-edge Android the keyboard overlays the
+  // window (adjustResize is defeated), covering the password box on shorter
+  // screens with no way to scroll. Track the height, pad the scroll content,
+  // ease the change, and pull the password field into view on focus.
+  const signInScrollRef = React.useRef<ScrollView>(null);
+  const [signInKbH, setSignInKbH] = React.useState(0);
+  React.useEffect(() => {
+    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const s = Keyboard.addListener(showEvt, (e: any) => {
+      LayoutAnimation.configureNext(LayoutAnimation.create(Platform.OS === 'ios' ? (e?.duration || 250) : 200, 'easeInEaseOut', 'opacity'));
+      setSignInKbH(e.endCoordinates?.height ?? 0);
+    });
+    const h = Keyboard.addListener(hideEvt, () => {
+      LayoutAnimation.configureNext(LayoutAnimation.create(180, 'easeInEaseOut', 'opacity'));
+      setSignInKbH(0);
+    });
+    return () => { s.remove(); h.remove(); };
+  }, []);
   // Role dropdown — the workspace is still decided by the ACCOUNT's real
   // profiles.role after authentication; picking a role only prefills the form.
   const ROLE_OPTS = [['crm', 'CRM', 'userCircle'], ['trainer', 'Trainer', 'dumbbell'], ['coach', 'Coach', 'crown'], ['ops', 'Operations', 'layers'], ['admin', 'Admin', 'shield'], ['doctor', 'Doctor', 'heart'], ['marketing', 'Marketing', 'trend'], ['academy', 'Academy', 'award']] as const;
@@ -100,7 +119,7 @@ export function SignIn() {
     go(r === 'crm' ? 'crm-dashboard' : r === 'coach' ? 'coach-dashboard' : r === 'ops' ? 'ops-dashboard' : r === 'admin' ? 'admin-dashboard' : r === 'doctor' ? 'doctor-dashboard' : r === 'marketing' ? 'marketing-dashboard' : 'dashboard', true);
   };
   return (
-    <ScrollView contentContainerStyle={{ paddingTop: insets.top + 90, paddingBottom: 40, paddingHorizontal: 22, minHeight: '100%' }}>
+    <ScrollView ref={signInScrollRef} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingTop: insets.top + 90, paddingBottom: 40 + signInKbH, paddingHorizontal: 22, minHeight: '100%' }}>
       <View style={{ alignItems: 'center', marginBottom: 30 }}>
         <OddsWordmark height={50} />
         <Body style={{ fontSize: 15, color: C.muted, marginTop: 14 }}>Sign in to access your dashboard</Body>
@@ -152,6 +171,7 @@ export function SignIn() {
             placeholderTextColor={C.muted3}
             secureTextEntry={!showPw}
             autoCapitalize="none"
+            onFocus={() => setTimeout(() => signInScrollRef.current?.scrollToEnd({ animated: true }), Platform.OS === 'ios' ? 80 : 300)}
             style={{ flex: 1, color: '#fff', fontFamily: F.body, fontSize: 15, padding: 0 }}
           />
           <Pressable onPress={() => setShowPw(!showPw)}>
