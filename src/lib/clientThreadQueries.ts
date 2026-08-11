@@ -13,9 +13,12 @@ import { supabase } from './supabase';
 
 const fullName = (p: any) => `${p?.first_name ?? ''} ${p?.last_name ?? ''}`.replace(/\s+/g, ' ').trim();
 const isAdminRole = (r: string | null | undefined) => r === 'admin' || r === 'super_admin';
-/* Operations Head — standing member of EVERY client thread (matches the
-   can_access_client_thread SQL and the push edge function). */
+/* Standing members of EVERY client thread (matches the
+   can_access_client_thread SQL and the push edge function):
+   - Operations Head (Sunaina Sethia, ops@oddsfitness.com)
+   - Admin 2c6a0525 (user-designated) */
 export const OPS_HEAD_ID = '386dc683-d537-492b-b589-769f57e6c824';
+export const THREAD_STANDING_MEMBER_IDS = [OPS_HEAD_ID, '2c6a0525-18d8-40aa-a5bb-df814a114452'];
 
 /* ---------- Thread list: my accessible clients + previews + unread ---------- */
 export type ClientThreadListRow = {
@@ -38,9 +41,9 @@ export function useClientThreadList(meId: string | null | undefined, dbRole: str
     refetchInterval: 60_000,
     queryFn: async (): Promise<ClientThreadListRow[]> => {
       // 1. My client universe: assigned clients, or all non-inactive clients
-      //    for admins AND the Ops Head (standing member of every thread).
+      //    for admins AND standing members (Ops Head + designated admin).
       let clients: { id: string; name: string }[] = [];
-      if (isAdminRole(dbRole) || meId === OPS_HEAD_ID) {
+      if (isAdminRole(dbRole) || THREAD_STANDING_MEMBER_IDS.includes(meId as string)) {
         const { data, error } = await supabase
           .from('clients').select('id, first_name, last_name, status')
           .not('status', 'in', '(inactive,discontinued)')
@@ -295,11 +298,19 @@ export function useClientThreadTeam(clientId: string | null) {
           roleLabel: ROLE_LABEL[p.role ?? ''] ?? (p.role ? p.role.charAt(0).toUpperCase() + p.role.slice(1) : 'Team'),
         });
       });
-      // Operations Head: standing member of every client thread, shown even
-      // when not assigned to this client via trainer_clients.
-      if (!seen.has(OPS_HEAD_ID)) {
-        const { data: oh } = await supabase.from('profiles').select('id, first_name, last_name, role').eq('id', OPS_HEAD_ID).maybeSingle();
-        if (oh) out.push({ userId: oh.id, name: fullName(oh) || 'Operations Head', role: oh.role ?? 'ops', roleLabel: 'Ops Head' });
+      // Standing members (Ops Head + designated admin): shown in every client
+      // thread's team, even when not assigned via trainer_clients.
+      const missingStanding = THREAD_STANDING_MEMBER_IDS.filter((id) => !seen.has(id));
+      if (missingStanding.length) {
+        const { data: standing } = await supabase.from('profiles').select('id, first_name, last_name, role').in('id', missingStanding);
+        (standing ?? []).forEach((p: any) => {
+          out.push({
+            userId: p.id,
+            name: fullName(p) || 'Member',
+            role: p.role ?? null,
+            roleLabel: p.id === OPS_HEAD_ID ? 'Ops Head' : (ROLE_LABEL[p.role ?? ''] ?? 'Admin'),
+          });
+        });
       }
       out.sort((a, b) => (ROLE_ORDER[a.role ?? ''] ?? 9) - (ROLE_ORDER[b.role ?? ''] ?? 9) || a.name.localeCompare(b.name));
       return out;
