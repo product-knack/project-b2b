@@ -40,13 +40,15 @@ Deno.serve(async (req) => {
       .from("clients").select("first_name, last_name").eq("id", thread.client_id).maybeSingle();
     const clientName = `${client?.first_name ?? ""} ${client?.last_name ?? ""}`.trim() || "Client";
 
-    // Assigned staff (all roles that reach the thread), minus the sender.
+    // Assigned staff (all roles that reach the thread) + the Operations Head
+    // (standing member of every client thread), minus the sender.
+    const OPS_HEAD_ID = "386dc683-d537-492b-b589-769f57e6c824";
     const { data: assigns } = await supabase
       .from("trainer_clients")
       .select("trainer_id")
       .eq("client_id", thread.client_id)
       .eq("actively_training", true);
-    const ids = [...new Set((assigns ?? []).map((a: any) => a.trainer_id))].filter((id) => id && id !== msg.sender_id);
+    const ids = [...new Set([...(assigns ?? []).map((a: any) => a.trainer_id), OPS_HEAD_ID])].filter((id) => id && id !== msg.sender_id);
     if (!ids.length) return json({ ok: true, skipped: "no recipients" });
 
     const { data: sender } = await supabase

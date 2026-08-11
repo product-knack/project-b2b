@@ -13,6 +13,9 @@ import { supabase } from './supabase';
 
 const fullName = (p: any) => `${p?.first_name ?? ''} ${p?.last_name ?? ''}`.replace(/\s+/g, ' ').trim();
 const isAdminRole = (r: string | null | undefined) => r === 'admin' || r === 'super_admin';
+/* Operations Head — standing member of EVERY client thread (matches the
+   can_access_client_thread SQL and the push edge function). */
+export const OPS_HEAD_ID = '386dc683-d537-492b-b589-769f57e6c824';
 
 /* ---------- Thread list: my accessible clients + previews + unread ---------- */
 export type ClientThreadListRow = {
@@ -30,9 +33,10 @@ export function useClientThreadList(meId: string | null | undefined, dbRole: str
     enabled: !!meId && !!dbRole,
     staleTime: 15_000,
     queryFn: async (): Promise<ClientThreadListRow[]> => {
-      // 1. My client universe: assigned clients, or all non-inactive clients for admins.
+      // 1. My client universe: assigned clients, or all non-inactive clients
+      //    for admins AND the Ops Head (standing member of every thread).
       let clients: { id: string; name: string }[] = [];
-      if (isAdminRole(dbRole)) {
+      if (isAdminRole(dbRole) || meId === OPS_HEAD_ID) {
         const { data, error } = await supabase
           .from('clients').select('id, first_name, last_name, status')
           .not('status', 'in', '(inactive,discontinued)')
@@ -287,6 +291,12 @@ export function useClientThreadTeam(clientId: string | null) {
           roleLabel: ROLE_LABEL[p.role ?? ''] ?? (p.role ? p.role.charAt(0).toUpperCase() + p.role.slice(1) : 'Team'),
         });
       });
+      // Operations Head: standing member of every client thread, shown even
+      // when not assigned to this client via trainer_clients.
+      if (!seen.has(OPS_HEAD_ID)) {
+        const { data: oh } = await supabase.from('profiles').select('id, first_name, last_name, role').eq('id', OPS_HEAD_ID).maybeSingle();
+        if (oh) out.push({ userId: oh.id, name: fullName(oh) || 'Operations Head', role: oh.role ?? 'ops', roleLabel: 'Ops Head' });
+      }
       out.sort((a, b) => (ROLE_ORDER[a.role ?? ''] ?? 9) - (ROLE_ORDER[b.role ?? ''] ?? 9) || a.name.localeCompare(b.name));
       return out;
     },
