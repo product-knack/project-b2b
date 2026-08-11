@@ -32,6 +32,10 @@ export function useClientThreadList(meId: string | null | undefined, dbRole: str
     queryKey: ['client-thread-list', meId, dbRole],
     enabled: !!meId && !!dbRole,
     staleTime: 15_000,
+    // Belt-and-braces for the home banners: realtime invalidation is the fast
+    // path, this poll guarantees badges recover even if the socket went stale
+    // while the app was backgrounded.
+    refetchInterval: 60_000,
     queryFn: async (): Promise<ClientThreadListRow[]> => {
       // 1. My client universe: assigned clients, or all non-inactive clients
       //    for admins AND the Ops Head (standing member of every thread).
