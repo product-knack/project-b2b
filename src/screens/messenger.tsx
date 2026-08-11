@@ -967,16 +967,31 @@ function MessengerHome({ meId, onOpen, onOpenClient, tab, setTab }: { meId: stri
   // --- Clients rows: preview the client's DIRECT DM only. The staff-only client
   //     thread (dedicated client_threads tables) and the care-team group are separate surfaces and
   //     must NOT bleed into this list's preview/unread. ---
+  // Latest activity in ANY client-linked conversation (care-team group / staff
+  // client thread) — recency only; preview/unread stay strictly from the DM.
+  const lastByClientId = React.useMemo(() => {
+    const m = new Map<string, string>();
+    all.forEach((c) => {
+      if (!c.clientId || !c.lastMessageAt) return;
+      const prev = m.get(c.clientId);
+      if (!prev || c.lastMessageAt > prev) m.set(c.clientId, c.lastMessageAt);
+    });
+    return m;
+  }, [all]);
   const clientRows = (clientsQ.data ?? []).map((cl) => {
     const d = cl.profileId ? directByProfile.get(cl.profileId) : undefined;
+    const groupAt = lastByClientId.get(cl.clientId) ?? null;
+    const dmAt = d?.lastMessageAt ?? null;
     return {
-      client: cl, lastMessage: d?.lastMessage ?? null, lastMessageAt: d?.lastMessageAt ?? null,
+      client: cl, lastMessage: d?.lastMessage ?? null, lastMessageAt: dmAt,
       lastSenderId: d?.lastSenderId ?? null, unread: d?.unreadCount ?? 0, hasDirect: !!d,
+      // Sort key: whichever surface spoke last — DM or the client's group thread.
+      activityAt: dmAt && groupAt ? (dmAt > groupAt ? dmAt : groupAt) : (dmAt ?? groupAt),
     };
   });
   const clientRowsF = clientRows
     .filter((r) => !q || r.client.name.toLowerCase().includes(q))
-    .sort((a, b) => (b.lastMessageAt ?? '').localeCompare(a.lastMessageAt ?? '') || a.client.name.localeCompare(b.client.name));
+    .sort((a, b) => (b.activityAt ?? '').localeCompare(a.activityAt ?? '') || a.client.name.localeCompare(b.client.name));
 
   // --- Team rows (roster + existing team DMs) ---
   const teamConvByUser = new Map<string, ChatConversation>();

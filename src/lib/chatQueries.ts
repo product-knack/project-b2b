@@ -26,6 +26,9 @@ export type ChatConversation = {
   subtitle: string | null;          // other role (direct) / "N members" (group)
   otherUserId: string | null;       // direct counterpart
   isAnnouncements: boolean;
+  /** clients.id when this conversation is client-linked (care-team groups /
+      staff client threads) — powers Clients-tab recency sorting. */
+  clientId: string | null;
   memberCount: number;
   lastMessage: string | null;
   lastMessageType: string | null;
@@ -78,6 +81,18 @@ export function useChatOverview(meId: string | null | undefined) {
           .in('id', [...userIds]);
         (profs ?? []).forEach((p: any) => profById.set(p.id, p));
       }
+      // Client linkage (care-team groups carry conversations.client_id) — lets
+      // the Clients tab float recently-active clients even when the activity
+      // happened in the group thread rather than the direct DM.
+      const clientByConv = new Map<string, string>();
+      {
+        const { data: convClients } = await supabase
+          .from('conversations')
+          .select('id, client_id')
+          .in('id', convIds)
+          .not('client_id', 'is', null);
+        (convClients ?? []).forEach((c: any) => clientByConv.set(c.id, c.client_id));
+      }
 
       return list.map((r) => {
         const isAnnouncements = r.name === 'Odds Announcements';
@@ -107,6 +122,7 @@ export function useChatOverview(meId: string | null | undefined) {
           subtitle,
           otherUserId,
           isAnnouncements,
+          clientId: clientByConv.get(r.conversation_id) ?? null,
           memberCount: (memberCount.get(r.conversation_id) || 0) + 1,
           lastMessage: previewFor(r.last_message, r.last_message_type),
           lastMessageType: r.last_message_type ?? null,
