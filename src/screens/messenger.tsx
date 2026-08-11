@@ -198,7 +198,7 @@ function MessageThread({ meId, conv, onBack, subtabs }: { meId: string; conv: Ch
   React.useEffect(() => { setSeenMsg(null); }, [conv.conversationId]);
   // In-app media viewer (image / video / document) — never leaves the app.
   const [viewer, setViewer] = React.useState<{ kind: string; url: string } | null>(null);
-  const memberNames = React.useMemo(() => (membersQ.data ?? []).map((m) => m.name.split(' ')[0]).join(', '), [membersQ.data]);
+  const memberNames = React.useMemo(() => (membersQ.data ?? []).map((m) => (m.name ?? 'Member').split(' ')[0]).join(', '), [membersQ.data]);
   const mentionNames = React.useMemo(() => (membersQ.data ?? []).map((m) => m.name), [membersQ.data]);
 
   // @mention typing: an "@word" being typed at the end of the draft opens the picker.
@@ -1261,7 +1261,7 @@ function ClientChat({ meId, client, onBack, allowDirect }: { meId: string; clien
                     return (
                       <View key={m.userId} style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 4, paddingHorizontal: 9, borderRadius: 999, backgroundColor: hexA(rc, 0.1), borderWidth: 1, borderColor: hexA(rc, 0.28) }}>
                         <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: rc }} />
-                        <Text style={{ fontFamily: F.bodySemi, fontSize: 10.5, color: C.ink3 }} numberOfLines={1}>{m.name.split(' ')[0]}</Text>
+                        <Text style={{ fontFamily: F.bodySemi, fontSize: 10.5, color: C.ink3 }} numberOfLines={1}>{(m.name ?? 'Member').split(' ')[0]}</Text>
                       </View>
                     );
                   })}

@@ -12,10 +12,12 @@ import { uploadChatMedia, PickedAsset } from './chatMedia';
 
 export const displayGroupName = (n: string | null | undefined) => (n === 'My Care Team' ? 'My Longevity Team' : n ?? '');
 const fullName = (p: any) => `${p?.first_name ?? ''} ${p?.last_name ?? ''}`.replace(/\s+/g, ' ').trim();
-export const chatInitials = (name: string) =>
-  name.split(/\s+/).filter(Boolean).map((w) => w[0]).slice(0, 2).join('').toUpperCase() || '?';
+/* Null-safe: doctor/limited-RLS sessions can surface conversations whose
+   display name could not be resolved — initials must never crash the render. */
+export const chatInitials = (name: string | null | undefined) =>
+  (name ?? '').split(/\s+/).filter(Boolean).map((w) => w[0]).slice(0, 2).join('').toUpperCase() || '?';
 const AV: [string, string][] = [['#9A7BEA', '#6E5BD0'], ['#7C8FE8', '#5B6FD0'], ['#57C98A', '#3A9E6E'], ['#E0A53C', '#B57F1E'], ['#E75A9B', '#B03A6E'], ['#FB8B3A', '#EE5E16'], ['#4FB8C9', '#2E8A9E']];
-export const avatarColors = (seed: string): [string, string] => AV[(seed?.length || 0) % AV.length];
+export const avatarColors = (seed: string | null | undefined): [string, string] => AV[(seed?.length || 0) % AV.length];
 
 export type ChatConversation = {
   conversationId: string;
