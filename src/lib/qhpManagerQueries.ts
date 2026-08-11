@@ -825,57 +825,100 @@ export type TrackerRow = {
   lastWorkout: string | null; lastQhp: string | null; qhpBy: string | null;
   nextDue: string | null; daysUntilDue: number | null;
   status: 'not-done' | 'overdue' | 'due-soon' | 'completed';
+  isRehabOnly: boolean;
 };
 const nonEmptyObj = (v: any) => v && typeof v === 'object' && Object.keys(v).length > 0;
+// Session types that are pure rehab/recovery — a client whose last-45-day
+// sessions are ALL of these (and has a QHP) is forced On Track (web parity).
+const REHAB_SESSION_TYPES = new Set(['rehabilitation', 'recovery', 'physiotherapy', 'red_light_therapy', 'mayo_facial_release', 'neural_check']);
+const trkChunk = <T,>(a: T[], n = 200): T[][] => { const o: T[][] = []; for (let i = 0; i < a.length; i += n) o.push(a.slice(i, i + n)); return o; };
 export function useQhpTracker(enabled: boolean, workoutFilter: boolean) {
   return useQuery({
     queryKey: ['qhp-tracker', workoutFilter],
     enabled,
     staleTime: 300_000,
     queryFn: async (): Promise<TrackerRow[]> => {
-      // 1. Eligible clients (active-ish, enrolled, not Staff/Trial).
+      // 1. Eligible clients: status 'active'/'Active' ONLY (null/inactive/
+      //    discontinued/merged/paused dropped), enrolled, not Staff/Trial.
       const { data: cls, error } = await supabase
         .from('clients')
         .select('id, first_name, last_name, status, coach_id, subscription_type')
-        .or('status.eq.active,status.eq.Active,status.is.null')
+        .or('status.eq.active,status.eq.Active')
         .not('subscription_type', 'is', null)
         .neq('subscription_type', 'Staff')
         .neq('subscription_type', 'Trial')
         .order('first_name', { ascending: true });
       if (error) throw new Error(error.message);
-      const clients = (cls ?? []) as any[];
+      let clients = (cls ?? []) as any[];
       if (!clients.length) return [];
 
-      // 2. Last completed workout per client. When the 45d filter is on we can
-      //    bound the query; otherwise paginate (web fetchAllRows equivalent).
+      // 1b. Drop clients currently paused: an active client_pause_history row
+      //     whose [pause_start, pause_end] window (null end = open-ended)
+      //     contains today (IST). Chunked by 200 (web parity).
+      const todayIst = istYmd(new Date());
+      const pausedIds = new Set<string>();
+      for (const part of trkChunk(clients.map((c) => c.id))) {
+        const { data: pauses } = await supabase
+          .from('client_pause_history')
+          .select('client_id, pause_start, pause_end')
+          .eq('is_active', true)
+          .in('client_id', part);
+        (pauses ?? []).forEach((p: any) => {
+          const start = p.pause_start ?? null;
+          const end = p.pause_end ?? null;
+          if (start && start <= todayIst && (end == null || end >= todayIst)) pausedIds.add(p.client_id);
+        });
+      }
+      if (pausedIds.size) clients = clients.filter((c) => !pausedIds.has(c.id));
+      if (!clients.length) return [];
+
+      // 2. Completed sessions (one fetch, three uses): last-workout date,
+      //    the 45d filter, and rehab-only detection. Always carry session_type.
+      //    When the filter is on we bound to the 45d window; otherwise paginate.
+      const cut = new Date(Date.now() - QHP_VALIDITY_DAYS * 864e5).toISOString();
       const lastWorkout = new Map<string, string>();
+      const recentTypes = new Map<string, string[]>(); // client -> session_types within last 45d
+      const noteSession = (s: any) => {
+        if (!lastWorkout.has(s.client_id)) lastWorkout.set(s.client_id, s.scheduled_at);
+        if (s.scheduled_at && s.scheduled_at >= cut) {
+          const arr = recentTypes.get(s.client_id) ?? [];
+          arr.push(String(s.session_type ?? '').toLowerCase());
+          recentTypes.set(s.client_id, arr);
+        }
+      };
       if (workoutFilter) {
-        const cut = new Date(Date.now() - QHP_VALIDITY_DAYS * 864e5).toISOString();
         const { data: sess } = await supabase
           .from('training_sessions')
-          .select('client_id, scheduled_at')
+          .select('client_id, scheduled_at, session_type')
           .eq('status', 'completed')
           .not('client_id', 'is', null)
           .gte('scheduled_at', cut)
           .order('scheduled_at', { ascending: false })
           .limit(10000);
-        (sess ?? []).forEach((s: any) => { if (!lastWorkout.has(s.client_id)) lastWorkout.set(s.client_id, s.scheduled_at); });
+        (sess ?? []).forEach(noteSession);
       } else {
         for (let page = 0; page < 10; page++) {
           const { data: sess } = await supabase
             .from('training_sessions')
-            .select('client_id, scheduled_at')
+            .select('client_id, scheduled_at, session_type')
             .eq('status', 'completed')
             .not('client_id', 'is', null)
             .order('scheduled_at', { ascending: false })
             .range(page * 1000, page * 1000 + 999);
-          (sess ?? []).forEach((s: any) => { if (!lastWorkout.has(s.client_id)) lastWorkout.set(s.client_id, s.scheduled_at); });
+          (sess ?? []).forEach(noteSession);
           if (!sess || sess.length < 1000) break;
         }
       }
       const eligible = workoutFilter ? clients.filter((c) => lastWorkout.has(c.id)) : clients;
       if (!eligible.length) return [];
       const eligibleIds = eligible.map((c) => c.id);
+
+      // Rehab-only: every last-45-day session is a rehab type, and there is
+      // at least one (web parity — baseline QHP still compulsory).
+      const rehabOnly = new Map<string, boolean>();
+      recentTypes.forEach((types, cid) => {
+        rehabOnly.set(cid, types.length > 0 && types.every((t) => REHAB_SESSION_TYPES.has(t)));
+      });
 
       // 3+4. Names/roles + assignments + assessments.
       const [profsR, tcR, assessR] = await Promise.all([
@@ -908,6 +951,7 @@ export function useQhpTracker(enabled: boolean, workoutFilter: boolean) {
       const today = new Date(); today.setHours(0, 0, 0, 0);
       const rows: TrackerRow[] = eligible.map((c) => {
         const q = lastQhp.get(c.id);
+        const isRehabOnly = rehabOnly.get(c.id) ?? false;
         let nextDue: string | null = null, days: number | null = null;
         let status: TrackerRow['status'] = 'not-done';
         if (q?.assessment_date) {
@@ -915,8 +959,14 @@ export function useQhpTracker(enabled: boolean, workoutFilter: boolean) {
           due.setDate(due.getDate() + QHP_VALIDITY_DAYS);
           nextDue = due.toISOString();
           days = Math.floor((due.getTime() - today.getTime()) / 864e5);
-          status = days < 0 ? 'overdue' : days <= QHP_WARNING_DAYS ? 'due-soon' : 'completed';
+          // Rehab-only clients WITH a QHP are never Overdue/Due Soon — the
+          // dates still show, but they are forced On Track (web parity).
+          status = isRehabOnly ? 'completed'
+            : days < 0 ? 'overdue'
+            : days <= QHP_WARNING_DAYS ? 'due-soon'
+            : 'completed';
         }
+        // No qualifying QHP → Not Done, even for rehab-only (baseline compulsory).
         const by = q?.coach_id ? pName.get(q.coach_id)?.name ?? null : c.coach_id ? pName.get(c.coach_id)?.name ?? null : null;
         return {
           clientId: c.id,
@@ -925,7 +975,7 @@ export function useQhpTracker(enabled: boolean, workoutFilter: boolean) {
           trainers: trainersOf.get(c.id) ?? [], crm: crmOf.get(c.id) ?? null,
           lastWorkout: lastWorkout.get(c.id) ?? null,
           lastQhp: q?.assessment_date ?? null, qhpBy: by,
-          nextDue, daysUntilDue: days, status,
+          nextDue, daysUntilDue: days, status, isRehabOnly,
         };
       });
       const prio: Record<TrackerRow['status'], number> = { 'not-done': 0, overdue: 1, 'due-soon': 2, completed: 3 };

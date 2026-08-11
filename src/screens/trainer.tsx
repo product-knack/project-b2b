@@ -9330,6 +9330,7 @@ export function QhpManager() {
                               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                                 <Body numberOfLines={1} style={{ flex: 1, fontSize: 14, fontFamily: F.bodySemi, color: '#fff' }}>{r.name}</Body>
                                 {r.subscription ? <Badge text={r.subscription} color={C.orange} /> : null}
+                                {r.isRehabOnly ? <Badge text="Rehab only" color={C.blue} /> : null}
                                 <Badge text={stLab(r.status)} color={col} />
                               </View>
                               {(r.trainers.length || r.crm) ? (
