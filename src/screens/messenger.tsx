@@ -1488,10 +1488,11 @@ export function ChatNotifications() {
   // Kept in a ref so the long-lived realtime closure always sees the current role.
   const roleRef = React.useRef(role);
   roleRef.current = role;
-  const [banner, setBanner] = React.useState<{ convId: string; title: string; text: string } | null>(null);
+  const [banner, setBanner] = React.useState<{ convId: string; title: string; text: string; kind?: 'chat' | 'client-thread' } | null>(null);
   const anim = React.useRef(new Animated.Value(-160)).current;
   const nameCache = React.useRef(new Map<string, string>());
   const convCache = React.useRef(new Map<string, { type: string; name: string | null }>());
+  const threadTitleCache = React.useRef(new Map<string, string>());
   const timer = React.useRef<any>(null);
 
   const hide = React.useCallback(() => {
@@ -1526,7 +1527,7 @@ export function ChatNotifications() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     }
   }, [stopLongBuzz]);
-  const show = React.useCallback((b: { convId: string; title: string; text: string }) => {
+  const show = React.useCallback((b: { convId: string; title: string; text: string; kind?: 'chat' | 'client-thread' }) => {
     setBanner(b);
     Animated.spring(anim, { toValue: 0, useNativeDriver: true, speed: 16, bounciness: 6 }).start();
     clearTimeout(timer.current);
@@ -1607,11 +1608,47 @@ export function ChatNotifications() {
     return () => { supabase.removeChannel(ch); clearTimeout(timer.current); };
   }, [meId]);
 
+  // ---- Client-thread messages (separate tables from the messenger) ----
+  // Live badge updates everywhere (thread list + dashboard card) and an in-app
+  // banner. RLS scopes realtime delivery to threads this user can access.
+  React.useEffect(() => {
+    if (!meId) return;
+    const ch = supabase
+      .channel('global-cthreads-' + meId)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'client_thread_messages' }, async (payload) => {
+        const m = payload.new as any;
+        if (!m || m.sender_id === meId) return;
+        qc.invalidateQueries({ queryKey: ['client-thread-list'] });
+        qc.invalidateQueries({ queryKey: ['client-thread-messages', m.thread_id] });
+        buzz(false);
+        if (routeRef.current === 'client-threads') return; // on the feature — the list updates in place
+        let title = threadTitleCache.current.get(m.thread_id);
+        if (!title) {
+          const { data: t } = await supabase.from('client_threads').select('client_id').eq('id', m.thread_id).maybeSingle();
+          if (t?.client_id) {
+            const { data: c } = await supabase.from('clients').select('first_name, last_name').eq('id', t.client_id).maybeSingle();
+            title = (c ? `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim() : '') || 'Client thread';
+          } else title = 'Client thread';
+          threadTitleCache.current.set(m.thread_id, title);
+        }
+        let name = nameCache.current.get(m.sender_id);
+        if (!name) {
+          const { data } = await supabase.from('profiles').select('first_name,last_name').eq('id', m.sender_id).maybeSingle();
+          name = (data ? `${data.first_name ?? ''} ${data.last_name ?? ''}`.trim() : '') || 'New message';
+          nameCache.current.set(m.sender_id, name);
+        }
+        const body = m.attachment_type ? '📎 Attachment' : (m.body || '');
+        show({ kind: 'client-thread', convId: m.thread_id, title: `${title} · Client thread`, text: `${name}: ${body}` });
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [meId]);
+
   if (!banner) return null;
   return (
     <Animated.View pointerEvents="box-none" style={{ position: 'absolute', top: 0, left: 0, right: 0, paddingTop: insets.top + 8, paddingHorizontal: 12, transform: [{ translateY: anim }], opacity: anim.interpolate({ inputRange: [-160, 0], outputRange: [0, 1] }), zIndex: 200 }}>
       <Pressable
-        onPress={() => { hide(); setOpenChat(banner.convId); go('messenger'); }}
+        onPress={() => { hide(); if (banner.kind === 'client-thread') { go('client-threads'); } else { setOpenChat(banner.convId); go('messenger'); } }}
         style={{ borderRadius: 18, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.55, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 12 }}
       >
         <LinearGradient colors={['#2A1C14', '#151010']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ borderRadius: 20, borderWidth: 1, borderColor: hexA(C.orange, 0.32) }}>
