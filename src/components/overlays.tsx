@@ -227,20 +227,12 @@ export function LeaveSheet() {
   const [endDate, setEndDate] = React.useState(todayYmd());
   const [endTime, setEndTime] = React.useState('18:00');
   const [reason, setReason] = React.useState('');
-  const [pick, setPick] = React.useState<string | null>(null);
   React.useEffect(() => {
     if (sheet === 'leave') {
       setStartDate(todayYmd()); setStartTime('09:00'); setEndDate(todayYmd()); setEndTime('18:00');
-      setReason(''); setPick(null); leaveM.reset();
+      setReason(''); leaveM.reset();
     }
   }, [sheet]); // eslint-disable-line react-hooks/exhaustive-deps
-  const applyPick = (p: string) => {
-    setPick(p);
-    setStartDate(todayYmd()); setStartTime('09:00');
-    if (p === 'Half day') { setEndDate(todayYmd()); setEndTime('13:00'); }
-    else if (p === 'Full day') { setEndDate(todayYmd()); setEndTime('18:00'); }
-    else { setEndDate(plusDaysYmd(1)); setEndTime('18:00'); }
-  };
   const dateOk = (v: string) => /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(v.trim());
   const timeOk = (v: string) => /^([01]\d|2[0-3]):[0-5]\d$/.test(v.trim());
   const valid = dateOk(startDate) && dateOk(endDate) && timeOk(startTime) && timeOk(endTime)
@@ -278,13 +270,13 @@ export function LeaveSheet() {
             <Mono style={{ fontSize: 10, letterSpacing: 1.2, color: dateOk(startDate) ? C.mono2 : C.red, marginBottom: 7 }}>START DATE</Mono>
             <View style={styles.field}>
               <Icon name="calendar" size={15} color={C.orange} strokeWidth={2} />
-              <TextInput value={startDate} onChangeText={(v) => { setStartDate(v); setPick(null); }} placeholder="YYYY-MM-DD" placeholderTextColor={C.muted3} autoCapitalize="none" style={fieldInput} />
+              <TextInput value={startDate} onChangeText={(v) => { setStartDate(v); }} placeholder="YYYY-MM-DD" placeholderTextColor={C.muted3} autoCapitalize="none" style={fieldInput} />
             </View>
           </View>
           <View style={{ width: 96 }}>
             <Mono style={{ fontSize: 10, letterSpacing: 1.2, color: timeOk(startTime) ? C.mono2 : C.red, marginBottom: 7 }}>TIME</Mono>
             <View style={styles.field}>
-              <TextInput value={startTime} onChangeText={(v) => { setStartTime(v); setPick(null); }} placeholder="09:00" placeholderTextColor={C.muted3} autoCapitalize="none" style={fieldInput} />
+              <TextInput value={startTime} onChangeText={(v) => { setStartTime(v); }} placeholder="09:00" placeholderTextColor={C.muted3} autoCapitalize="none" style={fieldInput} />
             </View>
           </View>
         </View>
@@ -293,26 +285,15 @@ export function LeaveSheet() {
             <Mono style={{ fontSize: 10, letterSpacing: 1.2, color: dateOk(endDate) ? C.mono2 : C.red, marginBottom: 7 }}>END DATE</Mono>
             <View style={styles.field}>
               <Icon name="calendar" size={15} color={C.orange} strokeWidth={2} />
-              <TextInput value={endDate} onChangeText={(v) => { setEndDate(v); setPick(null); }} placeholder="YYYY-MM-DD" placeholderTextColor={C.muted3} autoCapitalize="none" style={fieldInput} />
+              <TextInput value={endDate} onChangeText={(v) => { setEndDate(v); }} placeholder="YYYY-MM-DD" placeholderTextColor={C.muted3} autoCapitalize="none" style={fieldInput} />
             </View>
           </View>
           <View style={{ width: 96 }}>
             <Mono style={{ fontSize: 10, letterSpacing: 1.2, color: timeOk(endTime) ? C.mono2 : C.red, marginBottom: 7 }}>TIME</Mono>
             <View style={styles.field}>
-              <TextInput value={endTime} onChangeText={(v) => { setEndTime(v); setPick(null); }} placeholder="18:00" placeholderTextColor={C.muted3} autoCapitalize="none" style={fieldInput} />
+              <TextInput value={endTime} onChangeText={(v) => { setEndTime(v); }} placeholder="18:00" placeholderTextColor={C.muted3} autoCapitalize="none" style={fieldInput} />
             </View>
           </View>
-        </View>
-        <Mono style={{ fontSize: 10, letterSpacing: 1.2, color: C.mono2, marginBottom: 8 }}>QUICK PICK</Mono>
-        <View style={{ flexDirection: 'row', gap: 8, marginBottom: 14 }}>
-          {['Half day', 'Full day', '2 days'].map((p) => {
-            const active = pick === p;
-            return (
-              <Pressable key={p} onPress={() => applyPick(p)} style={{ paddingVertical: 8, paddingHorizontal: 14, borderRadius: 999, backgroundColor: active ? hexA(C.orange, 0.13) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: active ? hexA(C.orange, 0.3) : 'rgba(255,255,255,0.07)' }}>
-                <Text style={{ fontFamily: F.bodySemi, fontSize: 12.5, color: active ? C.orange : C.muted }}>{p}</Text>
-              </Pressable>
-            );
-          })}
         </View>
         <Mono style={{ fontSize: 10, letterSpacing: 1.2, color: C.mono2, marginBottom: 8 }}>REASON *</Mono>
         <View style={[styles.field, { minHeight: 76, alignItems: 'flex-start', paddingTop: 13 }]}>
