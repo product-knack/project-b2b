@@ -1,9 +1,39 @@
 import React from 'react';
-import { View, Text, Animated, Easing } from 'react-native';
+import { View, Text, Animated, Easing, Pressable } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { C, F, hexA } from '../theme';
 import { Icon } from '../icons';
 import { Body, Card } from './primitives';
+import { useAuth } from '../auth';
+import { useStore } from '../store';
+import { useClientThreadsUnread } from '../lib/clientThreadQueries';
+
+/* Self-contained unread alert for HOME dashboards: renders nothing at 0
+   unread, otherwise a purple banner that deep-links to Client Threads.
+   Mount with a single line on any role's home screen. */
+export function ClientThreadsUnreadBanner() {
+  const { session, dbRole } = useAuth();
+  const { go } = useStore();
+  const { unread } = useClientThreadsUnread(session?.user?.id, dbRole);
+  if (!unread) return null;
+  return (
+    <Pressable onPress={() => go('client-threads')} style={{ borderRadius: 15, overflow: 'hidden' }}>
+      <LinearGradient colors={[hexA(C.purple, 0.16), 'rgba(20,14,26,0.9)']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', gap: 11, padding: 12, borderRadius: 15, borderWidth: 1, borderColor: hexA(C.purple, 0.45) }}>
+        <View style={{ width: 36, height: 36, borderRadius: 12, backgroundColor: hexA(C.purple, 0.16), borderWidth: 1, borderColor: hexA(C.purple, 0.45), alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name="atSign" size={16} color={C.purple} strokeWidth={2} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontFamily: F.bodyBold, fontSize: 13, color: '#fff' }}>{unread} unread client thread message{unread === 1 ? '' : 's'}</Text>
+          <Body style={{ fontSize: 11, color: C.muted2, marginTop: 1 }}>Your clients' internal team threads have new activity</Body>
+        </View>
+        <View style={{ minWidth: 24, height: 24, borderRadius: 12, paddingHorizontal: 7, backgroundColor: C.purple, alignItems: 'center', justifyContent: 'center' }}>
+          <Text style={{ fontFamily: F.bodyBold, fontSize: 12, color: '#fff' }}>{unread > 99 ? '99+' : unread}</Text>
+        </View>
+        <Icon name="chevRight" size={15} color={C.purple} strokeWidth={2.4} />
+      </LinearGradient>
+    </Pressable>
+  );
+}
 
 /* Animated "Client Threads" entry card (trainer + CRM dashboards).
    Gentle ping ring around the icon + a breathing green NEW badge. */

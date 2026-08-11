@@ -7,6 +7,7 @@ import { Serif, Body, Mono, Card } from '../components/primitives';
 import { Page, TitleBlock, HScroll, BackLink } from './common';
 import { PdfPreview } from '../components/PdfPreview';
 import { useStore } from '../store';
+import { ClientThreadsUnreadBanner } from '../components/clientThreadsCard';
 import { useAcademyBanners, useQhpAnalyser, qhpPdfUrl, QHP_OVERDUE_MS, QhpAnalyserRow } from '../lib/academyQueries';
 import { useMyCapabilities } from '../lib/capabilities';
 import { PendingAttendanceBanner } from './academyApproval';
@@ -93,6 +94,7 @@ export function AcademyHome() {
       <TitleBlock title="Academy" sub="Research and academy tools" />
       {/* Teacher-submitted attendance waiting for review (web PendingAttendanceBanner). */}
       <PendingAttendanceBanner onPress={() => go('academy-management')} />
+      <ClientThreadsUnreadBanner />
 
       {q.isPending ? (
         <ActivityIndicator color={ACC} style={{ paddingVertical: 22 }} />

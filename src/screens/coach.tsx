@@ -8,6 +8,7 @@ import { Page, TitleBlock, GreetingHeader, Badge, HScroll, BackLink } from './co
 import { FeatureTour, COACH_TOUR, TourLauncher } from '../components/featureTour';
 import { useStore } from '../store';
 import { useAuth } from '../auth';
+import { ClientThreadsUnreadBanner } from '../components/clientThreadsCard';
 import { useSidebarProfile } from '../lib/navQueries';
 import {
   useCoachDashboard, useCoachClients, useCoachClientsOverview, useCoachTrainers, useTrainerDetail, useTrainerSessions,
@@ -142,6 +143,7 @@ export function CoachDashboard() {
       <GreetingHeader date={todayLabel()} name={`Hi, ${first}`} sub="Your trainers & clients at a glance" initial={prof.initial} avatarUrl={prof.avatarUrl} rightAction={<TourLauncher onPress={() => setTourOpen(true)} />} />
       <FeatureTour visible={tourOpen} steps={COACH_TOUR} tourName='coach' onClose={() => setTourOpen(false)} />
       <AccountSwitch />
+      <ClientThreadsUnreadBanner />
       {(pendingPlans.data ?? 0) > 0 ? <PendingPlansAlert count={pendingPlans.data!} onPress={() => go('coach-programs')} /> : null}
       <ErrorState q={q} />
       {q.isLoading || !d ? <Loading /> : (

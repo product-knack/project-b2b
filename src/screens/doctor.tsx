@@ -6,6 +6,7 @@ import { Icon, IconName } from '../icons';
 import { Serif, Body, Mono, Card, Avatar } from '../components/primitives';
 import { Page, TitleBlock, HScroll, Badge } from './common';
 import { useAuth } from '../auth';
+import { ClientThreadsUnreadBanner } from '../components/clientThreadsCard';
 import { useStore } from '../store';
 import {
   HEAD_DOCTOR_ID, ALLOWED_DOCTOR_IDS, useDoctorIdentity, usePhysioMetrics, useSeniorDashboard,
@@ -530,6 +531,7 @@ export function DoctorDashboard() {
         </View>
         <TourLauncher onPress={() => setTourOpen(true)} />
       </View>
+      <ClientThreadsUnreadBanner />
       <FeatureTour visible={tourOpen} steps={DOCTOR_TOUR} tourName='doctor' onClose={() => setTourOpen(false)} />
 
       {/* Pending protocol approvals banner (HOD) */}
