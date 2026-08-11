@@ -29,6 +29,10 @@ export type ChatConversation = {
   /** clients.id when this conversation is client-linked (care-team groups /
       staff client threads) — powers Clients-tab recency sorting. */
   clientId: string | null;
+  /** Other participants (me excluded). Lets the Clients tab attach care-team
+      groups to their client by MEMBERSHIP — many groups predate the client_id
+      column and carry null there. */
+  participantIds: string[];
   memberCount: number;
   lastMessage: string | null;
   lastMessageType: string | null;
@@ -66,11 +70,15 @@ export function useChatOverview(meId: string | null | undefined) {
         .eq('is_active', true);
       const otherByConv = new Map<string, string>();
       const memberCount = new Map<string, number>();
+      const partsByConv = new Map<string, string[]>();
       const userIds = new Set<string>();
       (parts ?? []).forEach((p: any) => {
         userIds.add(p.user_id);
         if (!otherByConv.has(p.conversation_id)) otherByConv.set(p.conversation_id, p.user_id);
         memberCount.set(p.conversation_id, (memberCount.get(p.conversation_id) || 0) + 1);
+        const arr = partsByConv.get(p.conversation_id) ?? [];
+        arr.push(p.user_id);
+        partsByConv.set(p.conversation_id, arr);
       });
       // Profiles for names/avatars — 1 batched query.
       const profById = new Map<string, any>();
@@ -123,6 +131,7 @@ export function useChatOverview(meId: string | null | undefined) {
           otherUserId,
           isAnnouncements,
           clientId: clientByConv.get(r.conversation_id) ?? null,
+          participantIds: partsByConv.get(r.conversation_id) ?? [],
           memberCount: (memberCount.get(r.conversation_id) || 0) + 1,
           lastMessage: previewFor(r.last_message, r.last_message_type),
           lastMessageType: r.last_message_type ?? null,

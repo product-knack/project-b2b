@@ -967,26 +967,55 @@ function MessengerHome({ meId, onOpen, onOpenClient, tab, setTab }: { meId: stri
   // --- Clients rows: preview the client's DIRECT DM only. The staff-only client
   //     thread (dedicated client_threads tables) and the care-team group are separate surfaces and
   //     must NOT bleed into this list's preview/unread. ---
-  // Latest activity in ANY client-linked conversation (care-team group / staff
-  // client thread) — recency only; preview/unread stay strictly from the DM.
-  const lastByClientId = React.useMemo(() => {
-    const m = new Map<string, string>();
+  // Every conversation belonging to a client: the direct DM, plus any group
+  // the client is a PARTICIPANT of (many care-team groups predate the
+  // client_id column, so membership is the reliable link), plus client_id-
+  // linked convs. Announcements excluded (every client is in it).
+  const convsByClientProfile = React.useMemo(() => {
+    const m = new Map<string, ChatConversation[]>();
     all.forEach((c) => {
-      if (!c.clientId || !c.lastMessageAt) return;
-      const prev = m.get(c.clientId);
-      if (!prev || c.lastMessageAt > prev) m.set(c.clientId, c.lastMessageAt);
+      if (c.type !== 'group' || c.isAnnouncements) return;
+      c.participantIds.forEach((uid) => {
+        const arr = m.get(uid) ?? [];
+        arr.push(c);
+        m.set(uid, arr);
+      });
+    });
+    return m;
+  }, [all]);
+  const convsByClientId = React.useMemo(() => {
+    const m = new Map<string, ChatConversation[]>();
+    all.forEach((c) => {
+      if (!c.clientId) return;
+      const arr = m.get(c.clientId) ?? [];
+      arr.push(c);
+      m.set(c.clientId, arr);
     });
     return m;
   }, [all]);
   const clientRows = (clientsQ.data ?? []).map((cl) => {
     const d = cl.profileId ? directByProfile.get(cl.profileId) : undefined;
-    const groupAt = lastByClientId.get(cl.clientId) ?? null;
-    const dmAt = d?.lastMessageAt ?? null;
+    // Union of the client's surfaces, deduped by conversation id.
+    const linked = new Map<string, ChatConversation>();
+    if (d) linked.set(d.conversationId, d);
+    (cl.profileId ? convsByClientProfile.get(cl.profileId) ?? [] : []).forEach((c) => linked.set(c.conversationId, c));
+    (convsByClientId.get(cl.clientId) ?? []).forEach((c) => linked.set(c.conversationId, c));
+    // Latest-speaking surface drives the preview; unread badges SUM across all
+    // surfaces (user request: group unreads must be visible on this list).
+    let latest: ChatConversation | undefined;
+    let unread = 0;
+    linked.forEach((c) => {
+      unread += c.unreadCount ?? 0;
+      if (c.lastMessageAt && (!latest?.lastMessageAt || c.lastMessageAt > latest.lastMessageAt)) latest = c;
+    });
     return {
-      client: cl, lastMessage: d?.lastMessage ?? null, lastMessageAt: dmAt,
-      lastSenderId: d?.lastSenderId ?? null, unread: d?.unreadCount ?? 0, hasDirect: !!d,
-      // Sort key: whichever surface spoke last — DM or the client's group thread.
-      activityAt: dmAt && groupAt ? (dmAt > groupAt ? dmAt : groupAt) : (dmAt ?? groupAt),
+      client: cl,
+      lastMessage: latest?.lastMessage ?? null,
+      lastMessageAt: latest?.lastMessageAt ?? null,
+      lastSenderId: latest?.lastSenderId ?? null,
+      unread,
+      hasDirect: !!d,
+      activityAt: latest?.lastMessageAt ?? null,
     };
   });
   const clientRowsF = clientRows
@@ -1021,7 +1050,7 @@ function MessengerHome({ meId, onOpen, onOpenClient, tab, setTab }: { meId: stri
     try {
       const convId = await openOrCreate.mutateAsync({ otherUserId: member.userId, type: 'team' });
       qc.invalidateQueries({ queryKey: ['chat-overview', meId] });
-      onOpen({ conversationId: convId, type: 'team', title: member.name, subtitle: member.roleLabel, otherUserId: member.userId, isAnnouncements: false, clientId: null, memberCount: 2, lastMessage: null, lastMessageType: null, lastMessageAt: null, lastSenderId: null, unreadCount: 0, myLastReadAt: null });
+      onOpen({ conversationId: convId, type: 'team', title: member.name, subtitle: member.roleLabel, otherUserId: member.userId, isAnnouncements: false, clientId: null, participantIds: [], memberCount: 2, lastMessage: null, lastMessageType: null, lastMessageAt: null, lastSenderId: null, unreadCount: 0, myLastReadAt: null });
     } catch (e: any) {
       Alert.alert('Could not open chat', e?.message || 'Please try again.');
     } finally { setOpening(null); }
@@ -1185,7 +1214,7 @@ function ClientChat({ meId, client, onBack, allowDirect }: { meId: string; clien
         qc.invalidateQueries({ queryKey: ['chat-overview'] });
         setDmConv({
           conversationId: id, type: 'direct', title: client.name, subtitle: 'Client', otherUserId: client.profileId,
-          isAnnouncements: false, clientId: null, memberCount: 2, lastMessage: null, lastMessageType: null,
+          isAnnouncements: false, clientId: null, participantIds: [], memberCount: 2, lastMessage: null, lastMessageType: null,
           lastMessageAt: null, lastSenderId: null, unreadCount: 0, myLastReadAt: null,
         });
       })
@@ -1210,7 +1239,7 @@ function ClientChat({ meId, client, onBack, allowDirect }: { meId: string; clien
     const ex = overview.data?.find((c) => c.conversationId === g.conversationId);
     setOpenGroup(ex ?? {
       conversationId: g.conversationId, type: 'group', title: g.name, subtitle: null, otherUserId: null,
-      isAnnouncements: false, clientId: null, memberCount: g.members.length, lastMessage: null, lastMessageType: null,
+      isAnnouncements: false, clientId: null, participantIds: [], memberCount: g.members.length, lastMessage: null, lastMessageType: null,
       lastMessageAt: null, lastSenderId: null, unreadCount: 0, myLastReadAt: null,
     });
   };
@@ -1379,7 +1408,7 @@ export function Messenger() {
           setActiveClient(null);
           setActive({
             conversationId: (conv as any).id, type: (conv as any).type ?? 'direct', title: title || 'Chat', subtitle: null,
-            otherUserId, isAnnouncements: (conv as any).name === 'Odds Announcements', clientId: (conv as any).client_id ?? null, memberCount: 0,
+            otherUserId, isAnnouncements: (conv as any).name === 'Odds Announcements', clientId: (conv as any).client_id ?? null, participantIds: [], memberCount: 0,
             lastMessage: null, lastMessageType: null, lastMessageAt: null, lastSenderId: null, unreadCount: 0, myLastReadAt: null,
           });
         }
