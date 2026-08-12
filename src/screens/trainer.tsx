@@ -203,9 +203,10 @@ const POST_WINDOW_MS = 2 * 60 * 60 * 1000; // 2h after
 const RESCHED_DAYS = 14;
 const RESCHED_SLOTS: string[] = (() => {
   const out: string[] = [];
-  for (let h = 6; h <= 21; h++) {
+  // Reschedule window: 5 AM to 10 PM (last slot 22:00).
+  for (let h = 5; h <= 22; h++) {
     out.push(`${String(h).padStart(2, '0')}:00`);
-    if (h < 21) out.push(`${String(h).padStart(2, '0')}:30`);
+    if (h < 22) out.push(`${String(h).padStart(2, '0')}:30`);
   }
   return out;
 })();
