@@ -86,17 +86,21 @@ export function remarkDue(input: {
   const baseLeft = input.baseline?.sessions_left_at_mark ?? input.liveSessionsLeft ?? null;
   const zeroAtMark = baseLeft !== null && baseLeft <= 0;
   const required = (zeroAtMark ? 1 : 0) + Math.max(0, input.consumedSinceMark);
-  const given = input.remarks.filter((r) => r.type === 'remark').length;
+  // Defensive: remarks should be an array, but a stale persisted cache or a
+  // malformed jsonb could hand us a non-array — never let .filter crash render.
+  const remarks = Array.isArray(input.remarks) ? input.remarks : [];
+  const given = remarks.filter((r) => r.type === 'remark').length;
   const pending = Math.max(0, required - given);
   const due = pending > 0 && !input.achieved;
   return { due, pending, required, given, reason: input.consumedSinceMark > 0 ? 'sessions_consumed' : 'zero_at_mark' };
 }
 export const latestCrmRemark = (remarks: RemarkEntry[]) =>
-  remarks.filter((r) => r.type === 'remark').sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))[0] ?? null;
+  (Array.isArray(remarks) ? remarks : []).filter((r) => r.type === 'remark').sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))[0] ?? null;
 export const hasUnansweredRemark = (remarks: RemarkEntry[]) => {
-  const last = latestCrmRemark(remarks);
+  const arr = Array.isArray(remarks) ? remarks : [];
+  const last = latestCrmRemark(arr);
   if (!last) return false;
-  return !remarks.some((r) => r.type === 'reply' && (r.created_at || '') > (last.created_at || ''));
+  return !arr.some((r) => r.type === 'reply' && (r.created_at || '') > (last.created_at || ''));
 };
 export const latestRemarkAt = (remarks: RemarkEntry[]) => latestCrmRemark(remarks)?.created_at ?? null;
 
@@ -425,8 +429,8 @@ export function useCrmForecastBanner(crmId: string | null) {
   const rowsQ = usePriorityRows(month);
   const mineQ = useMyCrmClientIds(crmId);
   const consumedQ = useConsumedSinceMark(rowsQ.data ?? []);
-  const rows = (rowsQ.data ?? []).filter(
-    (r) => r.achievement.status !== 'achieved' && r.fall_short?.status !== 'fall_short' && mineQ.data?.has(r.client_id)
+  const rows = (Array.isArray(rowsQ.data) ? rowsQ.data : []).filter(
+    (r) => r.achievement?.status !== 'achieved' && r.fall_short?.status !== 'fall_short' && mineQ.data?.has?.(r.client_id)
   );
   const threeDaysAgo = new Date(Date.now() - 3 * 864e5).toISOString();
   const newCount = rows.filter((r) => r.created_at >= threeDaysAgo).length;

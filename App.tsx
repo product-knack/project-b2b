@@ -92,7 +92,7 @@ export default function App() {
         {loaded ? (
           <PersistQueryClientProvider
             client={queryClient}
-            persistOptions={{ persister: cachePersister, maxAge: 7 * 24 * 60 * 60 * 1000, buster: 'v1' }}
+            persistOptions={{ persister: cachePersister, maxAge: 7 * 24 * 60 * 60 * 1000, buster: 'v2' }}
           >
             <AuthProvider>
               <StoreProvider>
