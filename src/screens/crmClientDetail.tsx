@@ -29,6 +29,7 @@ import {
   useClientCredentials, useTenDayInsight, useUpcomingRoster,
 } from '../lib/crmClientDetailQueries';
 import { useClientReports, useClientGoals, useClientBioAge, useClientProgression } from '../lib/clientQueries';
+import { useClientHealthReports } from '../lib/qhpQueries';
 import { useCrmProfile } from '../lib/crmQueries';
 import { BloodReportSheet, QhpReportSheet, SheetShell } from './reportDetail';
 import { AreaLine } from './trainer';
@@ -1195,10 +1196,10 @@ function MedicalTab({ clientId }: { clientId: string }) {
   const { session } = useAuth();
   const crmUid = session?.user?.id ?? '';
   const medQ = useClientMedicalHistory(clientId);
-  // Upload Reports → the doctor's Add Medical Entry sheet (manual form + AI
-  // document upload), reused verbatim; doctor_id records the CRM as the author.
-  // Requires the crm_medical_history RLS migration — without it inserts fail
-  // with a clear RLS error.
+  // AI "Upload & Extract" (default Lab Report) lands in health_reports, not
+  // client_medical_history — so uploaded reports must be shown from BOTH here,
+  // otherwise the upload looks like it "did nothing".
+  const reportsQ = useClientHealthReports(clientId);
   const [uploadOpen, setUploadOpen] = React.useState(false);
   const sevCol = (s: string | null) => (/high|severe|critical/i.test(s ?? '') ? C.red : /med|moderate/i.test(s ?? '') ? C.orange : C.green);
   return (
@@ -1211,7 +1212,24 @@ function MedicalTab({ clientId }: { clientId: string }) {
         </LinearGradient>
       </Pressable>
       {uploadOpen ? (
-        <MedicalEntrySheet visible onClose={() => { setUploadOpen(false); medQ.refetch(); }} clientId={clientId} doctorId={crmUid} />
+        <MedicalEntrySheet visible onClose={() => { setUploadOpen(false); medQ.refetch(); reportsQ.refetch(); }} clientId={clientId} doctorId={crmUid} />
+      ) : null}
+      {/* Uploaded reports (AI Upload & Extract lands here — health_reports) */}
+      {(reportsQ.data ?? []).length > 0 ? (
+        <View style={{ gap: 7 }}>
+          <Mono style={{ fontSize: 9, letterSpacing: 1, color: C.mono2, marginTop: 4 }}>UPLOADED REPORTS · {(reportsQ.data ?? []).length}</Mono>
+          {(reportsQ.data ?? []).map((r) => (
+            <Pressable key={r.id} onPress={() => r.fileUrl && Linking.openURL(r.fileUrl)} disabled={!r.fileUrl}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 11, borderRadius: 13, backgroundColor: 'rgba(0,0,0,0.25)', borderWidth: 1, borderColor: hexA(C.blue, 0.2), borderLeftWidth: 3, borderLeftColor: C.blue }}>
+              <Icon name="file" size={15} color={C.blue} strokeWidth={2} />
+              <View style={{ flex: 1 }}>
+                <Body numberOfLines={1} style={{ fontSize: 13, fontFamily: F.bodySemi, color: '#fff' }}>{r.reportName}</Body>
+                <Mono style={{ fontSize: 9, color: C.muted3, marginTop: 1 }}>{[r.reportType, r.date ? istD(r.date) : null].filter(Boolean).join(' · ')}</Mono>
+              </View>
+              {r.fileUrl ? <Icon name="chevRight" size={14} color={C.blue} strokeWidth={2.2} /> : null}
+            </Pressable>
+          ))}
+        </View>
       ) : null}
       {medQ.isLoading ? <Empty text="Loading…" /> : (medQ.data ?? []).length === 0 ? <Empty text="No medical history recorded." /> : (medQ.data ?? []).map((m: any) => (
         <View key={m.id} style={{ padding: 11, borderRadius: 13, backgroundColor: 'rgba(0,0,0,0.25)', borderWidth: 1, borderColor: hexA(sevCol(m.severity), 0.2), borderLeftWidth: 3, borderLeftColor: sevCol(m.severity), gap: 6 }}>
