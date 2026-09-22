@@ -4,7 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { backSwipeLock } from '../gestureLock';
+import { backSwipeLock, backOverride } from '../gestureLock';
 import { C, F, hexA, ORANGE_GRAD } from '../theme';
 import { Icon } from '../icons';
 import { useAuth } from '../auth';
@@ -14,7 +14,7 @@ import { Page } from './common';
 import { chatInitials, avatarColors } from '../lib/chatQueries';
 import {
   useClientThreadList, useOpenClientThread, useClientThreadMessages, useClientThreadRealtime,
-  useSendClientThreadMessage, useMarkClientThreadRead, useClientThreadTeam, ClientThreadMessage,
+  useSendClientThreadMessage, useMarkClientThreadRead, useClientThreadTeam, ClientThreadMessage, pendingThreadClientRef,
 } from '../lib/clientThreadQueries';
 
 /* ============ CLIENT THREADS — dedicated internal team chat ============
@@ -55,6 +55,12 @@ export function ClientThreads() {
     set({ threadViewOpen: !!sel });
     return () => set({ threadViewOpen: false });
   }, [!!sel]);
+  // Hardware back / edge swipe inside an open thread closes the thread (keeping
+  // the list and any draft) instead of popping the whole route.
+  React.useEffect(() => {
+    backOverride.handler = sel ? () => setSel(null) : null;
+    return () => { backOverride.handler = null; };
+  }, [!!sel]);
 
   // One-time intro: shown the FIRST time this user ever opens a client thread.
   const [introOpen, setIntroOpen] = React.useState(false);
@@ -80,6 +86,16 @@ export function ClientThreads() {
       setOpeningId(null);
     }
   };
+  // Deep link (dashboard QHP refresh card): open the requested client's thread
+  // once the list knows it; the slot is consumed so a later visit starts on the list.
+  React.useEffect(() => {
+    const want = pendingThreadClientRef.current;
+    if (!want || !listQ.data) return;
+    const hit = listQ.data.find((r) => r.clientId === want);
+    if (!hit) return;
+    pendingThreadClientRef.current = null;
+    open(hit.clientId, hit.name, hit.threadId);
+  }, [listQ.data]);
 
   if (sel) {
     return (
@@ -118,7 +134,7 @@ export function ClientThreads() {
 
   return (
     <Page gap={14} pt={6}>
-      <Pressable onPress={() => (canGoBack ? back() : go(homeRoute))} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+      <Pressable onPress={() => (canGoBack ? back() : go(homeRoute))} hitSlop={10} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6 }}>
         <Icon name="arrowLeft" size={16} color={C.ink2} strokeWidth={2.2} />
         <Body style={{ fontSize: 13.5, color: C.ink2 }}>Back</Body>
       </Pressable>
@@ -190,6 +206,8 @@ const roleColorOf = (r: string | null) => ROLE_COLOR[r ?? ''] ?? C.purple;
 function SwipeReplyRow({ enabled, onReply, children }: { enabled: boolean; onReply: () => void; children: React.ReactNode }) {
   const tx = React.useRef(new Animated.Value(0)).current;
   const fired = React.useRef(false);
+  // A bubble re-keyed/unmounted mid-drag never fires Release → release the lock.
+  React.useEffect(() => () => { backSwipeLock.locked = false; }, []);
   const enabledRef = React.useRef(enabled); enabledRef.current = enabled;
   const onReplyRef = React.useRef(onReply); onReplyRef.current = onReply;
   const springBack = () => Animated.spring(tx, { toValue: 0, useNativeDriver: true, speed: 20, bounciness: 5 }).start();
@@ -397,7 +415,7 @@ function ThreadView({ meId, meRole, threadId, clientId, clientName, onBack }: {
           msgs.map((m, i) => (
             <MsgIn key={m.id} animate={isNew(m.id)}>
               <SwipeReplyRow enabled={!m.id.startsWith('temp-')} onReply={() => setReplyTo(m)}>
-                <Bubble m={m} mine={m.senderId === meId} prev={msgs[i - 1]} pending={m.id.startsWith('temp-')} quoted={m.replyToId ? msgById.get(m.replyToId) ?? null : null} mentionNames={mentionNames} />
+                <Pressable onLongPress={() => setReplyTo(m)} delayLongPress={300}><Bubble m={m} mine={m.senderId === meId} prev={msgs[i - 1]} pending={m.id.startsWith('temp-')} quoted={m.replyToId ? msgById.get(m.replyToId) ?? null : null} mentionNames={mentionNames} /></Pressable>
               </SwipeReplyRow>
             </MsgIn>
           ))
@@ -447,6 +465,7 @@ function ThreadView({ meId, meRole, threadId, clientId, clientName, onBack }: {
             placeholder="Message…"
             placeholderTextColor={C.muted3}
             multiline
+            autoCorrect={false}
             style={{ fontFamily: F.body, fontSize: 15, lineHeight: 20, color: '#fff', padding: 0, maxHeight: 98 }}
           />
         </View>

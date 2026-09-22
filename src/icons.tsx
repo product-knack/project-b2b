@@ -29,6 +29,7 @@ export const ic = {
   scale: 'M12 3v18M5 7h14M6 7 3 14h6zM18 7l-3 7h6z',
   pin: 'M12 21s7-6 7-11a7 7 0 1 0-14 0c0 5 7 11 7 11ZM12 12a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z',
   swap: 'M4 7h13l-3-3M20 17H7l3 3',
+  trash: 'M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6',
   crown: 'M5 18h14l1-9-5 4-3-7-3 7-5-4z',
   award: 'M12 13a5 5 0 1 0 0-10 5 5 0 0 0 0 10ZM9 12l-2 8 5-3 5 3-2-8',
   phone: 'M5 4h4l2 5-3 2a11 11 0 0 0 5 5l2-3 5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2Z',
@@ -54,10 +55,16 @@ export const ic = {
   file: 'M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9zM14 3v6h6',
   bars: 'M6 7v10M9 5v14M15 5v14M18 7v10M9 12h6',
   send: 'M22 2 11 13M22 2l-7 20-4-9-9-4z',
+  // Microphone: capsule + pickup arc + stand. Used by the voice-memo controls.
+  mic: 'M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3zM5 10v1a7 7 0 0 0 14 0v-1M12 18v4M8 22h8',
   bubble: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z',
   atSign: 'M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8',
   home: 'M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z',
   logout: 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9',
+  // Question mark in a circle — the "Other" ticket type, i.e. not filed yet.
+  help: 'M12 12m-10 0a10 10 0 1 0 20 0a10 10 0 1 0-20 0M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h.01',
+  // Luggage tag — a ticket type someone wrote by hand rather than picked.
+  tag: 'M12.6 2.6A2 2 0 0 0 11.2 2H4a2 2 0 0 0-2 2v7.2a2 2 0 0 0 .6 1.4l8.7 8.7a2.4 2.4 0 0 0 3.4 0l6.6-6.6a2.4 2.4 0 0 0 0-3.4zM7.5 7.5h.01',
 } as const;
 
 export type IconName = keyof typeof ic;

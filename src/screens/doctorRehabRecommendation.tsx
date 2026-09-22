@@ -1,10 +1,11 @@
 import React from 'react';
 import { View, Text, Pressable, TextInput, Modal, ScrollView, ActivityIndicator, Alert } from 'react-native';
+import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import { LinearGradient } from 'expo-linear-gradient';
 import { C, F, hexA, ORANGE_GRAD } from '../theme';
 import { Icon } from '../icons';
 import { Serif, Body, Mono } from '../components/primitives';
-import { Page, TitleBlock, BackLink } from './common';
+import { Page, TitleBlock, BackLink, AccessPending } from './common';
 import { PdfPreview } from '../components/PdfPreview';
 import { useStore } from '../store';
 import { useMyCapabilities } from '../lib/capabilities';
@@ -29,6 +30,7 @@ const fmtAt = (iso: string | null) => {
 };
 
 export function DoctorRehabRecommendation() {
+  const kb = useKeyboardHeight(); // Android edge-to-edge: lift the sheet above the keyboard
   const { back, canGoBack, go } = useStore();
   const caps = useMyCapabilities();
   const allowed = caps.data.isPhysioHod;
@@ -53,7 +55,9 @@ export function DoctorRehabRecommendation() {
     return () => { cancelled = true; };
   }, [openLive?.id, openLive?.pdfPath]);
 
-  if (!caps.isLoading && !allowed) {
+  // Unknown (loading / paused offline / errored) is not "denied".
+  if (caps.isPending || caps.isError) return <AccessPending paused={caps.isPaused} error={caps.isError} onRetry={caps.refetch} />;
+  if (!allowed) {
     return (
       <Page gap={14} pt={6}>
         <TitleBlock title="Rehab Recommendation" sub="Physio HOD" />
@@ -132,7 +136,7 @@ export function DoctorRehabRecommendation() {
       <Modal visible={!!openLive} transparent animationType="slide" onRequestClose={() => setOpenRow(null)}>
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'flex-end' }}>
           <Pressable style={{ flex: 1 }} onPress={() => setOpenRow(null)} />
-          <View style={{ maxHeight: '92%', backgroundColor: '#12131A', borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 1, borderColor: hexA(PHYSIO_ACC, 0.22), paddingHorizontal: 16, paddingTop: 14, paddingBottom: 24 }}>
+          <View style={{ maxHeight: '92%', backgroundColor: '#12131A', borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 1, borderColor: hexA(PHYSIO_ACC, 0.22), paddingHorizontal: 16, paddingTop: 14, paddingBottom: kb > 0 ? kb + 14 : 24 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 }}>
               <View style={{ flex: 1 }}>
                 <Serif style={{ fontSize: 18 }} numberOfLines={1}>{openLive?.clientName}</Serif>

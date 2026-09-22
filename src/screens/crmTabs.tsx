@@ -22,6 +22,7 @@ import { useMarkCommDone } from '../lib/crmClientQueries';
 import type { CommRow } from '../lib/crmTabQueries';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
+import { invalidateDebounced } from '../lib/invalidateDebounced';
 
 /* ============ CRM Workspace — command-center grid + full-screen sections ============
    The 12 web-parity sections are QUEUES, not tabs: the dashboard shows a
@@ -264,8 +265,8 @@ export function CrmWorkspace({ crmId }: { crmId: string | null }) {
   React.useEffect(() => {
     const ch = supabase
       .channel('crm-home-approvals-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'session_schedule' }, () => qc.invalidateQueries({ queryKey: ['crm-reschedule-requests'] }))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'all_requests' }, () => qc.invalidateQueries({ queryKey: ['crm-roster-requests'] }))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'session_schedule' }, () => invalidateDebounced(qc, ['crm-reschedule-requests']))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'all_requests' }, () => invalidateDebounced(qc, ['crm-roster-requests']))
       .subscribe();
     return () => { supabase.removeChannel(ch); };
   }, [qc]);

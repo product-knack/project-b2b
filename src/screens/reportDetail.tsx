@@ -236,9 +236,11 @@ function PhotoViewer({ uri, onClose }: { uri: string | null; onClose: () => void
         <Pressable onPress={onClose} style={{ position: 'absolute', top: insets.top + 8, right: 16, width: 42, height: 42, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.14)', alignItems: 'center', justifyContent: 'center' }}>
           <Icon name="close" size={20} color="#fff" strokeWidth={2.4} />
         </Pressable>
+        {Platform.OS === 'ios' ? (
         <View style={{ position: 'absolute', bottom: insets.bottom + 16, alignSelf: 'center', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.1)' }}>
           <Mono style={{ fontSize: 9.5, color: 'rgba(255,255,255,0.75)' }}>PINCH TO ZOOM</Mono>
         </View>
+        ) : null}
       </View>
     </Modal>
   );

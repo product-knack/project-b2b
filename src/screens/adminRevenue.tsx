@@ -6,6 +6,7 @@ import { Icon } from '../icons';
 import { Serif, Body, Mono, Card } from '../components/primitives';
 import { Page, TitleBlock, Badge, BackLink, HScroll } from './common';
 import { supabase } from '../lib/supabase';
+import { invokeWithTimeout, isTimeoutError } from '../lib/withTimeout';
 import { inr } from '../lib/adminQueries';
 
 /* ============ ADMIN — Revenue Tracker + Revenue Summary (web /compliance/tools ports) ============
@@ -30,11 +31,12 @@ function Gate({ children }: { children: React.ReactNode }) {
       <Pressable disabled={busy || !pw} onPress={async () => {
         setBusy(true); setErr(null);
         try {
-          const { data, error } = await supabase.functions.invoke('verify-revenue-tracker-password', { body: { password: pw } });
-          if (error || !(data as any)?.ok) setErr('Incorrect password.');
+          const { data, error } = await invokeWithTimeout('verify-revenue-tracker-password', { body: { password: pw } });
+          if (error) setErr(isTimeoutError(error) ? 'Verification timed out — check your connection and try again.' : 'Incorrect password.');
+          else if (!(data as any)?.ok) setErr('Incorrect password.');
           else { unlocked = true; setOk(true); }
         } catch { setErr('Could not verify — try again.'); }
-        setBusy(false);
+        finally { setBusy(false); }
       }} style={{ alignSelf: 'stretch', alignItems: 'center', paddingVertical: 12, borderRadius: 12, backgroundColor: hexA(C.gold, busy || !pw ? 0.06 : 0.16), borderWidth: 1, borderColor: hexA(C.gold, busy || !pw ? 0.2 : 0.5) }}>
         <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: busy || !pw ? C.muted3 : C.gold }}>{busy ? 'Verifying…' : 'Unlock'}</Text>
       </Pressable>

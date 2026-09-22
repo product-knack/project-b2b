@@ -4,16 +4,18 @@ import { C, F, hexA, ORANGE_GRAD } from '../theme';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Icon, IconName } from '../icons';
 import { Serif, Body, Mono, Card, Avatar } from '../components/primitives';
-import { Page, TitleBlock, HScroll, Badge } from './common';
+import { Page, TitleBlock, HScroll, Badge, AccessPending } from './common';
+import { ConsultantDashboard } from './consultantDashboard';
 import { useAuth } from '../auth';
 import { ClientThreadsUnreadBanner } from '../components/clientThreadsCard';
+import { ManagerTeamChatCard } from './managerChat';
 import { useStore } from '../store';
 import {
   HEAD_DOCTOR_ID, ALLOWED_DOCTOR_IDS, useDoctorIdentity, usePhysioMetrics, useSeniorDashboard,
   useDoctorSessionDetails, usePendingProtocols, useApproveProtocol, useRejectProtocol,
   useProtocolExercises, useCreateProtocol, usePhysioProtocols, useDoctorAssignedClients,
   useDoctorClientSessionCounts, useAllClientsForDoctor, useHeadDoctorMonthSessions,
-  useHeadDoctorDoctors, useBulkCreateRoster, useCancelRosterSession, useRescheduleRosterSession,
+  useHeadDoctorDoctors, useBulkCreateRoster, useRescheduleRosterSession,
   useDeleteFutureRoster, useDeleteRosterSession, formatDoctorSessionType, personName, DOCTOR_ROSTER_CREATE_MODALITIES,
   ProtocolExerciseInput, usePhysioDialogClients, useHeadDoctorClients, fetchRosterReplicatePrefill,
   useDoctorsRunRate, useDoctorTodayRoster, DoctorRosterRow, usePhysioSessionExercises,
@@ -26,6 +28,7 @@ import { PhysioSessionSheet } from './doctorSessions';
 import { FeatureTour, DOCTOR_TOUR, TourLauncher } from '../components/featureTour';
 import * as Location from 'expo-location';
 import { useTrainerLeaderboard, istTimeParts } from '../lib/trainerQueries';
+import { CancelSessionFlow } from '../components/cancelSessionFlow';
 
 /* ============ DOCTOR WORKSPACE (web /doctor/* port, obsidian/ember UI) ============ */
 
@@ -256,15 +259,18 @@ const MODALITY_ICON = (m: string | null): IconName => {
   return 'dumbbell';
 };
 
-function DoctorTodayRoster() {
+/* Shared by the doctor dashboard and the therapist dashboard (16 Sep 2026):
+   `accent` recolours the card, `onLog` swaps the physio log sheet for the
+   caller's own (therapists log through AddTherapySessionSheet). */
+export function DoctorTodayRoster({ accent = C.orange, onLog }: { accent?: string; onLog?: (c: { clientId: string; clientName: string }) => void } = {}) {
+  const accentGrad = (accent === C.orange ? ORANGE_GRAD : [accent, hexA(accent, 0.7)]) as any;
   const { session } = useAuth();
   const uid = session?.user?.id ?? '';
   const rosterQ = useDoctorTodayRoster();
-  const cancelM = useCancelRosterSession();
   const [logFor, setLogFor] = React.useState<{ clientId: string; clientName: string } | null>(null);
   const [distFor, setDistFor] = React.useState<DoctorRosterRow | null>(null);
+  // Cancel = the trainer's shared two-step flow (Cancel / Paid Cancellation, remark, photo).
   const [cancelFor, setCancelFor] = React.useState<DoctorRosterRow | null>(null);
-  const [remark, setRemark] = React.useState('');
 
   // One silent device fix for the inline distance estimates (doctors may not have
   // granted location — never prompts here; the sheet asks on tap instead).
@@ -298,38 +304,29 @@ function DoctorTodayRoster() {
   const nextId = (upcoming.find((r) => new Date(r.scheduled_datetime).getTime() >= now - 30 * 60_000) ?? upcoming[0])?.id ?? null;
   const dayLabel = new Date().toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'long', day: '2-digit', month: 'short' });
 
-  const doCancel = async () => {
-    if (!cancelFor) return;
-    try {
-      // canceled_by check constraint accepts only 'Client' | 'Trainer' — a uuid here is rejected by the DB
-      await cancelM.mutateAsync({ session_id: cancelFor.id, canceled_by: 'Trainer', cancellation_remark: remark.trim() || 'Cancelled by doctor' });
-      setCancelFor(null); setRemark('');
-    } catch { /* error shown below */ }
-  };
-
   return (
     <View style={{ gap: 11 }}>
       {/* Summary header */}
       <FadeInUp delay={40}>
-        <Card colors={['rgba(58,34,20,0.55)', 'rgba(20,15,14,0.6)']} border={hexA(C.orange, 0.22)} radius={19} style={{ overflow: 'hidden' }}>
-          <LinearGradient colors={[hexA(C.orange, 0.55), 'rgba(255,255,255,0.02)']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ height: 3 }} />
+        <Card colors={['rgba(58,34,20,0.55)', 'rgba(20,15,14,0.6)']} border={hexA(accent, 0.22)} radius={19} style={{ overflow: 'hidden' }}>
+          <LinearGradient colors={[hexA(accent, 0.55), 'rgba(255,255,255,0.02)']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ height: 3 }} />
           <View style={{ padding: 14, gap: 11 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 11 }}>
-              <View style={{ width: 38, height: 38, borderRadius: 13, backgroundColor: hexA(C.orange, 0.14), borderWidth: 1, borderColor: hexA(C.orange, 0.35), alignItems: 'center', justifyContent: 'center' }}>
-                <Icon name="calendar" size={17} color={C.orange} strokeWidth={2.1} />
+              <View style={{ width: 38, height: 38, borderRadius: 13, backgroundColor: hexA(accent, 0.14), borderWidth: 1, borderColor: hexA(accent, 0.35), alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name="calendar" size={17} color={accent} strokeWidth={2.1} />
               </View>
               <View style={{ flex: 1 }}>
                 <Serif style={{ fontSize: 18 }}>Today's Roster</Serif>
                 <Mono style={{ fontSize: 8, letterSpacing: 0.8, color: C.mono2, marginTop: 1 }}>{dayLabel.toUpperCase()}</Mono>
               </View>
               <View style={{ alignItems: 'center' }}>
-                <Serif style={{ fontSize: 22, color: C.orange }}>{doneCount}<Text style={{ fontSize: 13, color: C.muted3 }}>/{activeTotal || 0}</Text></Serif>
+                <Serif style={{ fontSize: 22, color: accent }}>{doneCount}<Text style={{ fontSize: 13, color: C.muted3 }}>/{activeTotal || 0}</Text></Serif>
                 <Mono style={{ fontSize: 6.5, letterSpacing: 0.6, color: C.muted3 }}>DONE</Mono>
               </View>
             </View>
             {rows.length ? (
               <View style={{ gap: 7 }}>
-                <GrowBar pct={activeTotal ? doneCount / activeTotal : 0} color={doneCount === activeTotal && activeTotal > 0 ? C.green : C.orange} delay={250} />
+                <GrowBar pct={activeTotal ? doneCount / activeTotal : 0} color={doneCount === activeTotal && activeTotal > 0 ? C.green : accent} delay={250} />
                 <View style={{ flexDirection: 'row', gap: 6 }}>
                   {([['Upcoming', upcoming.length, C.blue], ['Completed', doneCount, C.green], ['Cancelled', cancelledCount, C.red]] as const).map(([lab, n, col]) => (
                     <View key={lab} style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 4, paddingHorizontal: 9, borderRadius: 999, backgroundColor: hexA(col, n ? 0.1 : 0.04), borderWidth: 1, borderColor: hexA(col, n ? 0.32 : 0.1) }}>
@@ -345,7 +342,7 @@ function DoctorTodayRoster() {
       </FadeInUp>
 
       {rosterQ.isPending ? (
-        <View style={{ paddingVertical: 20, alignItems: 'center' }}><ActivityIndicator color={C.orange} /></View>
+        <View style={{ paddingVertical: 20, alignItems: 'center' }}><ActivityIndicator color={accent} /></View>
       ) : rosterQ.isError ? (
         <Body style={{ fontSize: 11.5, color: C.red, textAlign: 'center' }}>{(rosterQ.error as Error).message}</Body>
       ) : rows.length === 0 ? (
@@ -364,7 +361,7 @@ function DoctorTodayRoster() {
         const isCancelled = st === 'cancelled';
         const isCompleted = st === 'completed';
         const isNext = r.id === nextId;
-        const stColor = isCancelled ? C.red : isCompleted ? C.green : isNext ? C.orange : st === 'confirmed' ? C.blue : C.gold;
+        const stColor = isCancelled ? C.red : isCompleted ? C.green : isNext ? accent : st === 'confirmed' ? C.blue : C.gold;
         const est = devPos && r.home_lat != null && r.home_lng != null ? approxTravel(devPos, r.home_lat, r.home_lng) : null;
         return (
           <FadeInUp key={r.id} delay={120 + idx * 70}>
@@ -384,8 +381,8 @@ function DoctorTodayRoster() {
                         <Body numberOfLines={1} style={{ flex: 1, fontSize: 14.5, fontFamily: F.bodySemi, color: '#fff', textDecorationLine: isCancelled ? 'line-through' : 'none' }}>{r.client_name}</Body>
                         {isNext ? (
                           <PulseGlow>
-                            <View style={{ paddingVertical: 3, paddingHorizontal: 9, borderRadius: 999, backgroundColor: hexA(C.orange, 0.18), borderWidth: 1, borderColor: hexA(C.orange, 0.55) }}>
-                              <Text style={{ fontFamily: F.bodyBold, fontSize: 8.5, letterSpacing: 0.8, color: C.orange }}>NEXT</Text>
+                            <View style={{ paddingVertical: 3, paddingHorizontal: 9, borderRadius: 999, backgroundColor: hexA(accent, 0.18), borderWidth: 1, borderColor: hexA(accent, 0.55) }}>
+                              <Text style={{ fontFamily: F.bodyBold, fontSize: 8.5, letterSpacing: 0.8, color: accent }}>NEXT</Text>
                             </View>
                           </PulseGlow>
                         ) : null}
@@ -433,13 +430,13 @@ function DoctorTodayRoster() {
                   {/* Actions */}
                   {!isCancelled && !isCompleted ? (
                     <View style={{ flexDirection: 'row', gap: 8 }}>
-                      <Pressable onPress={() => setLogFor({ clientId: r.client_id ?? '', clientName: r.client_name })} style={{ flex: 1.5, borderRadius: 12, overflow: 'hidden' }}>
-                        <LinearGradient colors={isNext ? ORANGE_GRAD : [hexA(C.green, 0.2), hexA(C.green, 0.1)]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 11, borderRadius: 12, borderWidth: isNext ? 0 : 1, borderColor: hexA(C.green, 0.45) }}>
+                      <Pressable onPress={() => { const c = { clientId: r.client_id ?? '', clientName: r.client_name }; if (onLog) onLog(c); else setLogFor(c); }} style={{ flex: 1.5, borderRadius: 12, overflow: 'hidden' }}>
+                        <LinearGradient colors={isNext ? accentGrad : [hexA(C.green, 0.2), hexA(C.green, 0.1)]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 11, borderRadius: 12, borderWidth: isNext ? 0 : 1, borderColor: hexA(C.green, 0.45) }}>
                           <Icon name="plus" size={13} color={isNext ? '#fff' : C.green} strokeWidth={2.3} />
                           <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: isNext ? '#fff' : C.green }}>Log Session</Text>
                         </LinearGradient>
                       </Pressable>
-                      <Pressable onPress={() => { setRemark(''); cancelM.reset(); setCancelFor(r); }} style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 11, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.03)', borderWidth: 1, borderColor: hexA(C.red, 0.35) }}>
+                      <Pressable onPress={() => setCancelFor(r)} style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 11, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.03)', borderWidth: 1, borderColor: hexA(C.red, 0.35) }}>
                         <Icon name="close" size={12} color={C.red} strokeWidth={2.4} />
                         <Text style={{ fontFamily: F.bodySemi, fontSize: 12.5, color: C.red }}>Cancel</Text>
                       </Pressable>
@@ -453,40 +450,30 @@ function DoctorTodayRoster() {
       })}
 
       {/* Log Session → the physio session sheet, prefilled with this client */}
-      <PhysioSessionSheet visible={!!logFor} onClose={() => setLogFor(null)} clientId={logFor?.clientId} clientName={logFor?.clientName} />
+      {!onLog ? <PhysioSessionSheet visible={!!logFor} onClose={() => setLogFor(null)} clientId={logFor?.clientId} clientName={logFor?.clientName} /> : null}
 
       {/* Live-routed distance sheet */}
       {distFor ? <DistanceSheet row={{ client_id: distFor.client_id, client_name: distFor.client_name }} visible onClose={() => setDistFor(null)} /> : null}
 
-      {/* Cancel confirm (remark optional) */}
-      <Modal visible={!!cancelFor} transparent animationType="fade" onRequestClose={() => setCancelFor(null)}>
-        <Pressable onPress={() => setCancelFor(null)} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', alignItems: 'center', justifyContent: 'center', padding: 22 }}>
-          <Pressable onPress={() => {}} style={{ width: '100%', borderRadius: 20, backgroundColor: C.sheetBg, borderWidth: 1, borderColor: hexA(C.red, 0.3), padding: 17, gap: 12 }}>
-            <Serif style={{ fontSize: 18 }}>Cancel this session?</Serif>
-            <Body style={{ fontSize: 12, color: C.muted2 }}>
-              {cancelFor?.client_name} · {cancelFor ? `${istTimeParts(cancelFor.scheduled_datetime).time} ${istTimeParts(cancelFor.scheduled_datetime).ampm}` : ''} — this marks the roster session cancelled.
-            </Body>
-            <TextInput
-              value={remark} onChangeText={setRemark} placeholder="Reason (optional)" placeholderTextColor={C.muted3} multiline
-              style={{ minHeight: 64, textAlignVertical: 'top', fontFamily: F.body, fontSize: 13, color: '#fff', padding: 12, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }}
-            />
-            {cancelM.isError ? <Body style={{ fontSize: 11, color: C.red }}>{(cancelM.error as Error).message}</Body> : null}
-            <View style={{ flexDirection: 'row', gap: 9 }}>
-              <Pressable onPress={() => setCancelFor(null)} style={{ flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' }}>
-                <Text style={{ fontFamily: F.bodySemi, fontSize: 12.5, color: C.muted }}>Keep Session</Text>
-              </Pressable>
-              <Pressable disabled={cancelM.isPending} onPress={doCancel} style={{ flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: 12, backgroundColor: hexA(C.red, 0.16), borderWidth: 1, borderColor: hexA(C.red, 0.5), opacity: cancelM.isPending ? 0.6 : 1 }}>
-                <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: C.red }}>{cancelM.isPending ? 'Cancelling…' : 'Cancel Session'}</Text>
-              </Pressable>
-            </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
+      {/* Cancel: same flow as the trainer roster card (type picker → remark + photo) */}
+      <CancelSessionFlow row={cancelFor ? { id: cancelFor.id, client_name: cancelFor.client_name, scheduled_datetime: cancelFor.scheduled_datetime } : null} onClose={() => setCancelFor(null)} />
     </View>
   );
 }
 
+/* 'doctor-dashboard' is a fork, as /doctor is on the web: a consultant doctor
+   (tag / role_specialization / specializations says "consultant") lands on the
+   Consultant Dashboard, everyone else on the physio / nutrition dashboard. The
+   identity is persisted ('doctor-' prefix), so the gate only shows on a cold
+   first sign-in. */
 export function DoctorDashboard() {
+  const identity = useDoctorIdentity();
+  if (identity.data.isConsultant) return <ConsultantDashboard />;
+  if (identity.isPending || identity.isError) return <AccessPending paused={identity.isPaused} error={identity.isError} onRetry={identity.refetch} />;
+  return <PhysioDoctorDashboard />;
+}
+
+function PhysioDoctorDashboard() {
   const [tourOpen, setTourOpen] = React.useState(false);
   const { session } = useAuth();
   const { go, openSheet } = useStore();
@@ -532,6 +519,9 @@ export function DoctorDashboard() {
         <TourLauncher onPress={() => setTourOpen(true)} />
       </View>
       <ClientThreadsUnreadBanner />
+      {/* Team Messenger — doctors can be manager_score team members too.
+          Renders nothing when this doctor isn't in a current team. */}
+      <ManagerTeamChatCard />
       {/* Emergency Leave — same global sheet the trainer dashboard uses; the
           leave_request row simply carries the doctor's own profile id. */}
       <Pressable onPress={() => openSheet('leave')} style={{ flexDirection: 'row', alignItems: 'center', gap: 11, padding: 12, borderRadius: 15, backgroundColor: hexA(C.red, 0.07), borderWidth: 1, borderColor: hexA(C.red, 0.3) }}>
@@ -543,6 +533,17 @@ export function DoctorDashboard() {
           <Body style={{ fontSize: 11, color: C.muted2, marginTop: 1 }}>Request time off - the CRM team gets notified</Body>
         </View>
         <Icon name="chevRight" size={15} color={C.red} strokeWidth={2.3} />
+      </Pressable>
+      {/* Reimbursement — cab expenses with payment screenshots, reviewed by the doctors' manager (web parity). */}
+      <Pressable onPress={() => go('doctor-reimbursements')} accessibilityRole="button" accessibilityLabel="Reimbursement" style={{ flexDirection: 'row', alignItems: 'center', gap: 11, padding: 12, borderRadius: 15, backgroundColor: hexA(C.blue, 0.07), borderWidth: 1, borderColor: hexA(C.blue, 0.3) }}>
+        <View style={{ width: 36, height: 36, borderRadius: 12, backgroundColor: hexA(C.blue, 0.13), borderWidth: 1, borderColor: hexA(C.blue, 0.35), alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name="rupee" size={16} color={C.blue} strokeWidth={2.1} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontFamily: F.bodyBold, fontSize: 13, color: '#fff' }}>Reimbursement</Text>
+          <Body style={{ fontSize: 11, color: C.muted2, marginTop: 1 }}>Cab expenses with payment screenshots, reviewed by your manager</Body>
+        </View>
+        <Icon name="chevRight" size={15} color={C.blue} strokeWidth={2.3} />
       </Pressable>
       <FeatureTour visible={tourOpen} steps={DOCTOR_TOUR} tourName='doctor' onClose={() => setTourOpen(false)} />
 
@@ -761,8 +762,9 @@ export function DoctorDashboard() {
 
       {/* Run rate breakdown — every doctor's pace + projection */}
       <Modal visible={runRateOpen} transparent animationType="slide" onRequestClose={() => setRunRateOpen(false)}>
-        <Pressable onPress={() => setRunRateOpen(false)} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'flex-end' }}>
-          <Pressable onPress={() => {}} style={{ maxHeight: '80%', backgroundColor: '#171210', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.15)', paddingHorizontal: 18, paddingTop: 16, paddingBottom: 26 }}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'flex-end' }}>
+          <Pressable onPress={() => setRunRateOpen(false)} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} />
+          <View style={{ maxHeight: '80%', backgroundColor: '#171210', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.15)', paddingHorizontal: 18, paddingTop: 16, paddingBottom: 26 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9, marginBottom: 12 }}>
               <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: C.purple }} />
               <View style={{ flex: 1 }}>
@@ -805,14 +807,15 @@ export function DoctorDashboard() {
                 })}
               </ScrollView>
             )}
-          </Pressable>
-        </Pressable>
+          </View>
+        </View>
       </Modal>
 
       {/* Acknowledgements breakdown — per doctor; tap one for session-level detail */}
       <Modal visible={ackOpen} transparent animationType="slide" onRequestClose={() => setAckOpen(false)}>
-        <Pressable onPress={() => setAckOpen(false)} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'flex-end' }}>
-          <Pressable onPress={() => {}} style={{ maxHeight: '80%', backgroundColor: '#171210', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.15)', paddingHorizontal: 18, paddingTop: 16, paddingBottom: 26 }}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'flex-end' }}>
+          <Pressable onPress={() => setAckOpen(false)} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} />
+          <View style={{ maxHeight: '80%', backgroundColor: '#171210', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.15)', paddingHorizontal: 18, paddingTop: 16, paddingBottom: 26 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9, marginBottom: 4 }}>
               <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: totalAck < totalSessions ? C.gold : C.green }} />
               <View style={{ flex: 1 }}>
@@ -856,14 +859,15 @@ export function DoctorDashboard() {
               </ScrollView>
             )}
             <Body style={{ fontSize: 10, color: C.muted3, textAlign: 'center', marginTop: 10 }}>Tap a doctor to see each session's acknowledgement status.</Body>
-          </Pressable>
-        </Pressable>
+          </View>
+        </View>
       </Modal>
 
       {/* Today's all-doctors breakdown */}
       <Modal visible={breakdownOpen} transparent animationType="fade" onRequestClose={() => setBreakdownOpen(false)}>
-        <Pressable onPress={() => setBreakdownOpen(false)} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'center', padding: 22 }}>
-          <Pressable onPress={() => {}} style={{ borderRadius: 18, backgroundColor: '#141010', borderWidth: 1, borderColor: hexA(C.blue, 0.3), padding: 18, gap: 11, maxHeight: '75%' }}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'center', padding: 22 }}>
+          <Pressable onPress={() => setBreakdownOpen(false)} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} />
+          <View style={{ borderRadius: 18, backgroundColor: '#141010', borderWidth: 1, borderColor: hexA(C.blue, 0.3), padding: 18, gap: 11, maxHeight: '75%' }}>
             <Text style={{ fontFamily: F.bodyBold, fontSize: 15, color: '#fff' }}>Today's Sessions Breakdown</Text>
             {!isHead ? (
               <Body style={{ fontSize: 12, color: C.muted3 }}>The team breakdown is available to the Head Doctor only.</Body>
@@ -883,8 +887,8 @@ export function DoctorDashboard() {
                 </View>
               </ScrollView>
             )}
-          </Pressable>
-        </Pressable>
+          </View>
+        </View>
       </Modal>
 
       {/* Per-doctor session detail dialog */}
@@ -1196,7 +1200,6 @@ export function DoctorRoster() {
   const doctorsQ = useHeadDoctorDoctors(isHead);
   const clientsQ = useHeadDoctorClients(isHead);
   const q = useHeadDoctorMonthSessions(monthDate, 'all');
-  const cancelM = useCancelRosterSession();
   const reschedM = useRescheduleRosterSession();
   const deleteM = useDeleteRosterSession();
   const confirmDelete = (s: any) =>
@@ -1209,10 +1212,8 @@ export function DoctorRoster() {
       ]
     );
   const [tab, setTab] = React.useState<'calendar' | 'reschedule' | 'list'>('calendar');
+  // Cancel = the trainer's shared flow, plus the HOD's Client / Doctor toggle (DB check: Client | Trainer).
   const [cancelFor, setCancelFor] = React.useState<any | null>(null);
-  // DB check constraint session_schedule_canceled_by_check allows exactly 'Client' | 'Trainer' (live-verified) — web dialog contract
-  const [cancelBy, setCancelBy] = React.useState<'Client' | 'Trainer' | null>(null);
-  const [cancelRemark, setCancelRemark] = React.useState('');
   const [reschedFor, setReschedFor] = React.useState<any | null>(null);
   const [reschedDate, setReschedDate] = React.useState('');
   const [reschedTime, setReschedTime] = React.useState('');
@@ -1267,7 +1268,7 @@ export function DoctorRoster() {
             <Pressable onPress={() => { setReschedFor(s); const d = new Date(s.scheduled_datetime); setReschedDate(d.toLocaleDateString('en-CA')); setReschedTime(d.toTimeString().slice(0, 5)); }} style={{ flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: 11, backgroundColor: hexA(C.blue, 0.1), borderWidth: 1, borderColor: hexA(C.blue, 0.3) }}>
               <Text style={{ fontFamily: F.bodySemi, fontSize: 11.5, color: '#A9BCFF' }}>Reschedule</Text>
             </Pressable>
-            <Pressable onPress={() => { setCancelFor(s); setCancelBy(null); setCancelRemark(''); }} style={{ flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: 11, backgroundColor: hexA(C.red, 0.08), borderWidth: 1, borderColor: hexA(C.red, 0.28) }}>
+            <Pressable onPress={() => setCancelFor(s)} style={{ flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: 11, backgroundColor: hexA(C.red, 0.08), borderWidth: 1, borderColor: hexA(C.red, 0.28) }}>
               <Text style={{ fontFamily: F.bodySemi, fontSize: 11.5, color: C.red }}>Cancel</Text>
             </Pressable>
           </>
@@ -1427,48 +1428,8 @@ export function DoctorRoster() {
           (tab === 'list' ? sessions : reschedRequests).slice(0, 80).map(sessionCard)
         )}
 
-        {/* Cancel dialog */}
-        <Modal visible={!!cancelFor} transparent animationType="fade" onRequestClose={() => setCancelFor(null)}>
-          <Pressable onPress={() => setCancelFor(null)} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'center', padding: 22 }}>
-            <Pressable onPress={() => {}} style={{ borderRadius: 18, backgroundColor: '#141010', borderWidth: 1, borderColor: hexA(C.red, 0.3), padding: 18, gap: 12 }}>
-              <Text style={{ fontFamily: F.bodyBold, fontSize: 15, color: '#fff' }}>Cancel Session</Text>
-              <Body style={{ fontSize: 12, color: C.muted2 }}>{cancelFor?.client_name} · {cancelFor ? fmtAt(cancelFor.scheduled_datetime) : ''}</Body>
-              <Mono style={{ fontSize: 9, letterSpacing: 1, color: C.mono2 }}>CANCELLED BY</Mono>
-              <View style={{ flexDirection: 'row', gap: 8 }}>
-                {(['Client', 'Trainer'] as const).map((who) => {
-                  const active = cancelBy === who;
-                  return (
-                    <Pressable key={who} onPress={() => setCancelBy(who)} style={{ flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 11, backgroundColor: hexA(C.red, active ? 0.16 : 0.04), borderWidth: 1, borderColor: hexA(C.red, active ? 0.5 : 0.16) }}>
-                      <Text style={{ fontFamily: active ? F.bodyBold : F.bodySemi, fontSize: 12, color: active ? C.red : C.muted }}>{who === 'Trainer' ? 'Doctor' : who}</Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-              <Mono style={{ fontSize: 9, letterSpacing: 1, color: C.mono2 }}>REASON</Mono>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}>
-                {['Client Request', 'Doctor Unavailable', 'Scheduling Conflict', 'Emergency', 'Other'].map((r) => {
-                  const active = cancelRemark === r;
-                  return (
-                    <Pressable key={r} onPress={() => setCancelRemark(r)} style={{ paddingVertical: 7, paddingHorizontal: 12, borderRadius: 999, backgroundColor: active ? hexA(C.orange, 0.16) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: active ? hexA(C.orange, 0.5) : 'rgba(255,255,255,0.1)' }}>
-                      <Text style={{ fontFamily: active ? F.bodyBold : F.bodySemi, fontSize: 11.5, color: active ? C.orange : C.muted }}>{r}</Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-              <View style={{ flexDirection: 'row', gap: 9 }}>
-                <Pressable onPress={() => setCancelFor(null)} style={{ flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }}>
-                  <Text style={{ fontFamily: F.bodySemi, fontSize: 12.5, color: C.ink }}>Keep</Text>
-                </Pressable>
-                <Pressable disabled={!cancelBy || !cancelRemark || cancelM.isPending} onPress={() => {
-                  setErr(null);
-                  cancelM.mutate({ session_id: cancelFor.id, canceled_by: cancelBy!, cancellation_remark: cancelRemark }, { onSuccess: () => setCancelFor(null), onError: (e: any) => { setCancelFor(null); setErr(e?.message ?? 'Failed'); } });
-                }} style={{ flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: 12, backgroundColor: hexA(C.red, cancelBy && cancelRemark ? 0.16 : 0.06), borderWidth: 1, borderColor: hexA(C.red, cancelBy && cancelRemark ? 0.45 : 0.2) }}>
-                  <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: cancelBy && cancelRemark ? C.red : C.muted3 }}>{cancelM.isPending ? 'Cancelling…' : 'Cancel Session'}</Text>
-                </Pressable>
-              </View>
-            </Pressable>
-          </Pressable>
-        </Modal>
+        {/* Cancel dialog: shared trainer flow with the Cancelled-by toggle */}
+        <CancelSessionFlow askWho row={cancelFor ? { id: cancelFor.id, client_name: cancelFor.client_name, scheduled_datetime: cancelFor.scheduled_datetime } : null} onClose={() => setCancelFor(null)} />
 
         {/* Reschedule dialog */}
         <Modal visible={!!reschedFor} transparent animationType="fade" onRequestClose={() => setReschedFor(null)}>
@@ -1505,8 +1466,9 @@ export function DoctorRoster() {
         {/* Client filter picker — keyboard-aware: the sheet lifts above the keyboard
             so the search field and results stay visible while typing */}
         <Modal visible={clientPickOpen} transparent animationType="slide" onRequestClose={() => setClientPickOpen(false)}>
-          <Pressable onPress={() => setClientPickOpen(false)} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'flex-end' }}>
-            <Pressable onPress={() => {}} style={{ maxHeight: '72%', backgroundColor: '#171210', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.15)', paddingHorizontal: 18, paddingTop: 16, paddingBottom: clientPickKb > 0 ? clientPickKb + 12 : 26 }}>
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'flex-end' }}>
+            <Pressable onPress={() => setClientPickOpen(false)} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} />
+            <View style={{ maxHeight: '72%', backgroundColor: '#171210', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.15)', paddingHorizontal: 18, paddingTop: 16, paddingBottom: clientPickKb > 0 ? clientPickKb + 12 : 26 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9, marginBottom: 10 }}>
                 <Serif style={{ flex: 1, fontSize: 18, color: '#fff' }}>Filter by client</Serif>
                 <Pressable onPress={() => setClientPickOpen(false)} hitSlop={10} style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center', justifyContent: 'center' }}>
@@ -1524,8 +1486,8 @@ export function DoctorRoster() {
                     </Pressable>
                   ))}
               </ScrollView>
-            </Pressable>
-          </Pressable>
+            </View>
+          </View>
         </Modal>
 
         <BulkCreateSheet visible={bulkOpen} onClose={() => setBulkOpen(false)} doctors={doctorsQ.data ?? []} presetClient={clientSel ?? undefined} />
@@ -1587,7 +1549,7 @@ function ClientSelect({ visible, value, onSelect }: { visible: boolean; value: {
         <>
           <TextInput value={search} onChangeText={setSearch} placeholder="Search client…" placeholderTextColor={C.muted3} style={inputStyle} />
           {clientsQ.isLoading ? <ActivityIndicator color={C.orange} size="small" /> : (
-            <View style={{ maxHeight: 190 }}>
+            <View style={{ maxHeight: 300 }}>
               <ScrollView keyboardShouldPersistTaps="handled" nestedScrollEnabled>
                 {list.slice(0, 40).map((c) => (
                   <Pressable key={c.id} onPress={() => { Keyboard.dismiss(); onSelect(c); }} style={{ paddingVertical: 10, paddingHorizontal: 10, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' }}>
@@ -1672,8 +1634,9 @@ function TimeWheelPicker({ visible, initial, onClose, onPick }: { visible: boole
   if (!visible) return null;
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable onPress={onClose} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', alignItems: 'center', justifyContent: 'center', padding: 30 }}>
-        <Pressable onPress={() => {}} style={{ width: '100%', maxWidth: 310, borderRadius: 20, backgroundColor: '#171210', borderWidth: 1, borderColor: 'rgba(255,150,90,0.2)', padding: 18, gap: 14 }}>
+      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', alignItems: 'center', justifyContent: 'center', padding: 30 }}>
+        <Pressable onPress={onClose} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} />
+        <View style={{ width: '100%', maxWidth: 310, borderRadius: 20, backgroundColor: '#171210', borderWidth: 1, borderColor: 'rgba(255,150,90,0.2)', padding: 18, gap: 14 }}>
           <Text style={{ fontFamily: F.bodyBold, fontSize: 15, color: '#fff', textAlign: 'center' }}>Pick a time</Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
             <WheelColumn data={HOURS} value={h} width={62} onChange={setH} />
@@ -1692,8 +1655,8 @@ function TimeWheelPicker({ visible, initial, onClose, onPick }: { visible: boole
               </LinearGradient>
             </Pressable>
           </View>
-        </Pressable>
-      </Pressable>
+        </View>
+      </View>
     </Modal>
   );
 }
@@ -1921,8 +1884,9 @@ function BulkCreateSheet({ visible, onClose, doctors, presetClient }: { visible:
       {/* Per-day Doctor / Modality dropdown — nested Modal (Android sibling-modal bug) */}
       {dropFor ? (
         <Modal visible transparent animationType="fade" onRequestClose={() => setDropFor(null)}>
-          <Pressable onPress={() => setDropFor(null)} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', alignItems: 'center', justifyContent: 'center', padding: 28 }}>
-            <Pressable onPress={() => {}} style={{ width: '100%', maxWidth: 320, maxHeight: '70%', borderRadius: 20, backgroundColor: '#171210', borderWidth: 1, borderColor: 'rgba(255,150,90,0.2)', paddingVertical: 14 }}>
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', alignItems: 'center', justifyContent: 'center', padding: 28 }}>
+            <Pressable onPress={() => setDropFor(null)} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} />
+            <View style={{ width: '100%', maxWidth: 320, maxHeight: '70%', borderRadius: 20, backgroundColor: '#171210', borderWidth: 1, borderColor: 'rgba(255,150,90,0.2)', paddingVertical: 14 }}>
               <Text style={{ fontFamily: F.bodyBold, fontSize: 14.5, color: '#fff', textAlign: 'center', marginBottom: 8 }}>
                 {WEEKDAYS[dropFor.day][0]} · {dropFor.kind === 'doctor' ? 'Doctor' : 'Modality'}
               </Text>
@@ -1940,8 +1904,8 @@ function BulkCreateSheet({ visible, onClose, doctors, presetClient }: { visible:
                   );
                 })}
               </ScrollView>
-            </Pressable>
-          </Pressable>
+            </View>
+          </View>
         </Modal>
       ) : null}
     </RosterSheet>

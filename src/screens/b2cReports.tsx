@@ -208,7 +208,7 @@ function BloodReportCard({ report }: { report: { id: string; name: string; uploa
           </View>
         </View>
         {report.fileUrl ? (
-          <Pressable onPress={() => Linking.openURL(report.fileUrl!)} hitSlop={6} style={{ paddingVertical: 6, paddingHorizontal: 11, borderRadius: 9, backgroundColor: hexA(C.blue, 0.1), borderWidth: 1, borderColor: hexA(C.blue, 0.35) }}>
+          <Pressable onPress={() => Linking.openURL(report.fileUrl!)} hitSlop={10} style={{ paddingVertical: 9, paddingHorizontal: 11, borderRadius: 9, backgroundColor: hexA(C.blue, 0.1), borderWidth: 1, borderColor: hexA(C.blue, 0.35) }}>
             <Text style={{ fontFamily: F.bodyBold, fontSize: 10.5, color: C.blue }}>PDF</Text>
           </Pressable>
         ) : null}

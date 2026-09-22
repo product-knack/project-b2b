@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, Pressable, ActivityIndicator, Modal, Linking, ScrollView } from 'react-native';
+import { View, Text, Pressable, ActivityIndicator, Modal, Linking, ScrollView, Alert } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import { LinearGradient } from 'expo-linear-gradient';
 import { C, F, hexA, ORANGE_GRAD } from '../theme';
@@ -9,7 +9,8 @@ import { Page, TitleBlock, Badge, BackLink } from './common';
 import { useStore } from '../store';
 import { supabase } from '../lib/supabase';
 import { useMyCapabilities } from '../lib/capabilities';
-import { generateNarratives, buildQhpHtml, saveQhpDetails, renderAndUploadPdf, getAssessmentSource, deepGet } from '../lib/qhpPdf';
+import { generateNarratives, buildQhpHtml, saveQhpDetails, renderAndUploadPdf, getAssessmentSource, deepGet, CancelToken, isCancelled } from '../lib/qhpPdf';
+import { withTimeout, NET_MS } from '../lib/withTimeout';
 import { qhpFullLabel } from '../lib/coachClientQueries';
 
 /* ============ Assessment Details (web /trainer/assessments/:id) ============
@@ -147,6 +148,16 @@ function GeneratePdfModal({ assessment, onClose }: { assessment: any; onClose: (
   const [narratives, setNarratives] = React.useState<Record<string, any> | null>(null);
   const [pdfUrl, setPdfUrl] = React.useState<string | null>(null);
   const [err, setErr] = React.useState('');
+  // Cancel token shared with the pipeline: generation/upload check it between
+  // steps and bail out, so the modal is never a trap while busy.
+  const cancelRef = React.useRef<CancelToken>({ cancelled: false });
+  React.useEffect(() => () => { cancelRef.current.cancelled = true; }, []); // unmount = cancel
+  const requestCancel = () => {
+    Alert.alert('Cancel generation?', 'The report will not be saved. You can generate it again later.', [
+      { text: 'Keep going', style: 'cancel' },
+      { text: 'Cancel', style: 'destructive', onPress: () => { cancelRef.current.cancelled = true; onClose(); } },
+    ]);
+  };
 
   // Defaults: the opened assessment is selected; compare against the latest earlier QHP (web default).
   React.useEffect(() => {
@@ -170,6 +181,7 @@ function GeneratePdfModal({ assessment, onClose }: { assessment: any; onClose: (
 
   const run = async () => {
     if (!selected) return;
+    cancelRef.current = { cancelled: false };
     setPhase('working');
     setErr('');
     try {
@@ -180,10 +192,12 @@ function GeneratePdfModal({ assessment, onClose }: { assessment: any; onClose: (
           baseline: baseline ? { data: baseline.data, date: baseline.date } : null,
         },
         setProgress,
+        cancelRef.current,
       );
       setNarratives(result);
       setPhase('preview');
     } catch (e: any) {
+      if (isCancelled(e)) return; // user cancelled — the modal is already closing
       setErr(e?.message ?? 'Generation failed.');
       setPhase('error');
     }
@@ -191,11 +205,13 @@ function GeneratePdfModal({ assessment, onClose }: { assessment: any; onClose: (
 
   const finalize = async () => {
     if (!selected || !narratives) return;
+    cancelRef.current = { cancelled: false };
     setPhase('uploading');
     try {
       setProgress({ label: 'Saving the report for review…', pct: 30 });
       const preapproved = { ...narratives, _meta: { client_name: clientName, assessment_date: selected.date, report_label: reportLabel, is_comparison: isComparison, compared_to: compare?.date ?? null, generated_from: 'odds-app' } };
-      const detailId = await saveQhpDetails({ clientId: assessment.client_id, coachAssessmentId: selected.id, preapproved });
+      const detailId = await withTimeout(saveQhpDetails({ clientId: assessment.client_id, coachAssessmentId: selected.id, preapproved }), NET_MS, 'Saving the report');
+      if (cancelRef.current.cancelled) return;
       setProgress({ label: 'Rendering & uploading the PDF…', pct: 70 });
       const d = selected.data;
       const html = buildQhpHtml({
@@ -215,10 +231,11 @@ function GeneratePdfModal({ assessment, onClose }: { assessment: any; onClose: (
           ...(selected.score != null ? [{ label: 'QHP Score', value: isComparison && compare?.score != null ? `${compare.score} → ${selected.score}` : `${selected.score}/100` }] : []),
         ],
       }, narratives);
-      const url = await renderAndUploadPdf({ detailId, clientId: assessment.client_id, clientName, html });
+      const url = await renderAndUploadPdf({ detailId, clientId: assessment.client_id, clientName, html }, cancelRef.current);
       setPdfUrl(url);
       setPhase('done');
     } catch (e: any) {
+      if (isCancelled(e)) return;
       setErr(e?.message ?? 'Finalize failed.');
       setPhase('error');
     }
@@ -228,7 +245,7 @@ function GeneratePdfModal({ assessment, onClose }: { assessment: any; onClose: (
   const previewKeys = narratives ? Object.keys(narratives).filter((k) => !k.startsWith('_')) : [];
 
   return (
-    <Modal visible transparent animationType="fade" onRequestClose={busy ? () => {} : onClose}>
+    <Modal visible transparent animationType="fade" onRequestClose={busy ? requestCancel : onClose}>
       <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', padding: 18 }}>
         <View style={{ maxHeight: '88%', backgroundColor: '#0E0A09', borderRadius: 22, borderWidth: 1, borderColor: 'rgba(255,150,90,0.18)', padding: 18, gap: 12 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
@@ -239,7 +256,8 @@ function GeneratePdfModal({ assessment, onClose }: { assessment: any; onClose: (
               <Serif style={{ fontSize: 17 }}>Generate QHP PDF</Serif>
               <Body numberOfLines={1} style={{ fontSize: 10.5, color: C.muted2 }}>{clientName}</Body>
             </View>
-            {!busy ? <Pressable onPress={onClose} hitSlop={8}><Icon name="close" size={14} color={C.muted2} strokeWidth={2.3} /></Pressable> : null}
+            {/* The ✕ is ALWAYS reachable: while busy it asks to cancel instead of vanishing. */}
+            {<Pressable onPress={busy ? requestCancel : onClose} hitSlop={10} style={{ width: 30, height: 30, alignItems: 'center', justifyContent: 'center' }}><Icon name="close" size={14} color={C.muted2} strokeWidth={2.3} /></Pressable>}
           </View>
 
           {phase === 'setup' ? (
@@ -297,6 +315,9 @@ function GeneratePdfModal({ assessment, onClose }: { assessment: any; onClose: (
               </View>
               <Mono style={{ fontSize: 9.5, color: C.muted3 }}>{progress.pct}% COMPLETE</Mono>
               {phase === 'working' ? <Body style={{ fontSize: 10, color: C.muted3 }}>Generating in 5 focused batches for better quality</Body> : null}
+              <Pressable onPress={requestCancel} hitSlop={10} style={{ marginTop: 4, paddingVertical: 8, paddingHorizontal: 16, borderRadius: 999, backgroundColor: hexA(C.red, 0.1), borderWidth: 1, borderColor: hexA(C.red, 0.35) }}>
+                <Text style={{ fontFamily: F.bodySemi, fontSize: 12, color: C.red }}>Cancel</Text>
+              </Pressable>
             </View>
           ) : phase === 'preview' ? (
             <>

@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, Pressable, TextInput, Modal, Animated } from 'react-native';
+import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import { LinearGradient } from 'expo-linear-gradient';
 import { C, F, hexA } from '../theme';
 import { Icon } from '../icons';
@@ -97,14 +98,17 @@ export function ResubmitSheet({ row, onClose }: { row: HeldOwnRow; onClose: () =
   const m = useResubmitReport();
   const [msg, setMsg] = React.useState('');
   const [err, setErr] = React.useState<string | null>(null);
+  const kb = useKeyboardHeight(); // Android edge-to-edge: keep the dialog above the keyboard
   const lastHold = [...row.notes].reverse().find((n) => n.type === 'hold' || n.type === 'hod_hold');
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onClose}>
-      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', padding: 24 }}>
+      {/* Centered dialog: pad by the keyboard height so the note + Resubmit button
+          re-center in the space ABOVE the keyboard instead of hiding under it. */}
+      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', padding: 24, paddingBottom: 24 + kb }}>
         <View style={{ backgroundColor: '#0E0A09', borderRadius: 22, borderWidth: 1, borderColor: 'rgba(255,150,90,0.18)', padding: 18, gap: 12 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
             <Serif style={{ flex: 1, fontSize: 17 }}>Resubmit — {row.clientName}</Serif>
-            <Pressable onPress={onClose} hitSlop={8}><Icon name="close" size={14} color={C.muted2} strokeWidth={2.3} /></Pressable>
+            <Pressable onPress={onClose} hitSlop={10} style={{ width: 30, height: 30, alignItems: 'center', justifyContent: 'center' }}><Icon name="close" size={14} color={C.muted2} strokeWidth={2.3} /></Pressable>
           </View>
           {lastHold ? (
             <View style={{ padding: 10, borderRadius: 11, backgroundColor: hexA(C.gold, 0.07), borderLeftWidth: 3, borderLeftColor: C.gold, gap: 3 }}>

@@ -1,5 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useAuth } from '../auth';
 import { supabase } from './supabase';
+import { invokeWithTimeout, uploadWithTimeout, withTimeout, NET_MS } from './withTimeout';
+import { serverNow, syncServerClock } from './managerChatQueries';
+import { ROSTER_FRESH_START_ISO } from './therapistQueries';
 
 /* ---------- IST helpers (mirror the web app's istDateTime) ---------- */
 const IST_OFFSET_MIN = 330;
@@ -86,7 +90,8 @@ export type ManagerEntry = {
   managerId: string;
   managerName: string;
   teamName: string;
-  teamSize: number;
+  teamSize: number; // ACTIVE members only (manager included when active); web parity 18 Sep 2026
+  inactiveCount: number; // members left out of teamSize; their sessions / QHPs / referrals still count
   totalSessions: number; // web parity: sessions + QHPs combined (what the web card shows as "Sess")
   rawSessions: number; // training sessions only
   qhpCount: number;
@@ -111,7 +116,12 @@ export type ManagerLeaderboard = {
 //   [ Open Past (overdue, no action) ] + [ Pending Reschedule Carry-Over ] + [ Today's day list ]
 const ROSTER_SELECT =
   'id, scheduled_datetime, session_type, modality, status, client_id, workout_session_id, reschedule_request, reschedule_requested_at, reschedule_status, reschedule_proposed_date, reschedule_proposed_time, missed_remarks, paid_cancellation, admin_approval, clients:client_id(first_name, last_name, status, brb_location)';
-const OPEN_PAST_CUTOFF_ISO = '2026-06-12T00:00:00+05:30';
+/* Fresh start (1 Sept 2026 IST): unlogged sessions from BEFORE the cutoff stay in
+   the DB but out of Today's Roster — the August backlog was never going to be
+   remarked one by one. Same rule the doctor and therapist rosters already use;
+   the trainer roster was still reaching back to 12 June and resurfacing June
+   misses in "Needs attention". Logged rows are unaffected (they show by date). */
+const OPEN_PAST_CUTOFF_ISO = ROSTER_FRESH_START_ISO;
 const notInactiveClient = (s: any) => !['inactive', 'discontinued'].includes((s.clients?.status ?? '').toLowerCase());
 const mapRosterRow = (s: any, isOpenPast: boolean): RosterRow => ({
   id: s.id,
@@ -150,6 +160,7 @@ export function useTodayRoster(trainerId: string, dayOffset = 0) {
     queryKey: ['trainer-roster', trainerId, dayOffset],
     enabled: !!trainerId,
     staleTime: 120_000,
+    refetchInterval: 60_000, // Today's Roster stays live without the global poll
     queryFn: async (): Promise<RosterRow[]> => {
       const targetDay = new Date(Date.now() + dayOffset * 864e5);
       const startOfToday = istDayStartUtcISO(targetDay);
@@ -172,6 +183,9 @@ export function useTodayRoster(trainerId: string, dayOffset = 0) {
         // Pending reschedule carry-over: overdue, not logged, not cancelled, request raised & still pending.
         dayOffset !== 0 ? noRows : supabase.from('session_schedule').select(ROSTER_SELECT)
           .eq('trainer_id', trainerId)
+          // Same fresh-start floor as the open-past query above; this one had no
+          // lower bound at all, so it could carry a pending request in from any date.
+          .gte('scheduled_datetime', ROSTER_FRESH_START_ISO)
           .lt('scheduled_datetime', startOfToday)
           .is('workout_session_id', null).neq('status', 'cancelled')
           .not('reschedule_requested_at', 'is', null).is('reschedule_status', null)
@@ -368,11 +382,13 @@ export type CancelSessionInput = {
   remark: string;
   paid?: boolean;
   image?: { uri: string; name: string; mime: string };
+  /** DB check accepts only Client | Trainer; doctors cancelling store Trainer (shared flow). */
+  canceledBy?: 'Client' | 'Trainer';
 };
 export function useCancelScheduledSession() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, remark, paid = false, image }: CancelSessionInput) => {
+    mutationFn: async ({ id, remark, paid = false, image, canceledBy = 'Trainer' }: CancelSessionInput) => {
       if (!remark.trim()) throw new Error('Cancellation remark is required');
 
       let attachment_url: string | null = null;
@@ -380,12 +396,12 @@ export function useCancelScheduledSession() {
         const sanitizedName = image.name.replace(/[^a-zA-Z0-9.-]/g, '_');
         const fileName = `roster-cancel-${Date.now()}-${Math.random().toString(36).substring(2, 10)}-${sanitizedName}`;
         const buf = await (await fetch(image.uri)).arrayBuffer(); // Hermes-safe (no blobs)
-        const { error: upErr } = await supabase.storage.from('session-attachments').upload(fileName, buf, { contentType: image.mime, upsert: false });
+        const { error: upErr } = await uploadWithTimeout('session-attachments', fileName, buf, { contentType: image.mime, upsert: false });
         if (upErr) throw new Error(`Attachment upload failed: ${upErr.message}`);
         attachment_url = supabase.storage.from('session-attachments').getPublicUrl(fileName).data.publicUrl;
       }
 
-      const updates: Record<string, any> = { status: 'cancelled', cancellation_remark: remark.trim(), canceled_by: 'Trainer' };
+      const updates: Record<string, any> = { status: 'cancelled', cancellation_remark: remark.trim(), canceled_by: canceledBy };
       if (attachment_url) updates.cancellation_attachment_url = attachment_url;
       if (paid) {
         updates.paid_cancellation = true;
@@ -403,7 +419,8 @@ export function useCancelScheduledSession() {
       return data;
     },
     onSuccess: (data: any) => {
-      qc.invalidateQueries({ queryKey: ['trainer-roster'] });
+      // Trainer roster + the doctor surfaces that share this flow (15 Sep 2026).
+      ['trainer-roster', 'doctor-today-roster', 'head-doctor-month-sessions', 'mgr-plan-sched'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
       // Best-effort push to assigned CRMs — a failed push never blocks the cancellation.
       if (data?.client_id && data?.trainer_id) {
         supabase.functions
@@ -478,7 +495,7 @@ async function invokeFnWithToken(name: string, body: any) {
     ({ data } = await supabase.auth.getSession());
   }
   const token = data.session?.access_token;
-  return supabase.functions.invoke(name, { body, ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}) });
+  return invokeWithTimeout(name, { body, ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}) });
 }
 
 export function useRosterDistance(clientId: string | null, enabled: boolean, origin?: { lat: number; lng: number } | null) {
@@ -785,13 +802,23 @@ export type TrainerSessionItem = {
   modality: string;
   status: string;
   logged: boolean;
+  // Client acknowledgement of the LOGGED session (training_sessions.
+  // session_acknowledged_at) — null when the session isn't logged yet.
+  acknowledged: boolean | null;
   is_past: boolean;
 };
 export function useTrainerMonthSessions(trainerId: string, ref: { year: number; month: number }) {
+  // Therapists only: their sessions are written by therapist_log_session with
+  // no workout id, so completed rows count on their own. Trainers and doctors
+  // keep the workout-id rule (a roster-created row is not a logged session).
+  const { dbRole } = useAuth();
+  const therapist = dbRole === 'therapist';
   return useQuery({
-    queryKey: ['trainer-month-sessions', trainerId, ref.year, ref.month],
+    // v2: items gained `acknowledged` — key bumped so persisted v1 caches can't be misread.
+    queryKey: ['trainer-month-sessions-v2', trainerId, ref.year, ref.month, therapist],
     enabled: !!trainerId,
     staleTime: 60_000,
+    refetchInterval: 60_000, // Sessions page keeps its live updates (realtime via liveSync too)
     queryFn: async () => {
       const refDate = new Date(Date.UTC(ref.year, ref.month, 15));
       const bounds = istMonthBounds(refDate);
@@ -805,18 +832,34 @@ export function useTrainerMonthSessions(trainerId: string, ref: { year: number; 
           .order('scheduled_datetime', { ascending: true }),
         // Ad-hoc logged workouts (no schedule slot) — e.g. trial sessions or logs made
         // offline without a roster slot. Shown on the day they were logged.
+        // Therapists: completed rows WITHOUT a workout id count too (therapy /
+        // rehab logs never carry one; requiring it hid 20 of Shiv's 29 sessions,
+        // 15 Sep 2026). Everyone else: workout-id rows only, as before.
         supabase
           .from('training_sessions')
-          .select('id, scheduled_at, session_type, session_name, status, workout_session_id, client_id, clients:client_id(first_name, last_name)')
+          .select('id, scheduled_at, session_type, session_name, status, workout_session_id, schedule_session_id, session_acknowledged_at, client_id, clients:client_id(first_name, last_name)')
           .eq('trainer_id', trainerId)
           .gte('scheduled_at', bounds.startUtc)
           .lte('scheduled_at', bounds.endUtc)
-          .not('workout_session_id', 'is', null)
+          .or(therapist ? 'workout_session_id.not.is.null,status.eq.completed' : 'workout_session_id.not.is.null')
           .neq('status', 'parked')
           .order('scheduled_at', { ascending: true }),
       ]);
       if (schedR.error) throw new Error(schedR.error.message);
-      const now = Date.now();
+      // is_past drives the Missed state — anchor it to the SERVER clock, not the
+      // device clock (a fast device would mark today's future sessions missed).
+      await syncServerClock();
+      const now = serverNow().getTime();
+      // Client-ack lookup for logged slots (same source as Today's Roster).
+      const ackByWorkout = new Map<string, boolean>();
+      const ackBySchedule = new Map<string, boolean>();
+      for (const t of (loggedR.data ?? []) as any[]) {
+        const acked = !!t.session_acknowledged_at;
+        if (t.workout_session_id) ackByWorkout.set(String(t.workout_session_id), acked);
+        if (t.schedule_session_id) ackBySchedule.set(String(t.schedule_session_id), acked);
+        // Therapy slots point at the training-session id itself.
+        ackByWorkout.set(String(t.id), acked);
+      }
       const items: TrainerSessionItem[] = (schedR.data ?? []).map((s: any) => ({
         id: s.id,
         scheduled_datetime: s.scheduled_datetime,
@@ -825,19 +868,61 @@ export function useTrainerMonthSessions(trainerId: string, ref: { year: number; 
         modality: s.modality || s.session_type || 'Session',
         status: s.status || 'scheduled',
         logged: !!s.workout_session_id,
+        acknowledged: s.workout_session_id
+          ? ackByWorkout.get(String(s.workout_session_id)) ?? ackBySchedule.get(String(s.id)) ?? null
+          : null,
         is_past: new Date(s.scheduled_datetime).getTime() < now,
       }));
+      // Slots whose training_sessions row sits OUTSIDE this month's window (late
+      // logging) miss the maps above — backfill their ack flags in one query.
+      const missingAck = (schedR.data ?? []).filter(
+        (s: any) => s.workout_session_id && !ackByWorkout.has(String(s.workout_session_id)) && !ackBySchedule.has(String(s.id)),
+      );
+      if (missingAck.length) {
+        // Therapy slots stamp the TRAINING-SESSION id into workout_session_id
+        // (therapist_log_session RPC), so match training_sessions.id too.
+        const ids = missingAck.map((s: any) => String(s.workout_session_id)).slice(0, 400);
+        const uuidIds = ids.filter((v) => /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(v));
+        const { data: extra } = await supabase
+          .from('training_sessions')
+          .select('id, workout_session_id, session_acknowledged_at')
+          .or([`workout_session_id.in.(${ids.join(',')})`, uuidIds.length ? `id.in.(${uuidIds.join(',')})` : ''].filter(Boolean).join(','));
+        const extraMap = new Map<string, boolean>();
+        for (const t of (extra ?? []) as any[]) {
+          if (t.workout_session_id) extraMap.set(String(t.workout_session_id), !!t.session_acknowledged_at);
+          extraMap.set(String(t.id), !!t.session_acknowledged_at);
+        }
+        for (const s of missingAck as any[]) {
+          const acked = extraMap.get(String(s.workout_session_id));
+          if (acked === undefined) continue;
+          const it = items.find((x) => x.id === s.id);
+          if (it) it.acknowledged = acked;
+        }
+      }
       // Merge logged training_sessions (web Training-tab behavior: a session shows on
       // the day it was LOGGED). Dedup only when its schedule slot is on the SAME day —
       // a late-logged old slot still appears on today's list (web parity), while the
       // old slot itself shows as Logged on its own day.
       const slotDayByWorkoutId = new Map<string, number>();
+      const slotDayById = new Map<string, number>();
       for (const s of (schedR.data ?? []) as any[]) {
-        if (s.workout_session_id) slotDayByWorkoutId.set(s.workout_session_id, Number(istDate(new Date(s.scheduled_datetime)).split('-')[2]));
+        const day = Number(istDate(new Date(s.scheduled_datetime)).split('-')[2]);
+        if (s.workout_session_id) slotDayByWorkoutId.set(String(s.workout_session_id), day);
+        slotDayById.set(String(s.id), day);
       }
       for (const t of (loggedR.data ?? []) as any[]) {
         const tDay = Number(istDate(new Date(t.scheduled_at)).split('-')[2]);
-        if (t.workout_session_id && slotDayByWorkoutId.get(t.workout_session_id) === tDay) continue;
+        // Already represented by a slot on the same day: via the workout id,
+        // via a therapy slot that points at this row, or via the back-link.
+        if (t.workout_session_id && slotDayByWorkoutId.get(String(t.workout_session_id)) === tDay) continue;
+        if (slotDayByWorkoutId.get(String(t.id)) === tDay) continue;
+        if (t.schedule_session_id && slotDayById.get(String(t.schedule_session_id)) === tDay) {
+          // A completed row linked to a slot the RPC never stamped: show the
+          // slot as logged instead of a duplicate line.
+          const it = items.find((x) => x.id === String(t.schedule_session_id));
+          if (it) { it.logged = true; if (it.acknowledged == null) it.acknowledged = !!t.session_acknowledged_at; }
+          continue;
+        }
         items.push({
           id: t.id,
           scheduled_datetime: t.scheduled_at,
@@ -846,6 +931,7 @@ export function useTrainerMonthSessions(trainerId: string, ref: { year: number; 
           modality: t.session_type || t.session_name || 'Session',
           status: t.status || 'completed',
           logged: true,
+          acknowledged: !!t.session_acknowledged_at,
           is_past: new Date(t.scheduled_at).getTime() < now,
         });
       }
@@ -899,7 +985,37 @@ export function useFirstSessionAlert(trainerId: string) {
   });
 }
 
+/* ---------- Trainer self-serve roster (today / tomorrow only) ----------
+   For trainers who are in NO current manager team: they have no day-plan flow and
+   would otherwise have to wait on a CRM roster request. The RPC is SECURITY
+   DEFINER and owns the rules (today-or-tomorrow, the client is actively assigned
+   to the caller, ±60 min clash) — the sheet only mirrors them for a nicer error.
+   Needs docs/trainer-self-roster.sql to have been run. */
+export function useAddOwnSession() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (i: { clientId: string; date: string; time: string; modality: string }) => {
+      const { data, error } = await withTimeout(
+        Promise.resolve(supabase.rpc('trainer_add_own_session', {
+          _client_id: i.clientId, _date: i.date, _time: i.time, _modality: i.modality,
+        })) as Promise<{ data: any; error: any }>,
+        NET_MS, 'Add session');
+      if (error) {
+        // The function is missing until the SQL is run — say that plainly rather
+        // than surfacing PostgREST's "PGRST202 no matches" at the trainer.
+        if ((error as any).code === 'PGRST202') throw new Error('Adding sessions is not enabled yet. Ask the tech team to finish the setup.');
+        throw new Error(error.message);
+      }
+      return data;
+    },
+    onSuccess: () => {
+      ['trainer-roster', 'trainer-month-sessions-v2', 'mgr-plan-sched', 'crm-month-roster'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+    },
+  });
+}
+
 /* ---------- Manager's own team overview (mirrors useMyManagerTeams) ---------- */
+export type MemberStatus = 'active' | 'inactive';
 export type ManagerTeamMember = {
   id: string;
   name: string;
@@ -907,7 +1023,27 @@ export type ManagerTeamMember = {
   qhps: number;
   referrals: number;
   isManager: boolean;
+  status: MemberStatus;           // profiles.status (source of truth), members_status as fallback
+  lastSessionDate: string | null; // yyyy-MM-dd IST from manager_score.members_status, inactive members only
 };
+
+/* Status + last-session date of one member (port of the web memberStatusOf):
+   profiles.status first, the team's trigger-maintained members_status map as
+   the fallback; the date only from the map, and only while inactive. A missing
+   profile (deleted user) reads as active, like the web. */
+export function memberStatusOf(team: any, memberId: string, statusMap: Map<string, MemberStatus>): { status: MemberStatus; lastSessionDate: string | null } {
+  const entry = team?.members_status && typeof team.members_status === 'object' ? (team.members_status as Record<string, any>)[memberId] : undefined;
+  const status: MemberStatus = statusMap.get(memberId) ?? (entry?.status === 'inactive' ? 'inactive' : 'active');
+  const last = entry?.last_session_date;
+  return { status, lastSessionDate: status === 'inactive' && typeof last === 'string' && last ? last : null };
+}
+/* Breakdown order shared by both platforms: active first, then inactive; sessions desc within each. */
+export const sortMembersByStatus = <T extends { status: MemberStatus; sessions: number }>(rows: T[]) =>
+  rows.sort((a, b) => {
+    const ai = a.status === 'inactive' ? 1 : 0, bi = b.status === 'inactive' ? 1 : 0;
+    if (ai !== bi) return ai - bi;
+    return b.sessions - a.sessions;
+  });
 export type ManagerTeam = {
   id: string;
   teamName: string;
@@ -950,13 +1086,16 @@ export function useManagerTeam(managerId: string) {
 
         const pMap = new Map<string, any>();
         if (memberIds.length > 0) {
-          const { data: profs } = await supabase.from('profiles').select('id, first_name, last_name, managers').in('id', memberIds);
+          const { data: profs } = await supabase.from('profiles').select('id, first_name, last_name, managers, status').in('id', memberIds);
           (profs ?? []).forEach((p: any) => pMap.set(p.id, p));
         }
+        const statusMap = new Map<string, MemberStatus>();
+        pMap.forEach((p, id) => statusMap.set(id, p.status === 'inactive' ? 'inactive' : 'active'));
 
         const members: ManagerTeamMember[] = memberIds.map((id) => {
           const p = pMap.get(id);
           const c = cMap.get(id) || { sessions: 0, referrals: 0, qhps: 0 };
+          const { status, lastSessionDate } = memberStatusOf(team, id, statusMap);
           return {
             id,
             name: p ? `${p.first_name ?? ''} ${p.last_name ?? ''}`.replace(/\s+/g, ' ').trim() || 'Member' : 'Unknown',
@@ -964,6 +1103,8 @@ export function useManagerTeam(managerId: string) {
             qhps: c.qhps,
             referrals: c.referrals,
             isManager: p?.managers === true || id === team.manager_id,
+            status,
+            lastSessionDate,
           };
         }).sort((a, b) => b.sessions - a.sessions);
 
@@ -1307,7 +1448,7 @@ function mgrMonthRange(periodStart: string, periodEnd: string | null, monthFilte
 }
 export function useManagerLeaderboard(monthFilter: MgrMonthFilter = 'overall') {
   return useQuery({
-    queryKey: ['manager-leaderboard', 'v3', monthFilter], // v3: web-parity rework (object result, combined sessions, competition months)
+    queryKey: ['manager-leaderboard', 'v4', monthFilter], // v4: member status (18 Sep 2026); v3 rows in the persisted cache lack status / inactiveCount
     staleTime: 120_000,
     queryFn: async (): Promise<ManagerLeaderboard | null> => {
       const { data: allTeams, error } = await supabase.from('manager_score').select('*').order('created_at', { ascending: false });
@@ -1341,11 +1482,13 @@ export function useManagerLeaderboard(monthFilter: MgrMonthFilter = 'overall') {
       const cMap = new Map<string, { sessions: number; referrals: number; qhps: number }>();
       for (const r of (counts ?? []) as any[]) cMap.set(r.member_id, { sessions: Number(r.session_count) || 0, referrals: Number(r.referral_count) || 0, qhps: Number(r.qhp_count) || 0 });
 
-      const { data: profs } = await supabase.from('profiles').select('id, first_name, last_name, managers, expected_sessions').in('id', [...memberIds]);
+      const { data: profs } = await supabase.from('profiles').select('id, first_name, last_name, managers, expected_sessions, status').in('id', [...memberIds]);
       const nameMap = new Map<string, string>();
       const isMgrMap = new Map<string, boolean>();
       const expectedMap = new Map<string, number | null>();
+      const statusMap = new Map<string, MemberStatus>();
       (profs ?? []).forEach((p: any) => {
+        statusMap.set(p.id, p.status === 'inactive' ? 'inactive' : 'active');
         nameMap.set(p.id, `${p.first_name ?? ''} ${p.last_name ?? ''}`.replace(/\s+/g, ' ').trim());
         isMgrMap.set(p.id, p.managers === true);
         expectedMap.set(p.id, p.expected_sessions ?? null);
@@ -1355,21 +1498,26 @@ export function useManagerLeaderboard(monthFilter: MgrMonthFilter = 'overall') {
         const members: string[] = Array.isArray(t.team_json) ? t.team_json : [];
         const all = t.manager_id ? [t.manager_id, ...members] : members;
         let sessions = 0, referrals = 0, qhps = 0;
+        let activeCount = 0, inactiveCount = 0;
         const memberRows: ManagerTeamMember[] = [];
         for (const id of all) {
           const c = cMap.get(id) || { sessions: 0, referrals: 0, qhps: 0 };
           const isMgr = isMgrMap.get(id) === true;
-          memberRows.push({ id, name: nameMap.get(id) || 'Member', sessions: c.sessions, qhps: c.qhps, referrals: c.referrals, isManager: isMgr });
-          if (isMgr) continue; // exclude manager-flagged from aggregates
+          const { status, lastSessionDate } = memberStatusOf(t, id, statusMap);
+          // Status only changes the headcount: an inactive member's numbers still add up (web rule).
+          if (status === 'inactive') inactiveCount += 1; else activeCount += 1;
+          memberRows.push({ id, name: nameMap.get(id) || 'Member', sessions: c.sessions, qhps: c.qhps, referrals: c.referrals, isManager: isMgr, status, lastSessionDate });
+          if (isMgr) continue; // exclude manager-flagged from aggregates (unchanged)
           sessions += c.sessions; referrals += c.referrals; qhps += c.qhps;
         }
-        memberRows.sort((a, b) => b.sessions - a.sessions); // web sorts the breakdown by raw sessions
+        sortMembersByStatus(memberRows); // active first, then inactive; sessions desc within each (web order)
         const combined = sessions + qhps; // web: totalSessions = sessions + QHPs
         return {
           managerId: t.manager_id,
           managerName: nameMap.get(t.manager_id) || t.team_name || 'Manager',
           teamName: t.team_name || nameMap.get(t.manager_id) || 'Team',
-          teamSize: all.length,
+          teamSize: activeCount,
+          inactiveCount,
           totalSessions: combined,
           rawSessions: sessions,
           qhpCount: qhps,

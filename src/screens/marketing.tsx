@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, Pressable, TextInput, ActivityIndicator, Modal, ScrollView, Linking } from 'react-native';
+import { View, Text, Pressable, TextInput, ActivityIndicator, Modal, ScrollView, Linking, Alert } from 'react-native';
+import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Polyline, Line as SvgLine, Text as SvgText, Circle } from 'react-native-svg';
 import { C, F, hexA, ORANGE_GRAD } from '../theme';
@@ -9,7 +10,7 @@ import { trackClientTab } from '../lib/amplitude';
 import { FeatureTour, MARKETING_TOUR, TourLauncher } from '../components/featureTour';
 import { useStore } from '../store';
 import { Serif, Body, Mono, Card, Avatar } from '../components/primitives';
-import { Page, TitleBlock, Badge, GreetingHeader } from './common';
+import { Page, TitleBlock, Badge, GreetingHeader, HScroll } from './common';
 import { useSidebarProfile } from '../lib/navQueries';
 import {
   useInfluencers, useInfluencer, useInfluencerCampaignLogs, useCampaignLogMutations,
@@ -428,7 +429,7 @@ export function MarketingClientDetail() {
       </Card>
 
       {/* Tabs */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 7 }}>
+      <HScroll gap={7}>
         {([['content', 'Content'], ['performance', 'Performance'], ['instagram', 'Instagram'], ['tickets', 'Tickets'], ['sessions', 'Sessions'], ['reports', 'Reports']] as [MTab, string][]).map(([id, label]) => {
           const active = tab === id;
           return (
@@ -442,7 +443,7 @@ export function MarketingClientDetail() {
             </Pressable>
           );
         })}
-      </ScrollView>
+      </HScroll>
 
       {tab === 'content' ? <ContentTab clientId={clientId!} /> :
        tab === 'performance' ? <PerformanceTab me={c} all={allInf} /> :
@@ -533,11 +534,12 @@ function ContentTab({ clientId }: { clientId: string }) {
 }
 
 function SheetFrame({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+  const kb = useKeyboardHeight(); // Android edge-to-edge: lift the sheet above the keyboard
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <View style={{ flex: 1, justifyContent: 'flex-end' }}>
         <Pressable onPress={onClose} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.62)' }} />
-        <View style={{ backgroundColor: '#0E0A09', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', padding: 18, paddingBottom: 30 }}>
+        <View style={{ maxHeight: '88%', backgroundColor: '#0E0A09', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', padding: 18, paddingBottom: kb > 0 ? kb + 14 : 30 }}>
           <View style={{ width: 40, height: 4, borderRadius: 99, backgroundColor: 'rgba(255,255,255,0.2)', alignSelf: 'center', marginBottom: 12 }} />
           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
             <Serif style={{ flex: 1, fontSize: 18 }}>{title}</Serif>
@@ -545,7 +547,10 @@ function SheetFrame({ title, onClose, children }: { title: string; onClose: () =
               <Icon name="close" size={13} color="#B8B2AC" strokeWidth={2.3} />
             </Pressable>
           </View>
-          {children}
+          {/* Scrollable body so long content / the keyboard never push the action button out of reach. */}
+          <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+            {children}
+          </ScrollView>
         </View>
       </View>
     </Modal>
@@ -787,7 +792,7 @@ function TicketsTab({ clientId }: { clientId: string }) {
                 <Pressable onPress={() => { setReplyFor({ month, parentId: root.id }); setReplyDraft(''); }} style={{ flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }}>
                   <Text style={{ fontFamily: F.bodySemi, fontSize: 11, color: C.muted }}>Reply</Text>
                 </Pressable>
-                <Pressable onPress={() => muts.closeTicket.mutate({ month, ticketId: root.id, closedBy: session?.user?.id ?? 'marketing' })} style={{ flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 10, backgroundColor: hexA(C.green, 0.1), borderWidth: 1, borderColor: hexA(C.green, 0.35) }}>
+                <Pressable disabled={muts.closeTicket.isPending} onPress={() => muts.closeTicket.mutate({ month, ticketId: root.id, closedBy: session?.user?.id ?? 'marketing' }, { onError: (e: any) => Alert.alert("Couldn't close ticket", e?.message ?? "Try again.") })} style={{ opacity: muts.closeTicket.isPending ? 0.5 : 1, flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 10, backgroundColor: hexA(C.green, 0.1), borderWidth: 1, borderColor: hexA(C.green, 0.35) }}>
                   <Text style={{ fontFamily: F.bodyBold, fontSize: 11, color: C.green }}>Close Ticket</Text>
                 </Pressable>
               </View>
@@ -1343,7 +1348,7 @@ const CONVERSION_ROWS: [string, number, number, number, number, number, number][
 
 function HistTable({ headers, rows, boldFrom }: { headers: string[]; rows: (string | number)[][]; boldFrom: number }) {
   return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+    <HScroll gap={0}>
       <View>
         <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.1)', paddingBottom: 6 }}>
           {headers.map((h, i) => (
@@ -1358,7 +1363,7 @@ function HistTable({ headers, rows, boldFrom }: { headers: string[]; rows: (stri
           </View>
         ))}
       </View>
-    </ScrollView>
+    </HScroll>
   );
 }
 
@@ -1447,7 +1452,7 @@ export function MarketingLeadAnalytics() {
             title="By Stage"
             sub={selectedStage ? `Showing sources for "${selectedStage}".` : 'Tap a bar to see lead sources for that stage.'}
             right={selectedStage ? (
-              <Pressable onPress={() => setSelectedStage(null)} hitSlop={8}><Mono style={{ fontSize: 9, color: C.orange }}>CLEAR</Mono></Pressable>
+              <Pressable onPress={() => setSelectedStage(null)} hitSlop={12} style={{ paddingVertical: 6, paddingHorizontal: 10 }}><Mono style={{ fontSize: 9, color: C.orange }}>CLEAR</Mono></Pressable>
             ) : undefined}
           >
             {byStage.length ? (

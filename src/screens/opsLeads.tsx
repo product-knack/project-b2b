@@ -15,6 +15,7 @@ import {
   useToggleLeadSpam, useMarkLeadAsApplicant, useOpsFollowUpReminders, canEditLead, canMarkLeadSpam, canRescheduleQHP,
   useToggleLeadPotential, useMarkLeadAttempt, useRestoreLeadFromDump, useAssignLead, useSetLeadPartner, useClearLeadPartner,
   useLeadPartnerSearch, usePartnerNames, useLeadMonthlySerials, assigneeFirstName, profileName,
+  readQhpPrefAlt, fmtAltSlotShort,
   type Lead, type LeadFilters, type RemarkEntry, type FollowUpEntry, type FollowUpReminder, type CallAttemptEntry,
 } from '../lib/opsLeadQueries';
 
@@ -104,7 +105,7 @@ function SheetShell({ title, sub, onClose, children, badge }: { title: string; s
 }
 function PrimaryBtn({ label, onPress, disabled, color = C.orange }: { label: string; onPress: () => void; disabled?: boolean; color?: string }) {
   return (
-    <Pressable onPress={onPress} disabled={disabled} style={{ alignItems: 'center', paddingVertical: 12, borderRadius: 12, backgroundColor: hexA(color, disabled ? 0.06 : 0.16), borderWidth: 1, borderColor: hexA(color, disabled ? 0.2 : 0.5) }}>
+    <Pressable onPress={onPress} disabled={disabled} style={({ pressed }) => ({ alignItems: 'center', paddingVertical: 12, borderRadius: 12, backgroundColor: hexA(color, disabled ? 0.06 : pressed ? 0.3 : 0.16), borderWidth: 1, borderColor: hexA(color, disabled ? 0.2 : 0.5) })}>
       <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: disabled ? C.muted3 : color }}>{label}</Text>
     </Pressable>
   );
@@ -141,6 +142,12 @@ function StageFlowSheet({ kind, lead, profile, onClose }: { kind: FlowKind; lead
   const [qTime, setQTime] = React.useState(String(lead.qhp_pref_time_from ?? '').slice(0, 5) || '09:00');
   const [qLocation, setQLocation] = React.useState(lead.qhp_pref_location ?? '');
   const [qNotes, setQNotes] = React.useState(lead.qhp_pref_notes ?? '');
+  /* Optional 2nd slot (leads.qhp_pref_alt). Collapsed until asked for; on
+     reschedule it opens pre-filled from whatever the lead already has. */
+  const savedAlt = React.useMemo(() => readQhpPrefAlt(lead.qhp_pref_alt), [lead.qhp_pref_alt]);
+  const [altOpen, setAltOpen] = React.useState(!!savedAlt);
+  const [altDate, setAltDate] = React.useState(savedAlt?.date ?? '');
+  const [altTime, setAltTime] = React.useState(String(savedAlt?.time ?? '').slice(0, 5));
   // qhp payment (booking only, web QHPBookingDialog)
   const [payType, setPayType] = React.useState<'Complimentary' | 'Paid' | null>(null);
   const [payAmount, setPayAmount] = React.useState('');
@@ -167,6 +174,26 @@ function StageFlowSheet({ kind, lead, profile, onClose }: { kind: FlowKind; lead
   const paid = payType === 'Paid';
   const opsCollects = paid && collectBy === 'Ops';
   const slotValid = /^\d{4}-\d{2}-\d{2}$/.test(qDate) && /^\d{2}:\d{2}$/.test(qTime) && qLocation.trim().length >= 2;
+
+  /* 2nd preference is optional, but once started it must be complete, in the
+     future, and different from the first slot (same rules as the web dialog).
+     Returns an error string, or null when the section is valid or untouched. */
+  const altError = React.useMemo((): string | null => {
+    if (!altOpen) return null;
+    if (!altDate && !altTime) return null; // opened but untouched — saved as null
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(altDate)) return 'Pick a date for the 2nd preference, or remove it';
+    if (!/^\d{2}:\d{2}$/.test(altTime)) return 'Pick a time for the 2nd preference, or remove it';
+    const when = new Date(`${altDate}T${altTime}:00`);
+    if (!isFinite(when.getTime())) return 'Pick a date for the 2nd preference, or remove it';
+    if (when.getTime() < Date.now()) return '2nd preference is in the past';
+    if (altDate === qDate && altTime === qTime) return 'Same as the first preference';
+    return null;
+  }, [altOpen, altDate, altTime, qDate, qTime]);
+  const altStarted = altOpen && (!!altDate || !!altTime);
+  /* The value both patches write: a complete alt, else null (which also clears
+     a previously saved one when the user removes it). */
+  const altPatchValue = altStarted && !altError ? { date: altDate, time: `${altTime}:00` } : null;
+  const removeAlt = () => { setAltOpen(false); setAltDate(''); setAltTime(''); };
   const payValid = payType === 'Complimentary' || (paid && Number(payAmount) > 0 && !!collectBy);
   const reasonValid = !!reschedReason && (reschedReason !== 'Other' || reschedNote.trim().length >= 5);
 
@@ -180,6 +207,7 @@ function StageFlowSheet({ kind, lead, profile, onClose }: { kind: FlowKind; lead
         stage: 'QHP Booked',
         qhp_pref_date: qDate, qhp_pref_time_from: `${qTime}:00`, qhp_pref_time_to: `${qTime}:00`,
         qhp_pref_location: qLocation.trim(), qhp_pref_notes: qNotes.trim() || null,
+        qhp_pref_alt: altPatchValue,
         qhp_details: {
           type: paid ? 'paid' : 'complimentary',
           amount: paid ? Number(payAmount) : null,
@@ -220,6 +248,7 @@ function StageFlowSheet({ kind, lead, profile, onClose }: { kind: FlowKind; lead
         stage: 'Reschedule QHP',
         qhp_pref_date: qDate, qhp_pref_time_from: `${qTime}:00`, qhp_pref_time_to: `${qTime}:00`,
         qhp_pref_location: qLocation.trim(), qhp_pref_notes: qNotes.trim() || null,
+        qhp_pref_alt: altPatchValue,
         qhp_details: { ...existing, reschedules: [...(Array.isArray(existing.reschedules) ? existing.reschedules : []), entry] },
       },
     }, { onSuccess: ok, onError: fail });
@@ -277,6 +306,25 @@ function StageFlowSheet({ kind, lead, profile, onClose }: { kind: FlowKind; lead
             <Field label="QHP DATE (YYYY-MM-DD)"><Inp value={qDate} onChangeText={setQDate} /></Field>
             <Field label="TIME (HH:MM · IST)"><Inp value={qTime} onChangeText={setQTime} placeholder="09:00" /></Field>
             <Field label="LOCATION"><Inp value={qLocation} onChangeText={setQLocation} placeholder="Studio / address" /></Field>
+            {/* Optional 2nd slot the QHP Manager falls back to (leads.qhp_pref_alt). */}
+            {!altOpen ? (
+              <Pressable onPress={() => setAltOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel="Add a second date and time preference" style={{ alignSelf: "flex-start", paddingVertical: 4 }}>
+                <Body style={{ fontSize: 11.5, color: C.gold }}>+ Add a 2nd date & time preference (optional)</Body>
+              </Pressable>
+            ) : (
+              <View style={{ gap: 9, padding: 11, borderRadius: 12, borderWidth: 1, borderStyle: "dashed", borderColor: hexA(C.gold, 0.45) }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                  <Mono style={{ flex: 1, fontSize: 8.5, letterSpacing: 0.8, color: C.gold }}>2ND PREFERENCE (OPTIONAL)</Mono>
+                  <Pressable onPress={removeAlt} hitSlop={10} accessibilityRole="button" accessibilityLabel="Remove the second preference">
+                    <Body style={{ fontSize: 11, color: C.red }}>Remove</Body>
+                  </Pressable>
+                </View>
+                <Field label="2ND DATE (YYYY-MM-DD)"><Inp value={altDate} onChangeText={setAltDate} placeholder="2026-09-05" /></Field>
+                <Field label="2ND TIME (HH:MM · IST)"><Inp value={altTime} onChangeText={setAltTime} placeholder="10:00" /></Field>
+                {altError ? <Body style={{ fontSize: 11, color: C.red }}>{altError}</Body> : null}
+                <Body style={{ fontSize: 10, color: C.muted3 }}>Used by the QHP Manager if the first slot can not be given.</Body>
+              </View>
+            )}
             {/* QHP payment (web QHPBookingDialog): required type; Paid needs amount + collector. */}
             <Field label="QHP TYPE (REQUIRED)"><ChipRow options={['Complimentary', 'Paid'] as const} value={payType} onChange={(v) => setPayType(v)} color={C.gold} /></Field>
             {paid ? (
@@ -294,7 +342,7 @@ function StageFlowSheet({ kind, lead, profile, onClose }: { kind: FlowKind; lead
             ) : null}
             <Field label="NOTES (OPTIONAL)"><Inp value={qNotes} onChangeText={(v: string) => setQNotes(v.slice(0, 500))} multiline style={{ minHeight: 56, textAlignVertical: 'top' }} /></Field>
             {err ? <Body style={{ fontSize: 11, color: C.red }}>{err}</Body> : null}
-            <PrimaryBtn label={busy ? 'Booking…' : 'Save & Mark QHP Booked'} disabled={busy || !slotValid || !payValid} onPress={saveBooking} />
+            <PrimaryBtn label={busy ? 'Booking…' : 'Save & Mark QHP Booked'} disabled={busy || !slotValid || !payValid || !!altError} onPress={saveBooking} />
           </>
         ) : kind === 'qhp_reschedule' ? (
           <>
@@ -302,13 +350,32 @@ function StageFlowSheet({ kind, lead, profile, onClose }: { kind: FlowKind; lead
             <Field label="NEW QHP DATE (YYYY-MM-DD)"><Inp value={qDate} onChangeText={setQDate} /></Field>
             <Field label="TIME (HH:MM · IST)"><Inp value={qTime} onChangeText={setQTime} placeholder="09:00" /></Field>
             <Field label="LOCATION"><Inp value={qLocation} onChangeText={setQLocation} placeholder="Studio / address" /></Field>
+            {/* Optional 2nd slot the QHP Manager falls back to (leads.qhp_pref_alt). */}
+            {!altOpen ? (
+              <Pressable onPress={() => setAltOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel="Add a second date and time preference" style={{ alignSelf: "flex-start", paddingVertical: 4 }}>
+                <Body style={{ fontSize: 11.5, color: C.gold }}>+ Add a 2nd date & time preference (optional)</Body>
+              </Pressable>
+            ) : (
+              <View style={{ gap: 9, padding: 11, borderRadius: 12, borderWidth: 1, borderStyle: "dashed", borderColor: hexA(C.gold, 0.45) }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                  <Mono style={{ flex: 1, fontSize: 8.5, letterSpacing: 0.8, color: C.gold }}>2ND PREFERENCE (OPTIONAL)</Mono>
+                  <Pressable onPress={removeAlt} hitSlop={10} accessibilityRole="button" accessibilityLabel="Remove the second preference">
+                    <Body style={{ fontSize: 11, color: C.red }}>Remove</Body>
+                  </Pressable>
+                </View>
+                <Field label="2ND DATE (YYYY-MM-DD)"><Inp value={altDate} onChangeText={setAltDate} placeholder="2026-09-05" /></Field>
+                <Field label="2ND TIME (HH:MM · IST)"><Inp value={altTime} onChangeText={setAltTime} placeholder="10:00" /></Field>
+                {altError ? <Body style={{ fontSize: 11, color: C.red }}>{altError}</Body> : null}
+                <Body style={{ fontSize: 10, color: C.muted3 }}>Used by the QHP Manager if the first slot can not be given.</Body>
+              </View>
+            )}
             <Field label="REASON FOR RESCHEDULE (REQUIRED)"><ChipRow options={RESCHEDULE_REASONS} value={reschedReason as any} onChange={(v) => setReschedReason(v)} color={'#EF4444'} /></Field>
             <Field label={reschedReason === 'Other' ? 'DESCRIBE THE REASON (REQUIRED · MIN 5 CHARS)' : 'NOTE (OPTIONAL)'}>
               <Inp value={reschedNote} onChangeText={(v: string) => setReschedNote(v.slice(0, 200))} placeholder={reschedReason === 'Other' ? 'Describe the reason' : 'Add a note'} />
             </Field>
             <Field label="NOTES FOR ASSESSOR (OPTIONAL)"><Inp value={qNotes} onChangeText={(v: string) => setQNotes(v.slice(0, 500))} multiline style={{ minHeight: 56, textAlignVertical: 'top' }} /></Field>
             {err ? <Body style={{ fontSize: 11, color: C.red }}>{err}</Body> : null}
-            <PrimaryBtn label={busy ? 'Saving…' : 'Save & Mark Reschedule QHP'} color={'#EF4444'} disabled={busy || !slotValid || !reasonValid} onPress={saveReschedule} />
+            <PrimaryBtn label={busy ? 'Saving…' : 'Save & Mark Reschedule QHP'} color={'#EF4444'} disabled={busy || !slotValid || !reasonValid || !!altError} onPress={saveReschedule} />
           </>
         ) : kind === 'raise_invoice' ? (
           <>
@@ -618,7 +685,7 @@ function LeadSheet({ leadId, rows, profile, partnerName, onClose }: { leadId: st
             </Pressable>
           ) : null}
           {spamAllowed ? (
-            <Pressable onPress={() => toggleSpam.mutate(lead.id, { onError: (e: any) => setErr(e?.message) })} style={{ paddingVertical: 7, paddingHorizontal: 11, borderRadius: 10, backgroundColor: hexA(C.red, 0.08), borderWidth: 1, borderColor: hexA(C.red, 0.3) }}>
+            <Pressable disabled={toggleSpam.isPending} onPress={() => toggleSpam.mutate(lead.id, { onError: (e: any) => setErr(e?.message) })} style={{ opacity: toggleSpam.isPending ? 0.5 : 1, paddingVertical: 7, paddingHorizontal: 11, borderRadius: 10, backgroundColor: hexA(C.red, 0.08), borderWidth: 1, borderColor: hexA(C.red, 0.3) }}>
               <Text style={{ fontFamily: F.bodySemi, fontSize: 11, color: C.red }}>{lead.is_spam ? 'Unmark spam' : 'Mark spam'}</Text>
             </Pressable>
           ) : null}
@@ -632,7 +699,7 @@ function LeadSheet({ leadId, rows, profile, partnerName, onClose }: { leadId: st
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
               <Icon name="clock" size={13} color={C.gold} strokeWidth={2.2} />
               <Body style={{ flex: 1, fontSize: 11.5, fontFamily: F.bodySemi, color: C.gold }}>Follow-up {fmtAt(pendingFu.scheduled_at)}</Body>
-              <Pressable onPress={() => completeFu.mutate({ leadId: lead.id, entryId: pendingFu.id, profile }, { onError: (e: any) => setErr(e?.message) })} style={{ paddingVertical: 5, paddingHorizontal: 10, borderRadius: 9, backgroundColor: hexA(C.green, 0.14), borderWidth: 1, borderColor: hexA(C.green, 0.45) }}>
+              <Pressable disabled={completeFu.isPending} onPress={() => completeFu.mutate({ leadId: lead.id, entryId: pendingFu.id, profile }, { onError: (e: any) => setErr(e?.message) })} style={{ paddingVertical: 5, paddingHorizontal: 10, borderRadius: 9, backgroundColor: hexA(C.green, 0.14), borderWidth: 1, borderColor: hexA(C.green, 0.45) }}>
                 <Text style={{ fontFamily: F.bodyBold, fontSize: 10, color: C.green }}>{completeFu.isPending ? '…' : 'Mark done'}</Text>
               </Pressable>
             </View>
@@ -643,6 +710,12 @@ function LeadSheet({ leadId, rows, profile, partnerName, onClose }: { leadId: st
         {/* QHP prefs / invoice summary */}
         {(lead.stage === 'QHP Booked' || lead.stage === 'Reschedule QHP') && lead.qhp_pref_date ? (
           <Body style={{ fontSize: 11, color: C.muted2 }}>QHP {fmtDay(lead.qhp_pref_date)} · {String(lead.qhp_pref_time_from ?? '').slice(0, 5)} · {lead.qhp_pref_location ?? '—'}{Array.isArray(lead.qhp_details?.reschedules) && lead.qhp_details.reschedules.length ? ` · rescheduled ×${lead.qhp_details.reschedules.length}` : ''}</Body>
+        ) : null}
+        {/* 2nd slot the QHP Manager can fall back to (leads.qhp_pref_alt). */}
+        {(lead.stage === 'QHP Booked' || lead.stage === 'Reschedule QHP') && readQhpPrefAlt(lead.qhp_pref_alt) ? (
+          <View style={{ alignSelf: 'flex-start', paddingVertical: 2, paddingHorizontal: 7, borderRadius: 999, backgroundColor: hexA(C.gold, 0.12), borderWidth: 1, borderColor: hexA(C.gold, 0.32) }}>
+            <Mono style={{ fontSize: 8.5, color: C.gold }}>2ND {fmtAltSlotShort(readQhpPrefAlt(lead.qhp_pref_alt)).toUpperCase()}</Mono>
+          </View>
         ) : null}
         {lead.invoice_details?.amount ? (
           <Body style={{ fontSize: 11, color: C.muted2 }}>Invoice ₹{lead.invoice_details.amount} · {lead.invoice_details.sessions_in_package} sessions · {lead.invoice_details.subscription_type}</Body>

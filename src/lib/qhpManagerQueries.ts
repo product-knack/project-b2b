@@ -52,7 +52,12 @@ export function waitUrgency(fromIso: string): { level: 'red' | 'amber' | 'green'
 }
 
 /* ---- Types ---- */
-export type OpsPrefs = { date: string | null; timeFrom: string | null; location: string | null; notes: string | null };
+export type OpsPrefs = {
+  date: string | null; timeFrom: string | null; location: string | null; notes: string | null;
+  /* Optional 2nd slot the Ops team captured (leads.qhp_pref_alt). Arrives from a
+     SEPARATE additive RPC — the primary prefs RPC does not return it. */
+  altDate?: string | null; altTime?: string | null;
+};
 export type PendingClient = {
   clientId: string;
   name: string;
@@ -66,6 +71,10 @@ export type PendingClient = {
   holdOverdue: boolean;
   holdResolvingAt: string | null;
   opsPrefs: OpsPrefs | null;     // lead QHP preferences ("Notes from Ops")
+  // WHO booked the QHP stage on the lead (ops attribution — leads.qhp_booked_by
+  // via the get_lead_qhp_booked_by definer RPC; creator fallback for old leads).
+  bookedByName: string | null;
+  bookedByRole: string | null;
 };
 export type QhpAssessment = {
   id: string; clientId: string | null; clientName: string; assessorName: string;
@@ -91,7 +100,7 @@ export type QhpManagerData = {
 
 export function useQhpManager(enabled: boolean) {
   return useQuery({
-    queryKey: ['qhp-manager', 'v4'],
+    queryKey: ['qhp-manager', 'v5'], // v5: PendingClient gained bookedByName/Role
     enabled,
     staleTime: 30_000,
     refetchInterval: 30_000, // web polls the reschedule requests at 30s
@@ -143,6 +152,27 @@ export function useQhpManager(enabled: boolean) {
                 });
               });
             } catch { /* prefs RPC unavailable */ }
+            /* 2nd preference: a separate additive RPC, in its own try/catch so a
+               failure here can never hide the primary preferences above. */
+            try {
+              const { data: alts } = await supabase.rpc('get_lead_qhp_pref_alt_for_clients', { _client_ids: cIds });
+              ((alts ?? []) as any[]).forEach((row: any) => {
+                const alt = row?.qhp_pref_alt;
+                if (!row?.client_id || !alt || typeof alt !== 'object' || !alt.date) return;
+                const cur = prefsMap.get(row.client_id) ?? { date: null, timeFrom: null, location: null, notes: null };
+                prefsMap.set(row.client_id, { ...cur, altDate: alt.date ?? null, altTime: alt.time ?? null });
+              });
+            } catch { /* alt RPC not deployed — cards just omit the 2nd slot */ }
+          }
+          // Ops attribution: who booked the QHP stage on the lead.
+          const bookedMap = new Map<string, { name: string | null; role: string | null }>();
+          if (cIds.length) {
+            try {
+              const { data: bb } = await supabase.rpc('get_lead_qhp_booked_by', { _client_ids: cIds });
+              ((bb ?? []) as any[]).forEach((row: any) => {
+                if (row?.client_id) bookedMap.set(row.client_id, { name: row.booked_by_name || null, role: row.booked_by_role ?? null });
+              });
+            } catch { /* RPC not deployed yet — cards just omit the line */ }
           }
           pending = cls
             .filter((c) => !hasData.get(c.id)) // drop completed QHPs
@@ -154,6 +184,8 @@ export function useQhpManager(enabled: boolean) {
                 holdReason: holdMap.get(c.id)?.reason ?? null, holdOverdue: holdMap.get(c.id)?.overdue ?? false,
                 holdResolvingAt: holdMap.get(c.id)?.resolvingAt ?? null,
                 opsPrefs: prefsMap.get(c.id) ?? null,
+                bookedByName: bookedMap.get(c.id)?.name ?? null,
+                bookedByRole: bookedMap.get(c.id)?.role ?? null,
               };
             });
         }
@@ -920,7 +952,7 @@ export function useQhpTracker(enabled: boolean, workoutFilter: boolean) {
         supabase.from('profiles').select('id, first_name, last_name, role').limit(3000),
         supabase.from('trainer_clients').select('client_id, trainer_id, actively_training').in('client_id', eligibleIds).eq('actively_training', true),
         supabase.from('coach_assessment')
-          .select('id, client_id, assessment_date, assessment_file_url, new_client_assessment_data, existing_client_assessment_data, qhp_data, coach_id')
+          .select('id, client_id, assessment_date, completed, assessment_file_url, new_client_assessment_data, existing_client_assessment_data, qhp_data, coach_id')
           .not('client_id', 'is', null)
           .in('client_id', eligibleIds)
           .order('assessment_date', { ascending: false }),
@@ -935,12 +967,21 @@ export function useQhpTracker(enabled: boolean, workoutFilter: boolean) {
         if (p.role === 'trainer') { const arr = trainersOf.get(r.client_id) ?? []; arr.push(p.name); trainersOf.set(r.client_id, arr); }
         else if (p.role === 'crm' && !crmOf.has(r.client_id)) crmOf.set(r.client_id, p.name);
       });
-      // Latest DONE assessment per client.
+      // Latest DONE assessment per client, keyed by effective date
+      // (completed ?? assessment_date). The 45-day validity clock now starts at
+      // the completion timestamp, not the scheduled assessment_date — matching
+      // the QHP home card (useQhpTotals) and the Manager validity check. When a
+      // done QHP has no completed timestamp we fall back to assessment_date.
+      const qhpRef = (a: any) => a?.completed ?? a?.assessment_date ?? null;
       const lastQhp = new Map<string, any>();
       ((assessR.data ?? []) as any[]).forEach((a) => {
-        if (lastQhp.has(a.client_id)) return;
         const done = !!a.assessment_file_url || nonEmptyObj(a.qhp_data) || nonEmptyObj(a.new_client_assessment_data) || nonEmptyObj(a.existing_client_assessment_data);
-        if (done) lastQhp.set(a.client_id, a);
+        if (!done) return;
+        const ref = qhpRef(a);
+        if (!ref) return;
+        const prev = lastQhp.get(a.client_id);
+        const prevRef = prev ? qhpRef(prev) : null;
+        if (!prev || (prevRef && new Date(ref).getTime() > new Date(prevRef).getTime())) lastQhp.set(a.client_id, a);
       });
 
       // Web computes daysUntilDue = differenceInDays(nextDue, new Date()) — i.e.
@@ -953,8 +994,11 @@ export function useQhpTracker(enabled: boolean, workoutFilter: boolean) {
         const isRehabOnly = rehabOnly.get(c.id) ?? false;
         let nextDue: string | null = null, days: number | null = null;
         let status: TrackerRow['status'] = 'not-done';
-        if (q?.assessment_date) {
-          const due = new Date(q.assessment_date + 'T00:00:00');
+        const refIso = q ? qhpRef(q) : null;
+        if (refIso) {
+          // completed is a full timestamp; assessment_date is date-only (parse at
+          // local midnight so a date string is not read as the previous UTC day).
+          const due = String(refIso).length <= 10 ? new Date(refIso + 'T00:00:00') : new Date(refIso);
           due.setDate(due.getDate() + QHP_VALIDITY_DAYS);
           nextDue = due.toISOString();
           const raw = (due.getTime() - now.getTime()) / 864e5;
@@ -974,7 +1018,7 @@ export function useQhpTracker(enabled: boolean, workoutFilter: boolean) {
           subscription: c.subscription_type ?? null,
           trainers: trainersOf.get(c.id) ?? [], crm: crmOf.get(c.id) ?? null,
           lastWorkout: lastWorkout.get(c.id) ?? null,
-          lastQhp: q?.assessment_date ?? null, qhpBy: by,
+          lastQhp: q ? qhpRef(q) : null, qhpBy: by,
           nextDue, daysUntilDue: days, status, isRehabOnly,
         };
       });

@@ -12,7 +12,8 @@
    Deltas vs web (flagged to the user): no photo/document uploads, no PDF
    generation, no local drafts/offline queue. */
 import React from 'react';
-import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, Pressable, ScrollView, Modal, TextInput, Alert, ActivityIndicator, KeyboardAvoidingView, Platform, Dimensions } from 'react-native';
+import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -607,6 +608,26 @@ export function QhpAssessmentForm({
   isExistingClient: boolean; assessorId: string;
 }) {
   const insets = useSafeAreaInsets();
+  // Android edge-to-edge: KeyboardAvoidingView is a no-op there, so the whole
+  // column pads itself by the keyboard height (footer stays reachable) and the
+  // focused input is scrolled above the keyboard, the same way Page does it.
+  const kb = useKeyboardHeight();
+  const formScrollRef = React.useRef<ScrollView>(null);
+  const formOffsetRef = React.useRef(0);
+  React.useEffect(() => {
+    if (Platform.OS !== 'android' || kb <= 0) return;
+    const input: any = (TextInput as any).State?.currentlyFocusedInput?.();
+    if (!input || !formScrollRef.current) return;
+    requestAnimationFrame(() => {
+      try {
+        input.measureInWindow((_x: number, y: number, _w: number, ih: number) => {
+          const kbTop = Dimensions.get('window').height - kb;
+          const overlap = y + ih + 24 - kbTop; // 24px breathing room above the keyboard
+          if (overlap > 0) formScrollRef.current?.scrollTo({ y: formOffsetRef.current + overlap, animated: true });
+        });
+      } catch { /* input unmounted mid-measure */ }
+    });
+  }, [kb]);
   const qc = useQueryClient();
   const [step, setStep] = React.useState(1);
   const [gadOpen, setGadOpen] = React.useState(false);
@@ -841,7 +862,7 @@ export function QhpAssessmentForm({
               {fd.currentActivities.map((a: string, i: number) => (
                 <View key={a + i} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6, paddingHorizontal: 11, borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.03)', borderWidth: 1, borderColor: IN_BD }}>
                   <Body style={{ flex: 1, fontSize: 12, color: '#fff' }}>{a}</Body>
-                  <Pressable onPress={() => set({ currentActivities: fd.currentActivities.filter((_: string, x: number) => x !== i) })}>
+                  <Pressable hitSlop={10} style={{ width: 28, height: 28, alignItems: 'center', justifyContent: 'center' }} onPress={() => set({ currentActivities: fd.currentActivities.filter((_: string, x: number) => x !== i) })}>
                     <Icon name="close" size={12} color={C.red} strokeWidth={2.4} />
                   </Pressable>
                 </View>
@@ -1163,7 +1184,7 @@ export function QhpAssessmentForm({
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={confirmClose}>
-      <View style={{ flex: 1, backgroundColor: '#0B0807' }}>
+      <View style={{ flex: 1, backgroundColor: '#0B0807', paddingBottom: Platform.OS === 'android' ? kb : 0 }}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
           {/* Header */}
           <View style={{ paddingTop: insets.top + 10, paddingHorizontal: 18, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(255,150,90,0.1)' }}>
@@ -1184,7 +1205,7 @@ export function QhpAssessmentForm({
             </View>
           </View>
 
-          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 18, paddingBottom: 30 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          <ScrollView ref={formScrollRef} onScroll={(e) => { formOffsetRef.current = e.nativeEvent.contentOffset.y; }} scrollEventThrottle={32} style={{ flex: 1 }} contentContainerStyle={{ padding: 18, paddingBottom: 30 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
             {isExistingClient && priorQ.isLoading ? (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
                 <ActivityIndicator size="small" color={C.gold} />

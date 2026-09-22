@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, Pressable, TextInput, ActivityIndicator, Modal, ScrollView, Linking, Animated, Keyboard, Platform } from 'react-native';
+import { View, Text, Pressable, TextInput, ActivityIndicator, Modal, ScrollView, Linking, Animated, Keyboard, Platform, Alert } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { C, F, hexA, ORANGE_GRAD } from '../theme';
 import { Icon, IconName } from '../icons';
@@ -363,7 +363,7 @@ export function CoachClientsOverview() {
 /* ---- Clients Overview → client detail (web /coach/clients-overview/:id) ---- */
 function RatingButtons({ clientId, value }: { clientId: string; value: Improvement }) {
   const m = useSetImprovementStatus();
-  const run = (next: 'good' | 'average' | 'poor') => m.mutate({ clientId, next: value === next ? null : next });
+  const run = (next: 'good' | 'average' | 'poor') => { if (m.isPending) return; m.mutate({ clientId, next: value === next ? null : next }, { onError: (e: any) => Alert.alert("Couldn't save rating", e?.message ?? "Try again.") }); };
   return (
     <View style={{ gap: 8 }}>
       <View style={{ flexDirection: 'row', gap: 8 }}>
@@ -872,7 +872,8 @@ function ProgramPendingCard({ plan, coachId, onView }: { plan: ProgramPlan; coac
   const kc = isWorkout ? C.orange : C.purple;
   const run = (action: PlanAction) => {
     if ((action === 'reject' || action === 'needs_revision') && !feedback.trim()) { setOpen(true); return; }
-    m.mutate({ kind: plan.kind, id: plan.id, action, feedback, coachId });
+    if (m.isPending) return;
+    m.mutate({ kind: plan.kind, id: plan.id, action, feedback, coachId }, { onError: (e: any) => Alert.alert("Couldn't update plan", e?.message ?? "Try again.") });
   };
   const busy = m.isPending;
   return (
@@ -1194,8 +1195,9 @@ function PickerModal({ title, options, value, onSelect, onClose, searchable }: {
   const opts = t ? options.filter((o) => (o.label ?? '').toLowerCase().includes(t)) : options;
   return (
     <Modal visible transparent animationType="slide" onRequestClose={close}>
-      <Pressable onPress={close} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' }}>
-        <Pressable onPress={() => {}} style={{ maxHeight: '75%', backgroundColor: '#0E0A09', borderTopLeftRadius: 24, borderTopRightRadius: 24, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 16, paddingTop: 12, paddingBottom: 24 + kb }}>
+      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' }}>
+        <Pressable onPress={close} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} />
+        <View style={{ maxHeight: '75%', backgroundColor: '#0E0A09', borderTopLeftRadius: 24, borderTopRightRadius: 24, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 16, paddingTop: 12, paddingBottom: 24 + kb }}>
           <View style={{ width: 40, height: 4, borderRadius: 99, backgroundColor: 'rgba(255,255,255,0.2)', alignSelf: 'center', marginBottom: 12 }} />
           <Serif style={{ fontSize: 18, marginBottom: 10 }}>{title}</Serif>
           {searchable ? <View style={{ marginBottom: 8 }}><SearchBar value={term} onChange={setTerm} placeholder="Search…" /></View> : null}
@@ -1210,8 +1212,8 @@ function PickerModal({ title, options, value, onSelect, onClose, searchable }: {
               );
             })}
           </ScrollView>
-        </Pressable>
-      </Pressable>
+        </View>
+      </View>
     </Modal>
   );
 }

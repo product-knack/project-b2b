@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, Pressable, TextInput, ActivityIndicator, Modal, ScrollView, Alert } from 'react-native';
+import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { LinearGradient } from 'expo-linear-gradient';
 import { C, F, hexA, ORANGE_GRAD } from '../theme';
@@ -100,7 +101,7 @@ function PickerField({ label, placeholder, options, value, onChange, disabled }:
             <Icon name="search" size={12} color={C.muted3} strokeWidth={2} />
             <TextInput value={search} onChangeText={setSearch} placeholder="Search…" placeholderTextColor={C.muted3} style={{ flex: 1, fontFamily: F.body, fontSize: 12, color: '#fff', padding: 0 }} />
           </View>
-          <ScrollView style={{ maxHeight: 200 }} nestedScrollEnabled keyboardShouldPersistTaps="handled">
+          <ScrollView style={{ maxHeight: 300 }} nestedScrollEnabled keyboardShouldPersistTaps="handled">
             {list.map((o, i) => (
               <Pressable key={o.id} onPress={() => { onChange(o.id); setOpen(false); }} style={{ flexDirection: 'row', alignItems: 'center', gap: 7, paddingVertical: 10, paddingHorizontal: 12, borderTopWidth: i === 0 ? 0 : 1, borderTopColor: 'rgba(255,255,255,0.05)', backgroundColor: value === o.id ? hexA(C.orange, 0.09) : 'transparent' }}>
                 <Text numberOfLines={1} style={{ flex: 1, fontFamily: value === o.id ? F.bodyBold : F.bodySemi, fontSize: 12, color: value === o.id ? C.orange : '#fff' }}>{o.name}</Text>
@@ -115,6 +116,7 @@ function PickerField({ label, placeholder, options, value, onChange, disabled }:
 }
 
 function FeeFormSheet({ existing, onClose }: { existing: Fee | null; onClose: () => void }) {
+  const kb = useKeyboardHeight(); // Android edge-to-edge: lift the sheet above the keyboard
   const save = useSaveFee();
   const trainersQ = useFeeTrainers();
   const clientsQ = useFeeClients();
@@ -126,7 +128,7 @@ function FeeFormSheet({ existing, onClose }: { existing: Fee | null; onClose: ()
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.62)', justifyContent: 'flex-end' }}>
-        <View style={{ maxHeight: '92%', backgroundColor: '#0E0A09', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 14, paddingBottom: 24 }}>
+        <View style={{ maxHeight: '92%', backgroundColor: '#0E0A09', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 14, paddingBottom: kb > 0 ? kb + 14 : 24 }}>
           <View style={{ width: 40, height: 4, borderRadius: 99, backgroundColor: 'rgba(255,255,255,0.2)', alignSelf: 'center', marginBottom: 12 }} />
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9, marginBottom: 10 }}>
             <Serif style={{ flex: 1, fontSize: 18 }}>{existing ? 'Edit Fee' : 'Add New Fee'}</Serif>
@@ -233,10 +235,10 @@ export function AdminTrainerFees() {
             <View style={{ flexDirection: 'row', marginTop: 4 }}><Badge text={r.payout_method} color={C.gold} /></View>
           </View>
           <Serif style={{ fontSize: 16, color: C.green }}>₹{Number(r.fee_amount).toFixed(2)}</Serif>
-          <Pressable onPress={() => setSheet({ fee: r })} hitSlop={5} style={{ width: 28, height: 28, borderRadius: 9, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }}>
+          <Pressable onPress={() => setSheet({ fee: r })} hitSlop={10} style={{ width: 28, height: 28, borderRadius: 9, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }}>
             <Icon name="clipboard" size={12} color={C.muted} strokeWidth={2} />
           </Pressable>
-          <Pressable disabled={del.isPending} onPress={() => confirmDelete(r)} hitSlop={5} style={{ width: 28, height: 28, borderRadius: 9, backgroundColor: hexA(C.red, 0.08), borderWidth: 1, borderColor: hexA(C.red, 0.4), alignItems: 'center', justifyContent: 'center' }}>
+          <Pressable disabled={del.isPending} onPress={() => confirmDelete(r)} hitSlop={10} style={{ width: 28, height: 28, borderRadius: 9, backgroundColor: hexA(C.red, 0.08), borderWidth: 1, borderColor: hexA(C.red, 0.4), alignItems: 'center', justifyContent: 'center' }}>
             {del.isPending && del.variables === r.id ? <ActivityIndicator size="small" color={C.red} /> : <Icon name="close" size={11} color={C.red} strokeWidth={2.5} />}
           </Pressable>
         </Card>
@@ -250,7 +252,10 @@ export function AdminTrainerFees() {
    Table manager_score: {manager_id, team_name, team_json = member profile ids[], team_start,
    team_end (null = ongoing), total_sessions, winner} — the last two are written by the
    leaderboard pipeline, never here. A profile may appear in exactly one slot per batch. */
-type ManagerTeam = { id: string; manager_id: string; team_name: string | null; team_json: string[] | null; team_start: string | null; team_end: string | null; total_sessions: number | null; winner: number | null; created_at: string };
+type ManagerTeam = { id: string; manager_id: string; team_name: string | null; team_json: string[] | null; team_start: string | null; team_end: string | null; total_sessions: number | null; winner: number | null; created_at: string; members_status: Record<string, { status?: string; last_session_date?: string | null }> | null };
+/* Trigger-maintained profiles.status mirror per member (web Manage Teams parity, 18 Sep 2026); read-only here. */
+const memberStatusEntry = (t: ManagerTeam, id: string) => (t.members_status && typeof t.members_status === 'object' ? t.members_status[id] : undefined);
+const fmtLastSession = (d: string | null | undefined) => (d ? new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : null);
 function useManagerTeams() {
   return useQuery({
     queryKey: ['manager-score-teams'],
@@ -314,7 +319,7 @@ function MultiPicker({ label, options, values, onToggle }: { label: string; opti
             <Icon name="search" size={12} color={C.muted3} strokeWidth={2} />
             <TextInput value={search} onChangeText={setSearch} placeholder="Search…" placeholderTextColor={C.muted3} style={{ flex: 1, fontFamily: F.body, fontSize: 12, color: '#fff', padding: 0 }} />
           </View>
-          <ScrollView style={{ maxHeight: 190 }} nestedScrollEnabled keyboardShouldPersistTaps="handled">
+          <ScrollView style={{ maxHeight: 300 }} nestedScrollEnabled keyboardShouldPersistTaps="handled">
             {list.map((o, i) => {
               const checked = values.includes(o.id);
               return (
@@ -336,6 +341,7 @@ function MultiPicker({ label, options, values, onToggle }: { label: string; opti
 
 type TeamEntry = { managerId: string | null; teamName: string; members: string[] };
 export function AdminManageTeams() {
+  const kb = useKeyboardHeight(); // Android edge-to-edge: lift the sheet above the keyboard
   const teamsQ = useManagerTeams();
   const poolQ = useFeeTrainers(); // same broad pool as the web (trainer/doctor/coach/crm)
   const createTeams = useCreateTeams();
@@ -471,13 +477,19 @@ export function AdminManageTeams() {
                   <Body numberOfLines={1} style={{ flex: 1, fontSize: 12.5, fontFamily: F.bodySemi, color: '#fff' }}>{t.team_name ?? '—'}</Body>
                   {(t.total_sessions ?? 0) > 0 ? <Badge text={`${t.total_sessions} sessions`} color={C.gold} /> : null}
                   {t.winner ? <Badge text={`Rank #${t.winner}`} color={C.green} /> : null}
-                  <Pressable onPress={() => { setEditing(t); setEditName(t.team_name ?? ''); setEditManager(t.manager_id); setEditMembers(t.team_json ?? []); }} hitSlop={5} style={{ width: 26, height: 26, borderRadius: 9, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }}>
+                  {(() => { const n = (t.team_json ?? []).filter((m) => memberStatusEntry(t, m)?.status === 'inactive').length; return n > 0 ? <Badge text={`${n} inactive`} color={C.muted2} /> : null; })()}
+                  <Pressable onPress={() => { setEditing(t); setEditName(t.team_name ?? ''); setEditManager(t.manager_id); setEditMembers(t.team_json ?? []); }} hitSlop={10} style={{ width: 26, height: 26, borderRadius: 9, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }}>
                     <Icon name="clipboard" size={11} color={C.muted} strokeWidth={2} />
                   </Pressable>
                 </View>
                 <Body style={{ fontSize: 10.5, color: C.muted2 }}>Manager: <Text style={{ color: C.ink2, fontFamily: F.bodySemi }}>{nameOfId(t.manager_id)}</Text></Body>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
-                  {(t.team_json ?? []).map((m) => <Badge key={m} text={nameOfId(m)} color={C.blue} />)}
+                  {(t.team_json ?? []).map((m) => {
+                    const e = memberStatusEntry(t, m);
+                    if (e?.status !== 'inactive') return <Badge key={m} text={nameOfId(m)} color={C.blue} />;
+                    const last = fmtLastSession(e.last_session_date);
+                    return <Badge key={m} text={`${nameOfId(m)} · inactive, ${last ? `last session ${last}` : 'no session logged'}`} color={C.muted2} />;
+                  })}
                 </View>
               </View>
             ))}
@@ -488,7 +500,7 @@ export function AdminManageTeams() {
       {editing ? (
         <Modal visible transparent animationType="slide" onRequestClose={() => setEditing(null)}>
           <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.62)', justifyContent: 'flex-end' }}>
-            <View style={{ maxHeight: '90%', backgroundColor: '#0E0A09', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 14, paddingBottom: 24 }}>
+            <View style={{ maxHeight: '90%', backgroundColor: '#0E0A09', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 14, paddingBottom: kb > 0 ? kb + 14 : 24 }}>
               <View style={{ width: 40, height: 4, borderRadius: 99, backgroundColor: 'rgba(255,255,255,0.2)', alignSelf: 'center', marginBottom: 12 }} />
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9, marginBottom: 10 }}>
                 <Serif style={{ flex: 1, fontSize: 18 }}>Edit Team</Serif>

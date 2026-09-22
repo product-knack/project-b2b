@@ -35,7 +35,7 @@ function SessionExerciseDetails({ sessionId }: { sessionId: string }) {
   }, [q.data]);
   return (
     <View style={{ gap: 7 }}>
-      <Pressable onPress={() => setExpanded((v) => !v)} style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+      <Pressable onPress={() => setExpanded((v) => !v)} hitSlop={10} style={{ flexDirection: 'row', alignItems: 'center', gap: 7, paddingVertical: 6 }}>
         <Icon name="dumbbell" size={12} color={C.blue} strokeWidth={2.1} />
         <Text style={{ flex: 1, fontFamily: F.bodySemi, fontSize: 11.5, color: '#A9BCFF' }}>Session Exercises</Text>
         <Icon name={expanded ? 'chevUp' : 'chevDown'} size={13} color={C.muted3} strokeWidth={2.2} />
@@ -83,7 +83,7 @@ export function PhysioSessionSheet({ visible, onClose, clientId, clientName }: {
   const clientsQ = usePhysioDialogClients(uid, visible && !clientId);
   const [clientSearch, setClientSearch] = React.useState('');
 
-  const [category, setCategory] = React.useState<'' | 'rehab' | 'recovery'>('');
+  const [category, setCategory] = React.useState<'' | 'rehab' | 'recovery' | 'therapy'>('');
   const [tab, setTab] = React.useState<'with-plan' | 'log-session'>('log-session');
   const [cancelled, setCancelled] = React.useState(false);
 
@@ -106,6 +106,14 @@ export function PhysioSessionSheet({ visible, onClose, clientId, clientName }: {
   // Recovery
   const [selectedModalities, setSelectedModalities] = React.useState<string[]>([]);
   const [modalityDetails, setModalityDetails] = React.useState<Record<string, any>>({});
+
+  // Therapy (web spec v2 §2.2) — the card exists ONLY for doctors whose
+  // role_specialization carries a therapy tag; identity computes that strict
+  // whitelist (physio_hod or any unrelated tag never unlocks it).
+  const identity = useDoctorIdentity();
+  const allowedTherapy = identity.data.therapyModalities;
+  const [therapyType, setTherapyType] = React.useState('');
+  const [therapyNotes, setTherapyNotes] = React.useState('');
 
   // Cognitive (doctors only; the whole sheet is doctor-only in this app)
   const [cogOn, setCogOn] = React.useState(false);
@@ -139,6 +147,7 @@ export function PhysioSessionSheet({ visible, onClose, clientId, clientName }: {
     setProtocolId(''); setRehabPhase(''); setRehabNotes(''); setChecked({});
     setWpForm({ ...emptyWp, treatments: [{ technique: '', target_area: '', reasoning: '' }] });
     setWpExercises([]); setSelectedModalities([]); setModalityDetails({});
+    setTherapyType(''); setTherapyNotes('');
     setCogOn(false); setMarkAsSession(false); setCog({ ...emptyCog });
     setErr(null); setDone(false);
     if (!clientId) { setSelClientId(''); setSelClientName(''); setClientSearch(''); }
@@ -163,6 +172,7 @@ export function PhysioSessionSheet({ visible, onClose, clientId, clientName }: {
     if (isCognitiveOnly) return Object.values(cog).some((v) => v != null);
     if (category === 'rehab') return tab === 'with-plan' ? !!(protocolId && rehabPhase) : !!wpForm.chief_complaint.trim();
     if (category === 'recovery') return selectedModalities.length > 0;
+    if (category === 'therapy') return !!therapyType; // blocked until a sub-type is chosen (web §2.2)
     return false;
   })();
 
@@ -175,7 +185,7 @@ export function PhysioSessionSheet({ visible, onClose, clientId, clientName }: {
       protocolComplaint: (protocolsQ.data ?? []).find((p: any) => p.id === protocolId)?.complaint ?? null,
       rehabPhase, rehabNotes, checkedExercises: Object.values(checked),
       wpForm, wpExercises: wpExercises.map(({ exercise_name, sets }) => ({ exercise_name, sets })),
-      selectedModalities, modalityDetails,
+      selectedModalities, modalityDetails, therapyType, therapyNotes,
       cognitiveEnabled: cogOn, markAsSession, cognitive: cog,
     };
     try {
@@ -192,10 +202,21 @@ export function PhysioSessionSheet({ visible, onClose, clientId, clientName }: {
     setCog((p) => ({ ...p, [k]: num }));
   };
 
-  const catBtn = (id: 'rehab' | 'recovery', label: string, icon: any) => {
+  const catBtn = (id: 'rehab' | 'recovery' | 'therapy', label: string, icon: any) => {
     const active = category === id;
+    // Selecting Therapy clears rehab/recovery state and vice versa (web §2.2);
+    // one allowed sub-modality pre-selects, two leave the grid choice open.
+    const pick = () => {
+      const next = active ? '' : id;
+      setCategory(next);
+      if (next === 'therapy') {
+        setProtocolId(''); setRehabPhase(''); setRehabNotes(''); setChecked({});
+        setSelectedModalities([]); setModalityDetails({});
+        setTherapyType(allowedTherapy.length === 1 ? allowedTherapy[0].value : '');
+      } else { setTherapyType(''); setTherapyNotes(''); }
+    };
     return (
-      <Pressable key={id} onPress={() => setCategory(active ? '' : id)} style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 12, borderRadius: 13, backgroundColor: active ? hexA(C.orange, 0.16) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: active ? hexA(C.orange, 0.5) : 'rgba(255,255,255,0.09)' }}>
+      <Pressable key={id} onPress={pick} style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 12, borderRadius: 13, backgroundColor: active ? hexA(C.orange, 0.16) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: active ? hexA(C.orange, 0.5) : 'rgba(255,255,255,0.09)' }}>
         <Icon name={icon} size={14} color={active ? C.orange : C.muted} strokeWidth={2.1} />
         <Text style={{ fontFamily: active ? F.bodyBold : F.bodySemi, fontSize: 13, color: active ? C.orange : C.muted }}>{label}</Text>
       </Pressable>
@@ -216,7 +237,7 @@ export function PhysioSessionSheet({ visible, onClose, clientId, clientName }: {
               <Serif style={{ fontSize: 19 }}>Log Physio Session</Serif>
               {activeClientName ? <Body style={{ fontSize: 11.5, color: C.muted2 }}>{activeClientName}</Body> : null}
             </View>
-            <Pressable onPress={onClose} style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center', justifyContent: 'center' }}>
+            <Pressable onPress={onClose} hitSlop={8} style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center', justifyContent: 'center' }}>
               <Icon name="close" size={14} color="#B8B2AC" strokeWidth={2.3} />
             </Pressable>
           </View>
@@ -235,7 +256,7 @@ export function PhysioSessionSheet({ visible, onClose, clientId, clientName }: {
                 ) : (
                   <>
                     <TextInput value={clientSearch} onChangeText={setClientSearch} placeholder="Search client…" placeholderTextColor={C.muted3} style={inputStyle} />
-                    <View style={{ maxHeight: 190, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)' }}>
+                    <View style={{ maxHeight: 300, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)' }}>
                       <ScrollView nestedScrollEnabled keyboardShouldPersistTaps="handled">
                         {(clientsQ.data ?? []).filter((c) => !clientSearch.trim() || c.name.toLowerCase().includes(clientSearch.trim().toLowerCase())).slice(0, 40).map((c) => (
                           <Pressable key={c.id} onPress={() => { Keyboard.dismiss(); setSelClientId(c.id); setSelClientName(c.name); }} style={{ paddingVertical: 10, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' }}>
@@ -292,6 +313,7 @@ export function PhysioSessionSheet({ visible, onClose, clientId, clientName }: {
                 <View style={{ flexDirection: 'row', gap: 9 }}>
                   {catBtn('rehab', 'Rehab', 'heart')}
                   {catBtn('recovery', 'Recovery', 'sparkle')}
+                  {allowedTherapy.length ? catBtn('therapy', 'Therapy', 'activity') : null}
                 </View>
               </View>
             ) : null}
@@ -528,6 +550,28 @@ export function PhysioSessionSheet({ visible, onClose, clientId, clientName }: {
               </View>
             ) : null}
 
+            {/* THERAPY (web spec v2 §2.2) */}
+            {category === 'therapy' ? (
+              <View style={{ gap: 9 }}>
+                <Mono style={labelStyle}>THERAPY TYPE *</Mono>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  {allowedTherapy.map((m) => {
+                    const on = therapyType === m.value;
+                    return (
+                      <Pressable key={m.value} onPress={() => setTherapyType(m.value)} style={{ flex: 1, alignItems: 'center', gap: 6, paddingVertical: 13, paddingHorizontal: 8, borderRadius: 13, backgroundColor: on ? hexA(C.orange, 0.16) : 'rgba(255,255,255,0.04)', borderWidth: 1.5, borderColor: on ? hexA(C.orange, 0.6) : 'rgba(255,255,255,0.1)' }}>
+                        <Icon name={m.value === 'massage_therapy' ? 'heart' : 'sparkle'} size={16} color={on ? C.orange : C.muted2} strokeWidth={2.1} />
+                        <Text style={{ fontFamily: on ? F.bodyBold : F.bodySemi, fontSize: 12, color: on ? '#fff' : C.muted, textAlign: 'center' }}>{m.label}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <View>
+                  <Mono style={labelStyle}>NOTES (OPTIONAL)</Mono>
+                  <TextInput value={therapyNotes} onChangeText={setTherapyNotes} multiline placeholder="Session notes…" placeholderTextColor={C.muted3} style={[inputStyle, { minHeight: 80, textAlignVertical: 'top' }]} />
+                </View>
+              </View>
+            ) : null}
+
             {/* Cancelled */}
             {category ? (
               <Pressable onPress={() => setCancelled((v) => !v)} style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
@@ -558,7 +602,7 @@ export function PhysioSessionSheet({ visible, onClose, clientId, clientName }: {
         <Modal visible={pickerOpen} transparent animationType="slide" onRequestClose={() => setPickerOpen(false)}>
           <View style={{ flex: 1, justifyContent: 'flex-end' }}>
             <Pressable onPress={() => setPickerOpen(false)} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)' }} />
-            <View style={{ maxHeight: '75%', backgroundColor: '#0E0A09', borderTopLeftRadius: 24, borderTopRightRadius: 24, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 16, paddingTop: 12, paddingBottom: 22 }}>
+            <View style={{ maxHeight: '75%', backgroundColor: '#0E0A09', borderTopLeftRadius: 24, borderTopRightRadius: 24, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 16, paddingTop: 12, paddingBottom: kbLift > 0 ? kbLift : 22 }}>
               <View style={{ width: 40, height: 4, borderRadius: 99, backgroundColor: 'rgba(255,255,255,0.2)', alignSelf: 'center', marginBottom: 10 }} />
               <Serif style={{ fontSize: 18, marginBottom: 8 }}>Rehab Exercises</Serif>
               <TextInput value={pickerSearch} onChangeText={setPickerSearch} placeholder="Search…" placeholderTextColor={C.muted3} style={[inputStyle, { marginBottom: 8 }]} />
@@ -634,7 +678,7 @@ export function DoctorSessionsPage() {
         <View style={{ flex: 1 }}>
           <TitleBlock title="Sessions" sub="Doctor session log & schedule" />
         </View>
-        {identity.data.isPhysio || identity.data.isHeadDoctor ? (
+        {identity.data.isPhysio || identity.data.isHeadDoctor || identity.data.therapyModalities.length > 0 ? (
           <Pressable onPress={() => setLogOpen(true)}>
             <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 10, paddingHorizontal: 14, borderRadius: 12 }}>
               <Icon name="plus" size={13} color="#fff" strokeWidth={2.6} />

@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from './lib/supabase';
+import { runSessionTeardown } from './lib/sessionTeardown';
+import { setOutboxUser } from './lib/offline';
 import type { Role } from './store';
 
 type AuthCtx = {
@@ -20,7 +22,7 @@ export const useAuth = () => useContext(Ctx);
    the CRM workspace; other STAFF roles land on the trainer workspace. Client
    accounts are not staff — they can't use this app at all. */
 const appRoleOf = (dbRole: string | null | undefined): Role | null =>
-  dbRole === 'client' || !dbRole ? null : dbRole === 'crm' ? 'crm' : dbRole === 'coach' ? 'coach' : dbRole === 'ops' ? 'ops' : dbRole === 'admin' ? 'admin' : dbRole === 'doctor' ? 'doctor' : dbRole === 'marketing' ? 'marketing' : dbRole === 'academy' ? 'academy' : 'trainer';
+  dbRole === 'client' || !dbRole ? null : dbRole === 'crm' ? 'crm' : dbRole === 'coach' ? 'coach' : dbRole === 'ops' ? 'ops' : dbRole === 'admin' ? 'admin' : dbRole === 'doctor' ? 'doctor' : dbRole === 'therapist' ? 'therapist' : dbRole === 'marketing' ? 'marketing' : dbRole === 'academy' ? 'academy' : dbRole === 'tech' ? 'tech' : 'trainer';
 
 async function fetchRole(userId: string): Promise<{ app: Role | null; db: string | null }> {
   const { data } = await supabase.from('profiles').select('role').eq('id', userId).maybeSingle();
@@ -36,12 +38,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // NOT publish the role (it would let the Router redirect before rejection).
   const expectedRoleRef = React.useRef<Role | null>(null);
 
+  // Tracks whether a session was live, so a transition TO signed-out (expiry,
+  // revocation, sign-out elsewhere) runs the per-user teardown — but the initial
+  // "no session yet" at cold start never wipes the offline cache.
+  const hadSessionRef = React.useRef(false);
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
+      hadSessionRef.current = !!data.session;
+      setOutboxUser(data.session?.user?.id ?? null);
       setSession(data.session);
       setLoading(false);
     });
     const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
+      setOutboxUser(s?.user?.id ?? null);
+      if (!s && hadSessionRef.current) runSessionTeardown();
+      hadSessionRef.current = !!s;
       setSession(s);
       if (!s) { setRole(null); setDbRole(null); }
     });
@@ -90,6 +101,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
+    // Teardown FIRST (query cache + persisted copy, outbox, AI cache, token
+    // cache, per-user AsyncStorage keys) so nothing of this user survives.
+    await runSessionTeardown();
     await supabase.auth.signOut({ scope: 'local' });
     setRole(null);
     setDbRole(null);

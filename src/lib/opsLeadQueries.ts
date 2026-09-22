@@ -7,7 +7,7 @@ import { uuidv4 } from './clientQueries';
    filter building, stats formulas, follow-up/remark jsonb shapes, permissions.
    Verified live: leads readable (957 rows), get_cold_lead_ids works (378 ids). */
 
-export const LEAD_SELECT = 'id,name,contact_no,source,lead_date,stage,stage_history,description,created_by,created_by_role,created_at,updated_at,client_id,converted_at,converted_by,remark,remarks,qhp_pref_date,qhp_pref_time_from,qhp_pref_time_to,qhp_pref_location,qhp_pref_notes,next_follow_up_at,next_follow_up_note,follow_ups,influencer,ads_creative,referral_name,qhp_booked_by,qhp_booked_by_role,invoice_details,category,qualified_lead_criteria,applicant_lead,is_spam,spam_history,qhp_details,categories,potential,assigned_to,lead_type,call_attempts,is_dump,dump_history,clinical_grade,partner_lead_id';
+export const LEAD_SELECT = 'id,name,contact_no,source,lead_date,stage,stage_history,description,created_by,created_by_role,created_at,updated_at,client_id,converted_at,converted_by,remark,remarks,qhp_pref_date,qhp_pref_time_from,qhp_pref_time_to,qhp_pref_location,qhp_pref_notes,qhp_pref_alt,next_follow_up_at,next_follow_up_note,follow_ups,influencer,ads_creative,referral_name,qhp_booked_by,qhp_booked_by_role,invoice_details,category,qualified_lead_criteria,applicant_lead,is_spam,spam_history,qhp_details,categories,potential,assigned_to,lead_type,call_attempts,is_dump,dump_history,clinical_grade,partner_lead_id';
 
 // Web parity (2026-08): "Potential" and "Trail" stages removed (Potential became
 // a JSONB star flag); "Reschedule QHP", "QHP Completed", "Decision Awaiting",
@@ -31,6 +31,33 @@ export type Lead = Record<string, any> & { id: string; name: string; stage: stri
 export type FollowUpEntry = { id: string; scheduled_at: string; note: string | null; status: 'pending' | 'done' | 'superseded'; created_at: string; created_by?: string | null; created_by_name?: string | null; completed_at?: string; completed_by?: string | null; completed_by_name?: string | null; completion_note?: string | null };
 export type RemarkEntry = { id?: string; text: string; date: string; author_id?: string | null; author_name?: string | null };
 export type PotentialMark = { marked: boolean; by: string | null; by_name: string | null; at: string };
+
+/* ---------- 2nd QHP slot preference (leads.qhp_pref_alt) ----------
+   Optional fallback slot the QHP Manager uses when the first one can't be given.
+   Stored as { date: 'YYYY-MM-DD', time: 'HH:mm:ss' } or NULL — the primary slot
+   stays in qhp_pref_date / _time_from / _time_to and is untouched. Web parity:
+   the same jsonb is written by hub-track's QHPBookingDialog. */
+export type QhpPrefAlt = { date: string; time: string };
+export const readQhpPrefAlt = (raw: any): QhpPrefAlt | null =>
+  raw && typeof raw === 'object' && typeof raw.date === 'string' && raw.date
+    ? { date: raw.date, time: typeof raw.time === 'string' ? raw.time : '' }
+    : null;
+/** "05-Sep · 10:00 AM" for the lead card chip. */
+export function fmtAltSlotShort(alt: QhpPrefAlt | null): string {
+  if (!alt) return '';
+  const d = new Date(`${alt.date}T${(alt.time || '00:00:00').slice(0, 8)}`);
+  if (!isFinite(d.getTime())) return '';
+  const day = d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }).replace(' ', '-');
+  return `${day} · ${d.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true })}`;
+}
+/** "05-Sep-2026 10:00 am" — the app's long IST convention, used by the QHP Manager. */
+export function fmtSlotLong(date: string | null | undefined, time: string | null | undefined): string {
+  if (!date) return '';
+  const d = new Date(`${date}T${String(time || '00:00:00').slice(0, 8)}`);
+  if (!isFinite(d.getTime())) return '';
+  const day = d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }).replace(/ /g, '-');
+  return time ? `${day} ${d.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true })}` : day;
+}
 export type CallAttemptEntry = { at: string; day: string; by: string | null; by_name: string | null };
 export type DumpHistoryEntry = { at: string; reason: string; by?: string | null; by_name?: string | null; attempts_count?: number };
 

@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from './supabase';
+import { invokeWithTimeout } from './withTimeout';
 
 /* ---------- Create a workout session (strength) ---------- */
 // RFC4122-ish v4 uuid (Hermes has no crypto.randomUUID).
@@ -211,6 +212,62 @@ export type WorkoutLogInput = {
   sessionDate?: string;
 };
 
+/* Result of the schedule-link step. 'skipped' = no slot (ad-hoc / partner 2nd leg);
+   'linked' = the RPC confirmed the pair is linked; 'unresolved' = not confirmed after
+   one retry (or the RPC errored) — non-fatal, trg_autolink reconciles it server-side. */
+export type LinkOutcome = { status: 'skipped' | 'linked' | 'unresolved'; attempts: number };
+
+// One short retry: the auto-create trigger may not have committed the training_sessions
+// row when the first RPC call runs. 500ms clears the common race, only fires on the
+// not-yet-linked path, and is invisible on the happy path.
+const LINK_RETRY_MS = 500;
+
+/* Link the logged workout to its roster slot via link_workout_to_schedule — one
+   transaction that sets training_sessions.schedule_session_id, handles the dedupe branch
+   where no row was created, and flips session_schedule.workout_session_id. Replaces the
+   two post-hoc UPDATEs that raced the create trigger (~20-27% of logs lost the back-link).
+   NON-THROWING by contract: a failed link must never fail the log. Retries once on
+   already_linked=false, then records an ops_alert (fire-and-forget) and leaves it to
+   trg_autolink_training_session_to_schedule. */
+async function linkWorkoutToSchedule(workoutSessionId: string, scheduleSessionId: string): Promise<LinkOutcome> {
+  const confirmLinked = async (): Promise<boolean> => {
+    const { data, error } = await supabase.rpc('link_workout_to_schedule', {
+      p_workout_session_id: workoutSessionId,
+      p_schedule_session_id: scheduleSessionId,
+    });
+    if (error) throw new Error(error.message);
+    // RPC returns { linked: bool, training_sessions_updated, session_schedule_updated,
+    // attached_existing }. `linked` is the single source of truth (true on both a fresh
+    // link and an idempotent re-run); absent only on the null-param early return.
+    return (data as any)?.linked === true;
+  };
+  let attempts = 0;
+  try {
+    attempts = 1;
+    if (await confirmLinked()) return { status: 'linked', attempts };
+    // Not linked yet — the training_sessions row likely hasn't committed. One retry.
+    await new Promise((r) => setTimeout(r, LINK_RETRY_MS));
+    attempts = 2;
+    if (await confirmLinked()) return { status: 'linked', attempts };
+  } catch (e) {
+    console.error('[schedule_link] RPC error', e);
+  }
+  // Unresolved after the retry (or an RPC error). Record for ops, fire-and-forget so it
+  // can never throw or block, then leave it to the fallback trigger.
+  console.error('[schedule_link] unresolved', { workoutSessionId, scheduleSessionId, attempts });
+  void supabase
+    .from('ops_alerts')
+    .insert({
+      source: 'schedule_link',
+      severity: 'warning',
+      title: 'Roster link not completed',
+      message: 'link_workout_to_schedule did not confirm a link after one retry',
+      context: { workout_session_id: workoutSessionId, schedule_session_id: scheduleSessionId, attempts },
+    })
+    .then(() => {}, () => {});
+  return { status: 'unresolved', attempts };
+}
+
 // Plain submit fn — used by the mutation hook AND the offline outbox drainer.
 // Row construction is a verbatim port of the web useWorkoutFormSubmission +
 // useWorkoutSession: workout_exercises is the ONLY session write (training_sessions
@@ -347,15 +404,12 @@ export async function submitWorkoutLog(args: WorkoutLogInput) {
   }
 
   // Web post-insert steps (non-fatal, idempotent):
-  // 1. Link the schedule slot on training_sessions, then patch session_schedule so
-  //    Today's Roster flips to "Logged" (guarded — never clobbers an existing link).
+  // 1. Link the logged workout to its roster slot in ONE transaction via the RPC. This
+  //    replaces the two post-hoc UPDATEs that raced the auto-create trigger. Non-throwing:
+  //    a failed link never fails the log; trg_autolink reconciles any residual server-side.
+  let link: LinkOutcome = { status: 'skipped', attempts: 0 };
   if (scheduleSessionId) {
-    try {
-      await supabase.from('training_sessions').update({ schedule_session_id: scheduleSessionId }).eq('workout_session_id', sessionId);
-    } catch { /* non-fatal (web parity) */ }
-    try {
-      await supabase.from('session_schedule').update({ workout_session_id: sessionId }).eq('id', scheduleSessionId).is('workout_session_id', null);
-    } catch { /* non-fatal */ }
+    link = await linkWorkoutToSchedule(sessionId, scheduleSessionId);
   }
   // 2. RPE on the auto-created training_sessions row (integer, web parity).
   if (rpe != null) {
@@ -367,7 +421,7 @@ export async function submitWorkoutLog(args: WorkoutLogInput) {
       await supabase.from('training_sessions').update({ partner_session_group_id: partnerSessionGroupId }).eq('workout_session_id', sessionId);
     } catch { /* non-fatal */ }
   }
-  return { sessionId };
+  return { sessionId, link };
 }
 
 /* Web checkDuplicateWorkoutSession: is there already a session TODAY (local-day
@@ -414,9 +468,12 @@ export function usePartnerInfo(clientId: string | null) {
         .eq('training_partner_id', me.training_partner_id)
         .neq('id', clientId)
         .maybeSingle();
-      if (!partner) return null;
-      const name = `${partner.first_name ?? ''} ${partner.last_name ?? ''}`.replace(/\s+/g, ' ').trim() || 'Partner';
-      return { id: partner.id, name };
+      // Live data (Sep 2026): the column is a SHARED couple id (both partners carry the
+      // same value). Fallback for pointer-style rows (value = the partner's own id).
+      const found = partner ?? (await supabase.from('clients').select('id, first_name, last_name').eq('id', me.training_partner_id).neq('id', clientId).maybeSingle()).data;
+      if (!found) return null;
+      const name = `${found.first_name ?? ''} ${found.last_name ?? ''}`.replace(/\s+/g, ' ').trim() || 'Partner';
+      return { id: found.id, name };
     },
   });
 }
@@ -489,12 +546,17 @@ export function usePreviousExerciseData(clientId: string | null) {
   return useQuery({
     queryKey: ['prev-exercise-data', clientId],
     enabled: !!clientId,
-    staleTime: 0,
+    // Previous-session placeholders only need to be fresh once per form open —
+    // staleTime 0 + the poll re-downloaded 1,000 rows every minute WHILE typing.
+    staleTime: 10 * 60_000,
+    refetchInterval: false,
+    refetchOnWindowFocus: false,
     queryFn: async (): Promise<Record<string, PrevSet[]>> => {
       const { data, error } = await supabase
         .from('workout_exercises')
         .select('exercise_name, set_number, load_performed, reps_performed, rest_period, tempo, duration_seconds, session_date, session_id, created_at')
         .eq('client_id', clientId)
+        .gte('session_date', new Date(Date.now() - 90 * 864e5).toISOString().slice(0, 10))
         .order('session_date', { ascending: false })
         .order('created_at', { ascending: false })
         .limit(1000);
@@ -539,7 +601,7 @@ export function usePreviousExerciseData(clientId: string | null) {
    client. Count = distinct workout_exercises.session_id for client+trainer+modality
    (Strength also counts legacy rows: null modality + a body_part). Plan validity =
    workout_plan_exercises status 'approved' and approved_at within 42 days. */
-const PLAN_VALID_DAYS = 42;
+export const PLAN_VALID_DAYS = 42;
 const PLANLESS_LIMIT = 3;
 const normModality = (m?: string | null) => (m || '').toLowerCase().replace(/training/g, '').replace(/[^a-z]/g, '');
 
@@ -720,7 +782,7 @@ export function useCreateWorkoutSession() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['trainer-roster'] });
       qc.invalidateQueries({ queryKey: ['client-sessions'] });
-      qc.invalidateQueries({ queryKey: ['trainer-month-sessions'] });
+      qc.invalidateQueries({ queryKey: ['trainer-month-sessions-v2'] }); // key was bumped to v2 — the old prefix matched nothing
     },
   });
 }
@@ -1000,7 +1062,7 @@ async function invokeEdgeFn(name: string, body: any) {
     ({ data } = await supabase.auth.getSession());
   }
   const token = data.session?.access_token;
-  return supabase.functions.invoke(name, { body, ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}) });
+  return invokeWithTimeout(name, { body, ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}) });
 }
 
 export type HandoffDoctorSession = { sessionTypes: string[]; sessionDate: string; doctorName: string; notes: string | null };
@@ -1205,7 +1267,11 @@ export function useClientSessions(clientId: string | null) {
         .eq('client_id', clientId)
         .neq('status', 'parked')
         .neq('status', 'cancelled')
-        .order('scheduled_at', { ascending: false });
+        // Bounded: the screen shows 10 at a time; an unbounded fetch pulled up to
+        // 1,000 rows (+ their AI analysis blobs) into the persisted cache.
+        .gte('scheduled_at', new Date(Date.now() - 365 * 864e5).toISOString())
+        .order('scheduled_at', { ascending: false })
+        .limit(60);
       if (error) throw new Error(error.message);
       const rows = (data ?? []) as any[];
 
@@ -1339,7 +1405,11 @@ export function useClientPlans(clientId: string | null) {
             status: r.status ?? null,
             approved_at: r.approved_at ?? null,
             created_at: r.created_at ?? null,
-            expired: approved > 0 ? approved + 45 * 864e5 < now : false,
+            // 42-day validity — same PLAN_VALID_DAYS rule as the web, the roster
+            // expiry strip, the log form and the plan gate. This briefly said 45
+            // (the old architecture doc's wrong number), making the Plan tab call
+            // a plan "Active" for 3 days after everything else showed it expired.
+            expired: approved > 0 ? approved + PLAN_VALID_DAYS * 864e5 < now : false,
             /** Coach's revision note (web "Coach Feedback" banner) — from the
                 first row; per-trainer slices carry their own in my_feedback. */
             coach_feedback: r.coach_feedback ?? null,
@@ -1423,6 +1493,7 @@ const PLAN_POOL_MAP: Record<string, string[]> = {
   'Strength Training': ['Strength', 'Cardio'],
   Pilates: ['Pilates', 'Yoga'],
   Aerobics: ['Aerobics'],
+  Yoga: ['Yoga'],
 };
 export function usePlanExerciseDb(planModality: string | null) {
   const key = planModality ?? '';
@@ -1522,7 +1593,10 @@ export async function submitWorkoutPlan(input: WorkoutPlanCreateInput) {
       };
 
       let rows: any[] = [];
-      if (modality === 'Yoga') {
+      // Yoga NEW shape = strength-style duration rows (falls to the else branch;
+      // the form fixes body_part to 'Yoga Activities'). The activity mapping below
+      // only serves LEGACY offline-queued payloads that still carry yoga[] entries.
+      if (modality === 'Yoga' && yoga.some((a) => a.name.trim())) {
         rows = yoga
           .filter((a) => a.name.trim())
           .map((a, i) => ({
@@ -1614,6 +1688,127 @@ export function useClientGoals(clientId: string | null) {
         .order('week_start_date', { ascending: true });
       if (error) throw new Error(error.message);
       return data ?? [];
+    },
+  });
+}
+
+/* Save weekly goals (web WeeklyGoals form): one daily_goals row per selected week
+   (Monday-start IST). z2c_target = Zone 2 sessions PER WEEK (a count like 2-3,
+   NOT minutes); recommendation is the free-text recovery note. Updates the row
+   in place when the week already exists (no reliance on a unique constraint). */
+export type WeeklyGoalsInput = {
+  clientId: string;
+  weekStartDates: string[]; // 'YYYY-MM-DD' Mondays
+  sleep: number | null; steps: number | null; nutrition: number | null; z2c: number | null;
+  recommendation: string | null;
+};
+export function useSaveWeeklyGoals() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: WeeklyGoalsInput) => {
+      const { data: existing, error: exErr } = await supabase
+        .from('daily_goals')
+        .select('id, week_start_date')
+        .eq('client_id', input.clientId)
+        .in('week_start_date', input.weekStartDates);
+      if (exErr) throw new Error(exErr.message);
+      const byWeek = new Map(((existing ?? []) as any[]).map((r) => [String(r.week_start_date).slice(0, 10), r.id]));
+      for (const ws of input.weekStartDates) {
+        const end = new Date(new Date(ws + 'T12:00:00Z').getTime() + 6 * 864e5);
+        const payload: Record<string, any> = {
+          client_id: input.clientId,
+          week_start_date: ws,
+          week_end_date: end.toISOString().slice(0, 10),
+          sleep_target_hours: input.sleep,
+          steps_target: input.steps,
+          nutrition_target: input.nutrition,
+          z2c_target: input.z2c,
+          recommendation: input.recommendation,
+        };
+        const id = byWeek.get(ws);
+        const { error } = id
+          ? await supabase.from('daily_goals').update(payload).eq('id', id)
+          : await supabase.from('daily_goals').insert(payload);
+        if (error) throw new Error(error.message);
+      }
+    },
+    onSuccess: (_r, v) => qc.invalidateQueries({ queryKey: ['client-goals', v.clientId] }),
+  });
+}
+
+export function useDeleteWeeklyGoal() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { id: string; clientId: string }) => {
+      const { error } = await supabase.from('daily_goals').delete().eq('id', input.id);
+      if (error) throw new Error(error.message);
+    },
+    onSuccess: (_r, v) => qc.invalidateQueries({ queryKey: ['client-goals', v.clientId] }),
+  });
+}
+
+/* ---------- Zone 2 cardio — this week's goal + completions ----------
+   Web SleepNutritionPromptDialog contract: the current (Monday-IST) daily_goals
+   row; completions live in zone_2_did jsonb as { sessions: [{ date, duration_minutes? }] },
+   ONE entry per date. Logging appends via UPDATE on the goal row, independent of
+   the sleep/nutrition/steps submit. */
+export type Z2Session = { date: string; duration_minutes?: number | null };
+export type Z2Week = { goalId: string; weekStart: string; weekEnd: string; target: number; sessions: Z2Session[] };
+const istMondayYmd = () => {
+  const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  const [y, m, d] = ymd.split('-').map(Number);
+  const anchor = new Date(Date.UTC(y, m - 1, d, 12));
+  const dow = (anchor.getUTCDay() + 6) % 7; // Mon=0
+  return new Date(Date.UTC(y, m - 1, d - dow, 12)).toISOString().slice(0, 10);
+};
+export function useZone2Week(clientId: string | null) {
+  return useQuery({
+    queryKey: ['z2-week', clientId],
+    enabled: !!clientId,
+    staleTime: 60_000,
+    queryFn: async (): Promise<Z2Week | null> => {
+      const monday = istMondayYmd();
+      const { data, error } = await supabase
+        .from('daily_goals')
+        .select('id, week_start_date, week_end_date, z2c_target, zone_2_did')
+        .eq('client_id', clientId!)
+        .eq('week_start_date', monday)
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      if (!data || !data.z2c_target) return null; // no goal / no Zone 2 target this week
+      const ws = String(data.week_start_date).slice(0, 10);
+      const we = data.week_end_date
+        ? String(data.week_end_date).slice(0, 10)
+        : new Date(new Date(ws + 'T12:00:00Z').getTime() + 6 * 864e5).toISOString().slice(0, 10);
+      const sessions = Array.isArray((data.zone_2_did as any)?.sessions) ? (data.zone_2_did as any).sessions : [];
+      return { goalId: data.id, weekStart: ws, weekEnd: we, target: Number(data.z2c_target) || 0, sessions };
+    },
+  });
+}
+export function useLogZone2Session() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { goalId: string; clientId: string; date: string; durationMin: number | null }) => {
+      // Fresh read → validate → append (web handleSaveZ2: in-week date, no duplicate per date).
+      const { data, error } = await supabase
+        .from('daily_goals')
+        .select('id, week_start_date, week_end_date, zone_2_did')
+        .eq('id', input.goalId)
+        .single();
+      if (error) throw new Error(error.message);
+      const ws = String(data.week_start_date).slice(0, 10);
+      const we = data.week_end_date ? String(data.week_end_date).slice(0, 10) : '';
+      if (input.date < ws || (we && input.date > we)) throw new Error('Pick a date inside this goal week');
+      const prev = (typeof data.zone_2_did === 'object' && data.zone_2_did) ? (data.zone_2_did as any) : {};
+      const sessions: any[] = Array.isArray(prev.sessions) ? [...prev.sessions] : [];
+      if (sessions.some((s) => String(s?.date).slice(0, 10) === input.date)) throw new Error('A Zone 2 session is already logged for that date');
+      sessions.push(input.durationMin != null ? { date: input.date, duration_minutes: input.durationMin } : { date: input.date });
+      const { error: upErr } = await supabase.from('daily_goals').update({ zone_2_did: { ...prev, sessions } }).eq('id', input.goalId);
+      if (upErr) throw new Error(upErr.message);
+    },
+    onSuccess: (_r, v) => {
+      qc.invalidateQueries({ queryKey: ['z2-week', v.clientId] });
+      qc.invalidateQueries({ queryKey: ['client-goals', v.clientId] });
     },
   });
 }
@@ -1988,7 +2183,10 @@ export function buildPlanExerciseRows(input: {
     super_set_group: null, exercise_notes: null, duration: null, activity_type: null,
     sub_activity: null, rir_target: null, measurement_type: null,
   };
-  if (modality === 'Yoga') {
+  // Yoga NEW shape = strength-style duration rows (falls through to the
+  // strength mapping; the form fixes body_part to 'Yoga Activities'). The
+  // activity mapping below only serves LEGACY payloads carrying yoga[] entries.
+  if (modality === 'Yoga' && yoga.some((a) => a.name.trim())) {
     return yoga
       .filter((a) => a.name.trim())
       .map((a, i) => ({

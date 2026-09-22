@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from './supabase';
+import { invokeWithTimeout } from './withTimeout';
 
 /* ============ Admin — Requests page (referrals + upgrade/renewal/cross-sell approvals) ============
    Ports of web useReferrals.ts, useSubscriptionUpgradeRequests.ts, useAdminRenewalRequests.ts,
@@ -242,7 +243,7 @@ export function useConvertLeadToClient() {
         .eq('id', input.lead.id);
       if (lErr) throw new Error(lErr.message);
       if (input.lead.stage === 'QHP Booked') {
-        supabase.functions.invoke('notify-new-client-card', { body: { client_id: (newClient as any).id } })
+        invokeWithTimeout('notify-new-client-card', { body: { client_id: (newClient as any).id } })
           .catch((e) => console.warn('notify-new-client-card failed', e));
       }
     },
@@ -443,7 +444,7 @@ export function useGenerateLeadPayment() {
         await supabase.from('clients').update({ generation_admin: true, generation_members: merged }).eq('id', input.lead.client_id);
       }
       if (input.method === 'razorpay') {
-        const { data: res, error: fnErr } = await supabase.functions.invoke('create-lead-razorpay-link', { body: { request_id: (inserted as any).id } });
+        const { data: res, error: fnErr } = await invokeWithTimeout('create-lead-razorpay-link', { body: { request_id: (inserted as any).id } });
         const errMsg = fnErr?.message || (res as any)?.error;
         if (errMsg) {
           await supabase.from('renewal_payment_requests').update({ payment_status: 'failed' }).eq('id', (inserted as any).id);
@@ -464,7 +465,7 @@ export function useRetryRazorpayLink() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (requestId: string): Promise<{ url: string | null }> => {
-      const { data: res, error } = await supabase.functions.invoke('create-lead-razorpay-link', { body: { request_id: requestId } });
+      const { data: res, error } = await invokeWithTimeout('create-lead-razorpay-link', { body: { request_id: requestId } });
       const errMsg = error?.message || (res as any)?.error;
       if (errMsg) throw new Error(errMsg);
       return { url: (res as any)?.url ?? null };

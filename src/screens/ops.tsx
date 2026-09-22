@@ -1,11 +1,13 @@
 import React from 'react';
 import { View, Text, Pressable, TextInput, ActivityIndicator, Modal, ScrollView, Linking, Animated } from 'react-native';
+import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import { LinearGradient } from 'expo-linear-gradient';
 import { C, F, hexA, ORANGE_GRAD } from '../theme';
 import { Icon, IconName } from '../icons';
 import { Serif, Body, Mono, Card, Avatar, CountUp, ProgressBar } from '../components/primitives';
 import { Page, TitleBlock, GreetingHeader, Badge, HScroll, BackLink } from './common';
 import { FeatureTour, OPS_TOUR, TourLauncher } from '../components/featureTour';
+import { ClientThreadsUnreadBanner } from '../components/clientThreadsCard';
 import { useStore } from '../store';
 import { useSidebarProfile } from '../lib/navQueries';
 import { useLeadStats, useColdLeads, useOpsFollowUpReminders, useMyOpsProfile } from '../lib/opsLeadQueries';
@@ -205,6 +207,10 @@ export function OpsDashboard() {
         rightAction={<TourLauncher onPress={() => setTourOpen(true)} />}
       />
       <FeatureTour visible={tourOpen} steps={OPS_TOUR} tourName='ops' onClose={() => setTourOpen(false)} />
+
+      {/* Client Threads unread — the Ops Head is a standing member of every client
+          thread; renders nothing at 0 unread. */}
+      <ClientThreadsUnreadBanner />
 
       {/* Urgent banners — animated, with previews */}
       {overdueFollowUps.length > 0 ? (
@@ -594,6 +600,7 @@ export function OpsBaseline() {
 
 /* ================= 5. SALES TARGETS ================= */
 function TargetNoteSheet({ target, canWrite, onClose }: { target: SalesTargetRow; canWrite: boolean; onClose: () => void }) {
+  const kb = useKeyboardHeight(); // Android edge-to-edge: lift the sheet above the keyboard
   const m = useAppendSalesTargetNote();
   const [cat, setCat] = React.useState<string>('general');
   const [note, setNote] = React.useState('');
@@ -601,14 +608,14 @@ function TargetNoteSheet({ target, canWrite, onClose }: { target: SalesTargetRow
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.62)', justifyContent: 'flex-end' }}>
-        <View style={{ maxHeight: '85%', backgroundColor: '#0E0A09', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 14, paddingBottom: 24 }}>
+        <View style={{ maxHeight: '85%', backgroundColor: '#0E0A09', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 14, paddingBottom: kb > 0 ? kb + 14 : 24 }}>
           <View style={{ width: 40, height: 4, borderRadius: 99, backgroundColor: 'rgba(255,255,255,0.2)', alignSelf: 'center', marginBottom: 12 }} />
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9, marginBottom: 10 }}>
             <Serif numberOfLines={1} style={{ flex: 1, fontSize: 18 }}>{target.clientName}</Serif>
             <Badge text={target.status} color={target.status === 'won' ? C.green : target.status === 'lost' ? C.red : C.gold} />
             <Pressable onPress={onClose} hitSlop={8}><Icon name="close" size={14} color={C.muted2} strokeWidth={2.3} /></Pressable>
           </View>
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingBottom: 10 }}>
+          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 10, paddingBottom: 10 }}>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
               <Badge text={target.targetType} color={C.blue} />
               <Body style={{ fontSize: 11, color: C.muted2 }}>Owner {target.ownerName}</Body>

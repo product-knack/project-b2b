@@ -61,7 +61,7 @@ function SheetShell({ title, sub, onClose, children }: { title: string; sub?: st
 }
 function PrimaryBtn({ label, onPress, disabled, color = C.orange }: { label: string; onPress: () => void; disabled?: boolean; color?: string }) {
   return (
-    <Pressable onPress={onPress} disabled={disabled} style={{ alignItems: 'center', paddingVertical: 12, borderRadius: 12, backgroundColor: hexA(color, disabled ? 0.06 : 0.16), borderWidth: 1, borderColor: hexA(color, disabled ? 0.2 : 0.5) }}>
+    <Pressable onPress={onPress} disabled={disabled} style={({ pressed }) => ({ alignItems: 'center', paddingVertical: 12, borderRadius: 12, backgroundColor: hexA(color, disabled ? 0.06 : pressed ? 0.3 : 0.16), borderWidth: 1, borderColor: hexA(color, disabled ? 0.2 : 0.5) })}>
       <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: disabled ? C.muted3 : color }}>{label}</Text>
     </Pressable>
   );

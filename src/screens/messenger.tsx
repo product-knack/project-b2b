@@ -2,7 +2,10 @@ import React from 'react';
 import { View, Text, Pressable, TextInput, ActivityIndicator, FlatList, ScrollView, Alert, Keyboard, Platform, Animated, Easing, LayoutAnimation, Image, Linking, Vibration, Modal } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
-import { Audio, Video, ResizeMode } from 'expo-av';
+// expo-av was removed in SDK 55 — audio is expo-audio, video is expo-video.
+// Note: expo-audio reports time in SECONDS (expo-av used milliseconds).
+import { createAudioPlayer, setAudioModeAsync, requestRecordingPermissionsAsync, useAudioRecorder, RecordingPresets, type AudioPlayer } from 'expo-audio';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import { WebView } from 'react-native-webview';
 
 /* Short recording cues (WhatsApp-style blips) — tiny bundled WAVs. Resolves when
@@ -17,12 +20,23 @@ async function playCue(kind: keyof typeof REC_CUES): Promise<void> {
   try {
     // Ensure PLAYBACK mode — if the last action was a recording, the mode may
     // still be capture-oriented and the blip would be inaudible.
-    await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
-    const { sound } = await Audio.Sound.createAsync(REC_CUES[kind], { shouldPlay: true, volume: 1.0 });
+    await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
+    const player = createAudioPlayer(REC_CUES[kind]);
+    player.volume = 1.0;
+    player.play();
     await new Promise<void>((resolve) => {
-      const t = setTimeout(() => resolve(), 700); // never hang on a missed callback
-      sound.setOnPlaybackStatusUpdate((st: any) => {
-        if (st?.didJustFinish || st?.error) { clearTimeout(t); sound.unloadAsync().catch(() => {}); resolve(); }
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        clearTimeout(t);
+        try { sub?.remove?.(); } catch { /* already gone */ }
+        try { player.remove(); } catch { /* already released */ }
+        resolve();
+      };
+      const t = setTimeout(finish, 700); // never hang on a missed callback
+      const sub = player.addListener('playbackStatusUpdate', (st: any) => {
+        if (st?.didJustFinish) finish();
       });
     });
   } catch { /* cue is cosmetic — never block recording */ }
@@ -39,6 +53,7 @@ import { Serif, Body, Mono, Avatar } from '../components/primitives';
 import { Page } from './common';
 import { SheetShell } from './reportDetail';
 import { supabase } from '../lib/supabase';
+import { invalidateDebounced } from '../lib/invalidateDebounced';
 import { istTimeParts } from '../lib/trainerQueries';
 import { PanResponder } from 'react-native';
 import { backSwipeLock, backOverride } from '../gestureLock';
@@ -47,6 +62,8 @@ import {
   useChatOverview, useMessageThread, useChatProfiles, useMarkConversationRead, useTeamRoster,
   useSendMessage, useSendMedia, useOpenOrCreateDm, useThreadMembers,
   useCrmMessengerClients, useClientGroups, useConversationReads,
+  useChatRescheduleSuggestion, useAcceptChatReschedule, useDismissChatReschedule,
+  useEditChatMessage,
   ChatConversation, ChatMessage, MessengerClient, TeamMember, ConversationRead, ClientGroup, chatInitials, avatarColors, displayGroupName,
 } from '../lib/chatQueries';
 
@@ -86,6 +103,8 @@ const dayLabel = (iso: string) => {
 function SwipeReplyRow({ enabled, onReply, children }: { enabled: boolean; onReply: () => void; children: React.ReactNode }) {
   const tx = React.useRef(new Animated.Value(0)).current;
   const fired = React.useRef(false);
+  // A bubble re-keyed/unmounted mid-drag never fires Release → release the lock.
+  React.useEffect(() => () => { backSwipeLock.locked = false; }, []);
   const enabledRef = React.useRef(enabled); enabledRef.current = enabled;
   const onReplyRef = React.useRef(onReply); onReplyRef.current = onReply;
   const springBack = () => Animated.spring(tx, { toValue: 0, useNativeDriver: true, speed: 20, bounciness: 5 }).start();
@@ -181,6 +200,62 @@ function Ticks({ state, dim }: { state: 'pending' | 'delivered' | 'all'; dim: st
   );
 }
 
+/* ---------- AI reschedule chip ----------
+   The analyze-chat-reschedule edge fn spotted a time agreed in this chat and
+   wrote a suggestion. Rendered ONLY for the session's trainer (RLS returns
+   nothing to anyone else). Accept = chat_accept_reschedule RPC moves the real
+   session_schedule row + notifies the manager's Team Messenger. */
+function ChatRescheduleChip({ conversationId }: { conversationId: string }) {
+  const { session } = useAuth();
+  const meId = session?.user?.id ?? null;
+  const sQ = useChatRescheduleSuggestion(conversationId, meId);
+  const acceptM = useAcceptChatReschedule();
+  const dismissM = useDismissChatReschedule();
+  const s = sQ.data;
+  if (!s || s.trainer_id !== meId) return null;
+  const fmt = (iso: string) => new Date(iso).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: 'numeric', minute: '2-digit', hour12: true });
+  const day = new Date(s.proposed_datetime).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'short', day: 'numeric', month: 'short' });
+  const busy = acceptM.isPending || dismissM.isPending;
+  const accept = async () => {
+    try {
+      await acceptM.mutateAsync({ suggestionId: s.id, conversationId });
+    } catch (e: any) {
+      Alert.alert('Could not reschedule', String(e?.message ?? e));
+    }
+  };
+  return (
+    <View style={{ marginHorizontal: 12, marginBottom: 8, borderRadius: 15, overflow: 'hidden', borderWidth: 1, borderColor: hexA(C.gold, 0.45), backgroundColor: 'rgba(26,20,15,0.96)' }}>
+      <LinearGradient colors={[hexA(C.gold, 0.6), 'rgba(255,255,255,0.02)']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ height: 2.5 }} />
+      <View style={{ padding: 11, gap: 6 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <Icon name="calendar" size={13} color={C.gold} strokeWidth={2.2} />
+          <Mono style={{ flex: 1, fontSize: 9, letterSpacing: 1, color: C.gold }}>RESCHEDULE DETECTED IN CHAT</Mono>
+        </View>
+        <Body style={{ fontSize: 13.5, fontFamily: F.bodySemi, color: '#fff' }}>
+          Move the {fmt(s.old_datetime)} session to {fmt(s.proposed_datetime)}?
+        </Body>
+        <Mono style={{ fontSize: 9.5, color: C.muted2 }}>{day} · updates the roster and informs your manager</Mono>
+        {s.evidence ? (
+          <View style={{ flexDirection: 'row', borderRadius: 9, overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.04)' }}>
+            <View style={{ width: 3, backgroundColor: hexA(C.gold, 0.6) }} />
+            <Body style={{ flex: 1, fontSize: 11.5, color: C.muted, paddingVertical: 5, paddingHorizontal: 9 }} numberOfLines={2}>{s.evidence}</Body>
+          </View>
+        ) : null}
+        <View style={{ flexDirection: 'row', gap: 8, marginTop: 2 }}>
+          <Pressable disabled={busy} onPress={() => dismissM.mutate({ suggestionId: s.id, conversationId }, { onError: (e: any) => Alert.alert("Couldn't dismiss", e?.message ?? 'Try again.') })} style={{ flex: 1, paddingVertical: 9, borderRadius: 11, alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', opacity: busy ? 0.6 : 1 }}>
+            <Text style={{ fontFamily: F.bodySemi, fontSize: 12.5, color: C.ink }}>Dismiss</Text>
+          </Pressable>
+          <Pressable disabled={busy} onPress={accept} style={{ flex: 1, borderRadius: 11, overflow: 'hidden', opacity: busy ? 0.6 : 1 }}>
+            <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ paddingVertical: 9, alignItems: 'center' }}>
+              <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: '#fff' }}>{acceptM.isPending ? 'Updating…' : 'Reschedule'}</Text>
+            </LinearGradient>
+          </Pressable>
+        </View>
+      </View>
+    </View>
+  );
+}
+
 function MessageThread({ meId, conv, onBack, subtabs }: { meId: string; conv: ChatConversation; onBack: () => void; subtabs?: { view: 'direct' | 'group'; hasDirect: boolean; onChange: (v: 'direct' | 'group') => void } }) {
   const insets = useSafeAreaInsets();
   const thread = useMessageThread(conv.conversationId);
@@ -211,6 +286,19 @@ function MessageThread({ meId, conv, onBack, subtabs }: { meId: string; conv: Ch
   }, [readsQ.data, meId]);
   const [seenMsg, setSeenMsg] = React.useState<(ChatMessage & { _pending?: boolean }) | null>(null);
   React.useEffect(() => { setSeenMsg(null); }, [conv.conversationId]);
+  // Edit own message (long-press → Edit Message) — history kept server-side.
+  const editM = useEditChatMessage(conv.conversationId, meId);
+  const [editMsg, setEditMsg] = React.useState<(ChatMessage & { _pending?: boolean }) | null>(null);
+  const [editText, setEditText] = React.useState('');
+  React.useEffect(() => { setEditMsg(null); setEditText(''); }, [conv.conversationId]);
+  const saveEdit = () => {
+    const t = editText.trim();
+    if (!editMsg || !t || t === editMsg.message) return;
+    editM.mutate({ messageId: editMsg.id, body: t }, {
+      onSuccess: () => { setEditMsg(null); setEditText(''); },
+      onError: (e: any) => Alert.alert('Edit failed', e?.message ?? 'Please try again.'),
+    });
+  };
   // In-app media viewer (image / video / document) — never leaves the app.
   const [viewer, setViewer] = React.useState<{ kind: string; url: string } | null>(null);
   const memberNames = React.useMemo(() => (membersQ.data ?? []).map((m) => (m.name ?? 'Member').split(' ')[0]).join(', '), [membersQ.data]);
@@ -291,23 +379,50 @@ function MessageThread({ meId, conv, onBack, subtabs }: { meId: string; conv: Ch
         if (m.sender_id !== meId) markRead.mutate({ conversationId: conv.conversationId, meId });
         qc.invalidateQueries({ queryKey: ['chat-overview', meId] });
       })
+      // UPDATE: message edits (body + edited_message history) land live for
+      // every open device — patch the cached row in place, no refetch.
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conv.conversationId}` }, (payload) => {
+        const m = payload.new as ChatMessage;
+        if (!m?.id) return;
+        qc.setQueryData(['chat-thread', conv.conversationId], (old: any) => {
+          if (!old) return old;
+          const pages = old.pages.map((pg: ChatMessage[]) => pg.map((x) => (x.id === m.id ? { ...x, ...m } : x)));
+          return { ...old, pages };
+        });
+      })
       .subscribe();
     return () => { supabase.removeChannel(ch); };
   }, [conv.conversationId, meId]);
 
+  // Double-tap guard: two presses inside one JS stall both read the pre-clear
+  // draft and posted twice — the ref check is synchronous, unlike state.
+  const lastSendRef = React.useRef<{ t: string; at: number }>({ t: '', at: 0 });
   const send = () => {
     const t = draft.trim();
-    if (!t) return;
+    if (!t || sendM.isPending) return;
+    if (lastSendRef.current.t === t && Date.now() - lastSendRef.current.at < 1500) return;
+    lastSendRef.current = { t, at: Date.now() };
+    const quoted = replyTo;
     setDraft('');
-    sendM.mutate({ text: t, replyToId: replyTo?.id ?? null });
     setReplyTo(null);
+    sendM.mutate({ text: t, replyToId: quoted?.id ?? null }, {
+      onError: (e: any) => {
+        // Server rejection: put the text (and quote) back so nothing is lost.
+        setDraft((d) => (d.trim() ? d : t));
+        if (quoted) setReplyTo(quoted);
+        Alert.alert('Message not sent', e?.message ?? 'Check your connection and try again.');
+      },
+    });
   };
 
   /* ---- Voice notes (B2C interop): WhatsApp-style hold-to-record. Hold the mic →
      start cue + the button swells; slide LEFT past the threshold → cancel; release
      → end cue + send through the same chat-media pipeline the client app uses
      (<conv>/<msgId>-voice-<ts>.m4a, message_type='voice', 1-year signed URL). */
-  const recRef = React.useRef<Audio.Recording | null>(null);
+  // expo-audio's recorder is a hook-owned object reused across takes; a ref tracks
+  // whether a take is actually in flight (expo-av created a new Recording per take).
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const recActiveRef = React.useRef(false);
   const [recording, setRecording] = React.useState(false);
   const recordingRef = React.useRef(false);
   const [recMs, setRecMs] = React.useState(0);
@@ -325,7 +440,10 @@ function MessageThread({ meId, conv, onBack, subtabs }: { meId: string; conv: Ch
     delAnim.setValue(0);
     Animated.timing(delAnim, { toValue: 1, duration: 900, useNativeDriver: true }).start(() => setShowDeleted(false));
   };
-  React.useEffect(() => () => { clearTimeout(recTimer.current); recRef.current?.stopAndUnloadAsync().catch(() => {}); }, []);
+  React.useEffect(() => () => {
+    clearTimeout(recTimer.current);
+    if (recActiveRef.current) { recActiveRef.current = false; recorder.stop().catch(() => {}); }
+  }, []);
   const tickRec = (startedAt: number) => {
     recMsRef.current = Date.now() - startedAt;
     setRecMs(recMsRef.current);
@@ -339,34 +457,38 @@ function MessageThread({ meId, conv, onBack, subtabs }: { meId: string; conv: Ch
   };
   const startRecording = async () => {
     try {
-      const perm = await Audio.requestPermissionsAsync();
+      const perm = await requestRecordingPermissionsAsync();
       if (!perm.granted) { recordingRef.current = false; micRest(); Alert.alert('Microphone needed', 'Allow microphone access to record voice messages.'); return; }
       // START blip plays FIRST and fully — recording only begins after, so the
       // tone is audible (and never captured into the note). WhatsApp order.
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
       await playCue('start');
       if (!recordingRef.current) return; // finger lifted during the blip
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
-      const { recording: rec } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
-      if (!recordingRef.current) { rec.stopAndUnloadAsync().catch(() => {}); Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true }).catch(() => {}); return; }
-      recRef.current = rec;
+      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+      await recorder.prepareToRecordAsync();
+      if (!recordingRef.current) { // finger lifted while preparing
+        setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => {});
+        return;
+      }
+      recorder.record();
+      recActiveRef.current = true;
       setRecording(true);
       tickRec(Date.now());
     } catch (e: any) { recordingRef.current = false; micRest(); Alert.alert('Could not start recording', e?.message ?? 'Unknown error'); }
   };
   const stopRecording = async (sendIt: boolean) => {
-    const rec = recRef.current;
-    recRef.current = null;
+    const wasActive = recActiveRef.current;
+    recActiveRef.current = false;
     clearTimeout(recTimer.current);
     setRecording(false);
     const elapsed = recMsRef.current;
     recMsRef.current = 0;
     setRecMs(0);
-    if (!rec) return;
+    if (!wasActive) return;
     try {
-      await rec.stopAndUnloadAsync();
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
-      const uri = rec.getURI();
+      await recorder.stop();
+      await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
+      const uri = recorder.uri;
       if (!sendIt || !uri) return;
       if (elapsed < 800) { Alert.alert('Too short', 'Hold the mic a moment longer to record a voice message.'); return; }
       playCue('end');
@@ -455,8 +577,19 @@ function MessageThread({ meId, conv, onBack, subtabs }: { meId: string; conv: Ch
     const timeText = item._pending ? (isMedia ? 'uploading…' : 'sending…') : `${tp.time} ${tp.ampm}`;
     const tickState: 'pending' | 'delivered' | 'all' = item._pending ? 'pending' : tickStateOf(item.created_at);
     const myTicks = (dim: string) => (mine ? <Ticks state={tickState} dim={dim} /> : null);
-    // Long-press any bubble (all chats) → Message Info sheet (sent/delivered/seen + times).
-    const onBubbleLongPress = () => { if (!item._pending) setSeenMsg(item); };
+    const wasEdited = !!(item.edited_message && item.edited_message.length);
+    // Long-press any bubble → Message Info sheet (sent/delivered/seen + times).
+    // Own TEXT bubbles also offer Edit Message (history kept in edited_message).
+    const onBubbleLongPress = () => {
+      if (item._pending) return;
+      if (mine && item.message_type === 'text' && !item.is_deleted) {
+        Alert.alert('Message', undefined, [
+          { text: 'Edit Message', onPress: () => { setEditText(item.message); setEditMsg(item); } },
+          { text: 'Message Info', onPress: () => setSeenMsg(item) },
+          { text: 'Cancel', style: 'cancel' },
+        ]);
+      } else setSeenMsg(item);
+    };
     // Quoted message block (rendered inside the bubble when this message is a reply).
     const quote = item.reply_to_id ? (() => {
       const orig = msgById.get(item.reply_to_id!);
@@ -522,7 +655,7 @@ function MessageThread({ meId, conv, onBack, subtabs }: { meId: string; conv: Ch
                 {quote}
                 <MentionText text={preview} names={mentionNames} highlight="#FFE9D2" style={{ fontFamily: F.body, fontSize: 14.5, color: '#fff', lineHeight: 20 }} />
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-end', marginTop: 3 }}>
-                  <Text style={{ fontFamily: F.mono, fontSize: 8.5, color: 'rgba(255,255,255,0.75)' }}>{timeText}</Text>
+                  <Text style={{ fontFamily: F.mono, fontSize: 8.5, color: 'rgba(255,255,255,0.75)' }}>{wasEdited ? 'edited · ' : ''}{timeText}</Text>
                   {myTicks('rgba(255,255,255,0.85)')}
                 </View>
               </LinearGradient>
@@ -531,7 +664,7 @@ function MessageThread({ meId, conv, onBack, subtabs }: { meId: string; conv: Ch
             <Pressable onLongPress={onBubbleLongPress} delayLongPress={300} style={{ maxWidth: '82%', borderRadius: 16, borderBottomLeftRadius: 5, paddingVertical: 9, paddingHorizontal: 13, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)' }}>
               {quote}
               <MentionText text={preview} names={mentionNames} highlight={C.orange} style={{ fontFamily: F.body, fontSize: 14.5, color: C.ink, lineHeight: 20 }} />
-              <Text style={{ fontFamily: F.mono, fontSize: 8.5, color: C.muted3, alignSelf: 'flex-end', marginTop: 3 }}>{tp.time} {tp.ampm}</Text>
+              <Text style={{ fontFamily: F.mono, fontSize: 8.5, color: C.muted3, alignSelf: 'flex-end', marginTop: 3 }}>{wasEdited ? 'edited · ' : ''}{tp.time} {tp.ampm}</Text>
             </Pressable>
           )}
         </View>
@@ -678,6 +811,10 @@ function MessageThread({ meId, conv, onBack, subtabs }: { meId: string; conv: Ch
         </View>
       ) : null}
 
+      {/* AI reschedule chip — appears when the chat agreed a new session time.
+         Visible ONLY to the session's trainer (RLS); one tap moves the roster. */}
+      <ChatRescheduleChip conversationId={conv.conversationId} />
+
       {/* Composer — lifted above the keyboard via manual kbH */}
       {isReadOnly ? (
         <View style={{ paddingHorizontal: 14, paddingTop: 12, paddingBottom: composerPadBottom, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.07)', backgroundColor: 'rgba(8,6,6,0.96)', alignItems: 'center' }}>
@@ -729,7 +866,7 @@ function MessageThread({ meId, conv, onBack, subtabs }: { meId: string; conv: Ch
               )}
             </View>
             {draft.trim() ? (
-              <Pressable onPress={send} style={{ marginBottom: 1 }}>
+              <Pressable onPress={send} disabled={sendM.isPending} accessibilityRole="button" accessibilityLabel="Send message" style={{ marginBottom: 1, opacity: sendM.isPending ? 0.6 : 1 }}>
                 <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' }}>
                   <Icon path="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z" size={17} color="#fff" strokeWidth={2.2} />
                 </LinearGradient>
@@ -751,9 +888,49 @@ function MessageThread({ meId, conv, onBack, subtabs }: { meId: string; conv: Ch
 
       {/* "Seen by" — long-press a bubble in a group to see who has read it */}
       <SeenBySheet msg={seenMsg} reads={readsQ.data ?? []} meId={meId} onClose={() => setSeenMsg(null)} />
+
+      {/* Edit own message — the current text is replaced in real time and every
+          previous version stays saved in the message's edit history. */}
+      <SheetShell visible={!!editMsg} onClose={() => { setEditMsg(null); setEditText(''); }} accent={C.orange} icon="chat" title="Edit Message" subtitle="Previous versions stay saved in the message history">
+        <TextInput
+          value={editText}
+          onChangeText={setEditText}
+          multiline
+          placeholder="Message"
+          placeholderTextColor={C.muted3}
+          style={{ minHeight: 92, maxHeight: 190, borderRadius: 14, padding: 13, textAlignVertical: 'top', backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: hexA(C.orange, 0.3), color: '#fff', fontFamily: F.body, fontSize: 14.5, lineHeight: 20 }}
+        />
+        {(editMsg?.edited_message?.length ?? 0) > 0 ? (
+          <Mono style={{ fontSize: 9, letterSpacing: 0.6, color: C.muted3 }}>
+            EDITED {editMsg!.edited_message!.length} TIME{editMsg!.edited_message!.length === 1 ? '' : 'S'} BEFORE · FULL TRAIL IN MESSAGE INFO
+          </Mono>
+        ) : null}
+        <View style={{ flexDirection: 'row', gap: 9 }}>
+          <Pressable onPress={() => { setEditMsg(null); setEditText(''); }} style={{ flex: 1, paddingVertical: 13, borderRadius: 13, alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }}>
+            <Body style={{ fontSize: 13.5, fontFamily: F.bodySemi, color: C.muted }}>Cancel</Body>
+          </Pressable>
+          <Pressable
+            disabled={!editText.trim() || editText.trim() === editMsg?.message || editM.isPending}
+            onPress={saveEdit}
+            style={{ flex: 1, borderRadius: 13, overflow: 'hidden', opacity: !editText.trim() || editText.trim() === editMsg?.message || editM.isPending ? 0.5 : 1 }}
+          >
+            <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ paddingVertical: 13, alignItems: 'center' }}>
+              <Body style={{ fontSize: 13.5, fontFamily: F.bodySemi, color: '#fff' }}>{editM.isPending ? 'Saving…' : 'Save Changes'}</Body>
+            </LinearGradient>
+          </Pressable>
+        </View>
+      </SheetShell>
+
       <MediaViewer media={viewer} onClose={() => setViewer(null)} />
     </View>
   );
+}
+
+/* expo-video's player comes from a hook, so the viewer's conditional video branch
+   needs its own component (hooks can't be called conditionally). */
+function FullscreenVideo({ uri }: { uri: string }) {
+  const player = useVideoPlayer(uri, (p) => { p.play(); });
+  return <VideoView player={player} style={{ flex: 1 }} nativeControls contentFit="contain" />;
 }
 
 /* ============ Voice message bubble (B2C interop) ============
@@ -764,37 +941,48 @@ const fmtClock = (ms: number) => {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 };
 function VoiceBubble({ url, mine, pending, timeText, onLongPress, ticks }: { url: string; mine: boolean; pending?: boolean; timeText: string; onLongPress?: () => void; ticks?: React.ReactNode }) {
-  const soundRef = React.useRef<Audio.Sound | null>(null);
+  const playerRef = React.useRef<AudioPlayer | null>(null);
+  const subRef = React.useRef<{ remove?: () => void } | null>(null);
   const [playing, setPlaying] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [posMs, setPosMs] = React.useState(0);
   const [durMs, setDurMs] = React.useState(0);
 
-  React.useEffect(() => () => { soundRef.current?.unloadAsync().catch(() => {}); }, []);
+  React.useEffect(() => () => {
+    try { subRef.current?.remove?.(); } catch { /* already gone */ }
+    try { playerRef.current?.remove(); } catch { /* already released */ }
+  }, []);
 
+  // expo-audio status is in SECONDS; this UI works in milliseconds.
   const onStatus = (st: any) => {
     if (!st?.isLoaded) return;
-    setPosMs(st.positionMillis ?? 0);
-    if (st.durationMillis) setDurMs(st.durationMillis);
-    setPlaying(!!st.isPlaying);
-    // stopAsync (not setPositionAsync) — a bare seek-to-0 resumes playback while shouldPlay is still true, causing an endless loop
-    if (st.didJustFinish) { setPlaying(false); setPosMs(0); soundRef.current?.stopAsync().catch(() => {}); }
+    setPosMs(Math.round((st.currentTime ?? 0) * 1000));
+    if (st.duration) setDurMs(Math.round(st.duration * 1000));
+    setPlaying(!!st.playing);
+    // Pause + rewind on finish: a bare seek-to-0 would resume and loop forever.
+    if (st.didJustFinish) {
+      setPlaying(false);
+      setPosMs(0);
+      try { playerRef.current?.pause(); playerRef.current?.seekTo(0); } catch { /* released */ }
+    }
   };
 
   const toggle = async () => {
     if (pending) return;
     try {
-      if (!soundRef.current) {
+      if (!playerRef.current) {
         setLoading(true);
-        await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
-        const { sound } = await Audio.Sound.createAsync({ uri: url }, { shouldPlay: true, progressUpdateIntervalMillis: 250 }, onStatus);
-        soundRef.current = sound;
+        await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
+        const p = createAudioPlayer({ uri: url });
+        playerRef.current = p;
+        subRef.current = p.addListener('playbackStatusUpdate', onStatus);
+        p.play();
         setLoading(false);
         return;
       }
-      const st: any = await soundRef.current.getStatusAsync();
-      if (st?.isLoaded && st.isPlaying) await soundRef.current.pauseAsync();
-      else await soundRef.current.playAsync();
+      const p = playerRef.current;
+      if (p.playing) p.pause();
+      else p.play();
     } catch (e: any) {
       setLoading(false);
       Alert.alert('Playback failed', e?.message ?? 'Could not play this voice message.');
@@ -853,13 +1041,7 @@ function MediaViewer({ media, onClose }: { media: { kind: string; url: string } 
         {media.kind === 'image' ? (
           <Image source={{ uri: media.url }} style={{ flex: 1 }} resizeMode="contain" />
         ) : media.kind === 'video' ? (
-          <Video
-            source={{ uri: media.url }}
-            style={{ flex: 1 }}
-            useNativeControls
-            resizeMode={ResizeMode.CONTAIN}
-            shouldPlay
-          />
+          <FullscreenVideo uri={media.url} />
         ) : (
           <WebView
             source={{ uri: docUri }}
@@ -921,7 +1103,22 @@ function SeenBySheet({ msg, reads, meId, onClose }: { msg: (ChatMessage & { _pen
             <Body numberOfLines={2} style={{ fontSize: 12.5, color: C.ink3 }}>
               {msg.message_type !== 'text' ? ({ image: '📷 Photo', video: '🎥 Video', voice: '🎤 Voice', document: '📄 Document' }[msg.message_type] ?? 'Message') : msg.message}
             </Body>
+            {(msg.edited_message?.length ?? 0) > 0 ? (
+              <Mono style={{ fontSize: 8.5, letterSpacing: 0.6, color: C.gold, marginTop: 5 }}>EDITED</Mono>
+            ) : null}
           </View>
+          {/* Edit history — every previous version of this message, newest first */}
+          {(msg.edited_message?.length ?? 0) > 0 ? (
+            <View style={{ marginTop: 8, padding: 11, borderRadius: 12, backgroundColor: hexA(C.gold, 0.05), borderWidth: 1, borderColor: hexA(C.gold, 0.25) }}>
+              <Mono style={{ fontSize: 9, letterSpacing: 1, color: C.gold, marginBottom: 4 }}>EDIT HISTORY · {msg.edited_message!.length}</Mono>
+              {[...msg.edited_message!].reverse().map((v, i) => (
+                <View key={i} style={{ paddingVertical: 7, borderTopWidth: i === 0 ? 0 : 1, borderTopColor: 'rgba(255,255,255,0.06)' }}>
+                  <Body style={{ fontSize: 12.5, color: C.ink3 }}>{v.message}</Body>
+                  {v.edited_at ? <Mono style={{ fontSize: 8.5, color: C.muted3, marginTop: 3 }}>replaced {infoDT(v.edited_at)}</Mono> : null}
+                </View>
+              ))}
+            </View>
+          ) : null}
           {/* Status timeline — sent/delivered share the server receipt time */}
           <View style={{ marginTop: 8, paddingHorizontal: 11, paddingVertical: 4, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.03)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)' }}>
             {statusRow('Sent', infoDT(msg.created_at), 'pending')}
@@ -1573,7 +1770,7 @@ export function ChatNotifications() {
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, async (payload) => {
         const m = payload.new as any;
         if (!m || m.sender_id === meId || m.is_deleted) return;
-        qc.invalidateQueries({ queryKey: ['chat-overview', meId] });
+        invalidateDebounced(qc, ['chat-overview', meId]); // the overview is a 4-round-trip fetch — once per burst, not per row
 
         // Resolve the conversation (cached) FIRST — we need its type to decide the
         // haptic, and we must buzz even when the messenger is already open.
@@ -1618,8 +1815,8 @@ export function ChatNotifications() {
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'client_thread_messages' }, async (payload) => {
         const m = payload.new as any;
         if (!m || m.sender_id === meId) return;
-        qc.invalidateQueries({ queryKey: ['client-thread-list'] });
-        qc.invalidateQueries({ queryKey: ['client-thread-messages', m.thread_id] });
+        invalidateDebounced(qc, ['client-thread-list']);
+        invalidateDebounced(qc, ['client-thread-messages', m.thread_id]);
         buzz(false);
         if (routeRef.current === 'client-threads') return; // on the feature — the list updates in place
         let title = threadTitleCache.current.get(m.thread_id);

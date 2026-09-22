@@ -1,6 +1,13 @@
 import * as Print from 'expo-print';
-import * as FileSystem from 'expo-file-system/legacy';
 import { supabase } from './supabase';
+import { withTimeout, uploadWithTimeout, NET_MS } from './withTimeout';
+
+/* Cooperative cancellation: the modal flips `cancelled`, the pipeline checks it
+   between steps and throws CancelledError (callers ignore it silently). */
+export type CancelToken = { cancelled: boolean };
+export class CancelledError extends Error { constructor() { super('Cancelled'); this.name = 'CancelledError'; } }
+export const isCancelled = (e: any) => e?.name === 'CancelledError';
+const PRINT_MS = 60_000; // HTML → PDF render
 
 /* ============ Native "Generate QHP PDF" pipeline ============
    Mirrors the web QHPPDFGenerator happy path end-to-end:
@@ -82,6 +89,7 @@ export async function generateNarratives(
     baseline?: { data: any; date: string | null } | null;
   },
   onProgress: (p: QhpGenProgress) => void,
+  cancel?: CancelToken,
 ): Promise<Record<string, any>> {
   const isComparison = !!input.previous;
   const baseBody: any = {
@@ -111,12 +119,14 @@ export async function generateNarratives(
 
   const merged: Record<string, any> = {};
   for (let i = 0; i < BATCHES.length; i++) {
+    if (cancel?.cancelled) throw new CancelledError();
     const base = (i / BATCHES.length) * 100;
     onProgress({ label: `Generating ${BATCH_LABELS[i]} (${i + 1}/${BATCHES.length})…`, pct: Math.round(base) });
     const body = { ...baseBody, section_batch: BATCHES[i] };
     let lastErr: string | null = null;
     for (let attempt = 0; attempt < 2; attempt++) {
       const { data, error } = await invokeWithTimeout(body, BATCHES[i]);
+      if (cancel?.cancelled) throw new CancelledError();
       if (error) { lastErr = error.message ? String(error.message) : await fnMessage(error, `Batch ${i + 1} failed`); continue; }
       if ((data as any)?.error) { lastErr = String((data as any).error); continue; }
       Object.assign(merged, (data as any)?.narratives ?? {});
@@ -238,31 +248,26 @@ export async function saveQhpDetails(input: { clientId: string; coachAssessmentI
   return data.id;
 }
 
-/* ---------------- PDF upload ---------------- */
-const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-function base64ToBytes(b64: string): Uint8Array {
-  const clean = b64.replace(/[^A-Za-z0-9+/]/g, '');
-  const len = Math.floor((clean.length * 3) / 4);
-  const out = new Uint8Array(len);
-  let o = 0;
-  for (let i = 0; i + 3 < clean.length || (i < clean.length && o < len); i += 4) {
-    const n = (B64.indexOf(clean[i]) << 18) | (B64.indexOf(clean[i + 1]) << 12) | ((B64.indexOf(clean[i + 2]) & 63) << 6) | (B64.indexOf(clean[i + 3]) & 63);
-    if (o < len) out[o++] = (n >> 16) & 255;
-    if (o < len && clean[i + 2] !== undefined) out[o++] = (n >> 8) & 255;
-    if (o < len && clean[i + 3] !== undefined) out[o++] = n & 255;
-  }
-  return out;
-}
-
-export async function renderAndUploadPdf(input: { detailId: string; clientId: string; clientName: string; html: string }): Promise<string> {
-  const { uri } = await Print.printToFileAsync({ html: input.html, base64: false });
-  const b64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
-  const bytes = base64ToBytes(b64);
+/* ---------------- PDF upload ----------------
+   Every step is bounded and cancellable. The PDF bytes come straight from the
+   native file via fetch().arrayBuffer() — the old base64 string + hand-rolled
+   decoder froze the JS thread for seconds on a 1 MB report. */
+export async function renderAndUploadPdf(input: { detailId: string; clientId: string; clientName: string; html: string }, cancel?: CancelToken): Promise<string> {
+  const check = () => { if (cancel?.cancelled) throw new CancelledError(); };
+  check();
+  const { uri } = await withTimeout(Print.printToFileAsync({ html: input.html, base64: false }), PRINT_MS, 'PDF render');
+  check();
+  const buf = await withTimeout((await fetch(uri)).arrayBuffer(), NET_MS, 'Reading the PDF');
+  check();
   const storagePath = `reports/${input.clientId}/${input.detailId}.pdf`;
   const fileName = `${input.clientName.replace(/[^a-z0-9-_ ]/gi, '').trim() || 'client'} - QHP Report.pdf`;
-  const { error: upErr } = await supabase.storage.from('qhp-images').upload(storagePath, bytes.buffer as ArrayBuffer, { upsert: true, contentType: 'application/pdf' });
+  const { error: upErr } = await uploadWithTimeout('qhp-images', storagePath, buf, { upsert: true, contentType: 'application/pdf' });
   if (upErr) throw new Error(upErr.message);
-  const { error: patchErr } = await supabase.from('qhp_details').update({ pdf_storage_path: storagePath, pdf_filename: fileName }).eq('id', input.detailId);
+  check();
+  const { error: patchErr } = await withTimeout<{ error: any }>(
+    Promise.resolve(supabase.from('qhp_details').update({ pdf_storage_path: storagePath, pdf_filename: fileName }).eq('id', input.detailId)) as Promise<{ error: any }>,
+    NET_MS, 'Saving the report',
+  );
   if (patchErr) throw new Error(patchErr.message);
   return supabase.storage.from('qhp-images').getPublicUrl(storagePath).data.publicUrl;
 }

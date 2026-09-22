@@ -1,6 +1,7 @@
 import React from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from './supabase';
+import { invokeWithTimeout } from './withTimeout';
 
 /* ============ Revenue Forecast (Admin + CRM) ============
    Native port of the web feature (doc: revenue-forecast-architecture.md).
@@ -314,7 +315,7 @@ export function useMarkPriority() {
         }
       }
       // Fire-and-forget push fan-out (edge function has its own de-dupe stamps).
-      supabase.functions.invoke('notify-priority-forecast', {
+      invokeWithTimeout('notify-priority-forecast', {
         body: { mode: 'assigned', month: input.month, client_ids: input.clientIds },
       }).catch(() => {});
     },
@@ -435,7 +436,7 @@ export function useCrmForecastBanner(crmId: string | null) {
   const threeDaysAgo = new Date(Date.now() - 3 * 864e5).toISOString();
   const newCount = rows.filter((r) => r.created_at >= threeDaysAgo).length;
   const dueCount = rows.filter((r) =>
-    remarkDue({ baseline: r.baseline, liveSessionsLeft: null, consumedSinceMark: consumedQ.data?.get(r.client_id) ?? 0, remarks: r.remarks, achieved: false }).due
+    remarkDue({ baseline: r.baseline, liveSessionsLeft: null, consumedSinceMark: consumedQ.data?.get?.(r.client_id) ?? 0, remarks: r.remarks, achieved: false }).due
   ).length;
   return { total: rows.length, newCount, dueCount, isLoading: rowsQ.isLoading || mineQ.isLoading, month };
 }

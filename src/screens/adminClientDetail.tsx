@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, Pressable, TextInput, ActivityIndicator, Linking, Switch, Modal, ScrollView } from 'react-native';
+import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import { C, F, hexA } from '../theme';
 import { Icon } from '../icons';
 import { Serif, Body, Mono, Card, Avatar, ProgressBar } from '../components/primitives';
@@ -37,10 +38,11 @@ const inpSt = { borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.05)', bor
 const todayYmd = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 
 function Sheet({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+  const kb = useKeyboardHeight(); // Android edge-to-edge: lift the sheet above the keyboard
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.62)', justifyContent: 'flex-end' }}>
-        <View style={{ maxHeight: '90%', backgroundColor: '#0E0A09', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 14, paddingBottom: 24 }}>
+        <View style={{ maxHeight: '90%', backgroundColor: '#0E0A09', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 14, paddingBottom: kb > 0 ? kb + 14 : 24 }}>
           <View style={{ width: 40, height: 4, borderRadius: 99, backgroundColor: 'rgba(255,255,255,0.2)', alignSelf: 'center', marginBottom: 12 }} />
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9, marginBottom: 10 }}>
             <Serif style={{ flex: 1, fontSize: 18 }}>{title}</Serif>
@@ -343,7 +345,7 @@ export function AdminClientDetail() {
                 <Serif numberOfLines={1} style={{ fontSize: 19 }}>{name}</Serif>
                 {c.email ? <Body numberOfLines={1} style={{ fontSize: 10.5, color: C.muted2 }}>{c.email}</Body> : null}
                 {c.phone ? (
-                  <Pressable onPress={() => Linking.openURL(`tel:${c.phone}`)} hitSlop={6}>
+                  <Pressable onPress={() => Linking.openURL(`tel:${c.phone}`)} hitSlop={10}>
                     <Body style={{ fontSize: 10.5, color: C.blue }}>{c.phone}</Body>
                   </Pressable>
                 ) : null}
@@ -494,7 +496,7 @@ export function AdminClientDetail() {
                       setErr(null);
                       if (removeArm === t.rowId) removeTrainer.mutate({ rowId: t.rowId, clientId: c.id }, { onSuccess: () => setRemoveArm(null), onError: fail });
                       else setRemoveArm(t.rowId);
-                    }} hitSlop={6} style={{ width: 28, height: 28, borderRadius: 10, backgroundColor: hexA(C.red, removeArm === t.rowId ? 0.25 : 0.1), borderWidth: 1, borderColor: hexA(C.red, 0.4), alignItems: 'center', justifyContent: 'center' }}>
+                    }} hitSlop={10} style={{ width: 28, height: 28, borderRadius: 10, backgroundColor: hexA(C.red, removeArm === t.rowId ? 0.25 : 0.1), borderWidth: 1, borderColor: hexA(C.red, 0.4), alignItems: 'center', justifyContent: 'center' }}>
                       <Icon name="close" size={11} color={C.red} strokeWidth={2.5} />
                     </Pressable>
                   </View>
@@ -553,17 +555,17 @@ export function AdminClientDetail() {
                                 </View>
                                 {s.complimentary_session ? <Badge text="Comp" color={C.purple} /> : null}
                                 <Badge text={s.cancelled || s.status === 'cancelled' ? 'cancelled' : 'completed'} color={col} />
-                                <Pressable disabled={toggleComp.isPending} onPress={() => { setErr(null); toggleComp.mutate({ id: s.id, next: !s.complimentary_session, clientId: c.id }, { onError: fail }); }} hitSlop={5} style={{ width: 26, height: 26, borderRadius: 9, backgroundColor: hexA(C.purple, s.complimentary_session ? 0.25 : 0.08), borderWidth: 1, borderColor: hexA(C.purple, 0.4), alignItems: 'center', justifyContent: 'center' }}>
+                                <Pressable disabled={toggleComp.isPending} onPress={() => { setErr(null); toggleComp.mutate({ id: s.id, next: !s.complimentary_session, clientId: c.id }, { onError: fail }); }} hitSlop={10} style={{ width: 26, height: 26, borderRadius: 9, backgroundColor: hexA(C.purple, s.complimentary_session ? 0.25 : 0.08), borderWidth: 1, borderColor: hexA(C.purple, 0.4), alignItems: 'center', justifyContent: 'center' }}>
                                   <Icon name="gift" size={11} color={C.purple} strokeWidth={2.2} />
                                 </Pressable>
-                                <Pressable onPress={() => setSessSheet({ mode: 'edit', s })} hitSlop={5} style={{ width: 26, height: 26, borderRadius: 9, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }}>
+                                <Pressable onPress={() => setSessSheet({ mode: 'edit', s })} hitSlop={10} style={{ width: 26, height: 26, borderRadius: 9, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }}>
                                   <Icon name="clipboard" size={11} color={C.muted} strokeWidth={2} />
                                 </Pressable>
                                 <Pressable disabled={delSession.isPending} onPress={() => {
                                   setErr(null);
                                   if (delArm === s.id) delSession.mutate({ id: s.id, clientId: c.id }, { onSuccess: () => setDelArm(null), onError: fail });
                                   else setDelArm(s.id);
-                                }} hitSlop={5} style={{ width: 26, height: 26, borderRadius: 9, backgroundColor: hexA(C.red, delArm === s.id ? 0.3 : 0.08), borderWidth: 1, borderColor: hexA(C.red, 0.4), alignItems: 'center', justifyContent: 'center' }}>
+                                }} hitSlop={10} style={{ width: 26, height: 26, borderRadius: 9, backgroundColor: hexA(C.red, delArm === s.id ? 0.3 : 0.08), borderWidth: 1, borderColor: hexA(C.red, 0.4), alignItems: 'center', justifyContent: 'center' }}>
                                   <Icon name="close" size={10} color={C.red} strokeWidth={2.5} />
                                 </Pressable>
                               </View>
@@ -624,7 +626,7 @@ export function AdminClientDetail() {
                   {(membersQ.data ?? []).map((m) => (
                     <View key={m.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 9, padding: 8, borderRadius: 10, backgroundColor: 'rgba(0,0,0,0.22)' }}>
                       <Body style={{ flex: 1, fontSize: 12, color: '#fff' }}>{m.name}</Body>
-                      <Pressable disabled={updateGen.isPending} onPress={() => { setErr(null); updateGen.mutate({ clientId: c.id, generationAdmin: true, members: memberIds.filter((x) => x !== m.id) }, { onError: fail }); }} hitSlop={6} style={{ width: 26, height: 26, borderRadius: 9, backgroundColor: hexA(C.red, 0.1), borderWidth: 1, borderColor: hexA(C.red, 0.4), alignItems: 'center', justifyContent: 'center' }}>
+                      <Pressable disabled={updateGen.isPending} onPress={() => { setErr(null); updateGen.mutate({ clientId: c.id, generationAdmin: true, members: memberIds.filter((x) => x !== m.id) }, { onError: fail }); }} hitSlop={10} style={{ width: 26, height: 26, borderRadius: 9, backgroundColor: hexA(C.red, 0.1), borderWidth: 1, borderColor: hexA(C.red, 0.4), alignItems: 'center', justifyContent: 'center' }}>
                         <Icon name="close" size={10} color={C.red} strokeWidth={2.5} />
                       </Pressable>
                     </View>

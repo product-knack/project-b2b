@@ -1,20 +1,22 @@
 import React from 'react';
-import { View, Text, Pressable, ScrollView, FlatList, Image, Modal, TextInput, Keyboard, Platform, PanResponder, Animated, Easing, Alert, ActivityIndicator, useWindowDimensions, Linking, AppState, KeyboardAvoidingView, LayoutAnimation } from 'react-native';
-import { backSwipeLock } from '../gestureLock';
+import { View, Text, Pressable, ScrollView, FlatList, Image, Modal, TextInput, TextInputProps, Keyboard, Platform, PanResponder, Animated, Easing, Alert, ActivityIndicator, useWindowDimensions, Linking, AppState, KeyboardAvoidingView, LayoutAnimation } from 'react-native';
+import { backSwipeLock, backOverride } from '../gestureLock';
 import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { trackClientTab } from '../lib/amplitude';
 import { FeatureTour, TRAINER_TOUR, TourLauncher } from '../components/featureTour';
+import { useDragReorder } from '../lib/useDragReorder';
+import { withTimeout, NET_MS, GPS_MS } from '../lib/withTimeout';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { C, F, hexA, ORANGE_GRAD } from '../theme';
 import { Icon, TrophyIcon, IconName } from '../icons';
-import { useStore } from '../store';
+import { useStore, homeRouteFor, Role } from '../store';
 import {
   Serif, Body, Mono, Card, StatCard, QuickAction, IconChip, GradientButton, ProgressBar, Pill, Avatar, AvatarPhoto, CountUp,
 } from '../components/primitives';
 import { useSidebarProfile, useUploadAvatar } from '../lib/navQueries';
-import { Page, GreetingHeader, TitleBlock, BackLink, MiniStat, Badge, SessionCard, CollapsibleSessionCard, ActionBtn, MiniAvatar, HScroll } from './common';
+import { Page, GreetingHeader, TitleBlock, BackLink, MiniStat, Badge, SessionCard, CollapsibleSessionCard, ActionBtn, MiniAvatar, HScroll, AccessPending } from './common';
 import { AccountSwitch } from '../components/AccountSwitch';
 import { QhpReviewAlert, HeldReportsAlert } from '../components/qhpAlerts';
 import { OddsWordmark } from '../components/oddsAi';
@@ -23,16 +25,22 @@ import { useAuth } from '../auth';
 import { supabase, DEV_TRAINER_ID } from '../lib/supabase';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { QhpAssessmentForm, CoachPresenceModal, fetchHasPriorCompletedQHP } from './qhpAssessmentForm';
-import { useTodayRoster, useTrainerStats, useTrainerProfile, useTrainerMonthSessions, useTrainerLeaderboard, useManagerLeaderboard, useManagerTeam, useManagerTeamLeaves, useManagerTeamIncidents, useManagerTeamRetention, useManagerTeamLateLogs, useManagerTeamRoster, useManagerTeamPlanOverview, useManagerTeamAcks, useManagerTeamAppAdoption, useTrainerSessionBreakdown, useTrainerReferralBreakdown, useFirstSessionAlert, istTimeParts, istDayLabel, istDate, useCancelScheduledSession, useRequestReschedule, useAddMissedRemark, lbMonthBounds, lbMonthLabel, LbBounds, RosterRow, ManagerTeamMember, MgrMonthFilter, usePlanExpiryMap, PlanExpiry, useTrainerAckSummary, useRequestRoster, useRosterDistance, SESSION_MODALITIES, useMyMonthSessionBreakdown, usePilatesRunRate } from '../lib/trainerQueries';
-import { useMyClients, useClientDetail, useClientSessions, useClientPlans, useClientGoals, useClientReports, useClientBioAge, useClientProgression, useCreateWorkoutSession, useModalityGate, useWorkoutTemplates, useSaveWorkoutTemplate, useDeleteWorkoutTemplate, useClientHealthCheck, useSaveHealthData, useExerciseDb, useSessionExercises, uuidv4, HealthDataInput, useWeeklyProgressionAll, ackWeeklyReport, WeeklyProgressionRow, useApprovedPlansForLogging, usePartnerInfo, usePreviousExerciseData, checkDuplicateWorkoutToday, PlanExerciseRow, useClientDailyStats, useSaveClientHomeLocation, PILATES_REFORMER_EXERCISES, usePlanEditValidation, normalizePlanModality, PLAN_EDIT_MAX_WORKOUTS } from '../lib/clientQueries';
+import { useAddOwnSession, useTodayRoster, useTrainerStats, useTrainerProfile, useTrainerMonthSessions, useTrainerLeaderboard, useManagerLeaderboard, useManagerTeam, useManagerTeamLeaves, useManagerTeamIncidents, useManagerTeamRetention, useManagerTeamLateLogs, useManagerTeamRoster, useManagerTeamPlanOverview, useManagerTeamAcks, useManagerTeamAppAdoption, useTrainerSessionBreakdown, useTrainerReferralBreakdown, useFirstSessionAlert, istTimeParts, istDayLabel, istDate, useCancelScheduledSession, useRequestReschedule, useAddMissedRemark, lbMonthBounds, lbMonthLabel, LbBounds, RosterRow, ManagerTeamMember, MgrMonthFilter, usePlanExpiryMap, PlanExpiry, useTrainerAckSummary, useRequestRoster, useRosterDistance, SESSION_MODALITIES, useMyMonthSessionBreakdown, usePilatesRunRate } from '../lib/trainerQueries';
+import { PrevSet, useMyClients, useClientDetail, useClientSessions, useClientPlans, useClientGoals, useSaveWeeklyGoals, useDeleteWeeklyGoal, useZone2Week, useLogZone2Session, useWeeklyHealthSummary, PLAN_VALID_DAYS, useClientReports, useClientBioAge, useClientProgression, useCreateWorkoutSession, useModalityGate, useWorkoutTemplates, useSaveWorkoutTemplate, useDeleteWorkoutTemplate, useClientHealthCheck, useSaveHealthData, useExerciseDb, useSessionExercises, uuidv4, HealthDataInput, useWeeklyProgressionAll, ackWeeklyReport, WeeklyProgressionRow, useApprovedPlansForLogging, usePartnerInfo, usePreviousExerciseData, checkDuplicateWorkoutToday, PlanExerciseRow, useClientDailyStats, useSaveClientHomeLocation, PILATES_REFORMER_EXERCISES, usePlanEditValidation, normalizePlanModality, PLAN_EDIT_MAX_WORKOUTS } from '../lib/clientQueries';
 import * as Location from 'expo-location';
 import KvStorage from 'expo-sqlite/kv-store';
 import { enqueueOutbox, getIsOnline, useIsOnline, useOutbox, retryOutboxItem, removeOutboxItem, drainOutbox, submitItem, updateOutboxItem, getOutboxItem, WorkoutLogOutboxPayload, OutboxItem, useSyncedNotices, dismissSyncedNotice } from '../lib/offline';
 import { useClientThreadsUnread } from '../lib/clientThreadQueries';
 import { ClientThreadsCard } from '../components/clientThreadsCard';
+import { ManagerTeamChatCard } from './managerChat';
+import { istToday, useMyManagerTeam, TRAINER_MODALITIES } from '../lib/managerChatQueries';
+import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import { useQhpAssessments, useQhpPermissions, useQhpConnectAlerts, useMarkQhpConnected, useQhpAssessors, useQhpClients, useScheduleQhp, useRequestQhpReschedule, useClientMedicalHistory, useClientHealthReports, HealthReportItem, useParqLinks, useGenerateParqLink, qhpFormatDuration, qhpUrgency, QHP_TARGET_MINS } from '../lib/qhpQueries';
 import { PdfPreview } from '../components/PdfPreview';
+import { QhpVoiceMemoButton, QhpVoiceMemoPlayer, QhpVoiceMemoDialog } from '../components/QhpVoiceMemo';
+import { QhpRefreshPendingCard } from '../components/qhpRefreshPending';
 import { useMyCapabilities } from '../lib/capabilities';
+import { fmtSlotLong } from '../lib/opsLeadQueries';
 import { QhpReports } from './qhpReports';
 import { ServicesButton } from '../components/servicesButton';
 import { SessionHandoffPopup } from '../components/sessionHandoff';
@@ -88,7 +96,7 @@ export function SignIn() {
   }, []);
   // Role dropdown — the workspace is still decided by the ACCOUNT's real
   // profiles.role after authentication; picking a role only prefills the form.
-  const ROLE_OPTS = [['crm', 'CRM', 'userCircle'], ['trainer', 'Trainer', 'dumbbell'], ['coach', 'Coach', 'crown'], ['ops', 'Operations', 'layers'], ['admin', 'Admin', 'shield'], ['doctor', 'Doctor', 'heart'], ['marketing', 'Marketing', 'trend'], ['academy', 'Academy', 'award']] as const;
+  const ROLE_OPTS = [['crm', 'CRM', 'userCircle'], ['trainer', 'Trainer', 'dumbbell'], ['coach', 'Coach', 'crown'], ['ops', 'Operations', 'layers'], ['admin', 'Admin', 'shield'], ['doctor', 'Doctor', 'heart'], ['therapist', 'Therapist', 'activity'], ['marketing', 'Marketing', 'trend'], ['academy', 'Academy', 'award'], ['tech', 'Tech', 'activity']] as const;
   const [fill, setFill] = React.useState<(typeof ROLE_OPTS)[number][0]>('trainer');
   const pickRole = (id: (typeof ROLE_OPTS)[number][0]) => setFill(id);
   const [rolePickerOpen, setRolePickerOpen] = React.useState(false);
@@ -102,8 +110,17 @@ export function SignIn() {
     // The selected role MUST match the account's REAL role (profiles.role) —
     // auth.signIn enforces it and signs the session back out on mismatch,
     // BEFORE any state can leak (so the Router never redirects).
-    const { error, role: accountRole } = await signIn(email.trim(), password, fill);
-    setSigningIn(false);
+    // Bounded + finally: a stalled auth call can never leave the button stuck
+    // at "Signing in…".
+    let error: string | null = null;
+    let accountRole: Role | null = null;
+    try {
+      ({ error, role: accountRole } = await withTimeout(signIn(email.trim(), password, fill), NET_MS, 'Sign in'));
+    } catch (e: any) {
+      error = e?.message ?? 'Could not sign in. Please try again.';
+    } finally {
+      setSigningIn(false);
+    }
     if (error) {
       if (error.startsWith('wrong-role:')) {
         const real = error.slice('wrong-role:'.length);
@@ -116,7 +133,7 @@ export function SignIn() {
     }
     const r = accountRole ?? 'trainer';
     set({ role: r }); // drawer/nav & home routes follow the real account role
-    go(r === 'crm' ? 'crm-dashboard' : r === 'coach' ? 'coach-dashboard' : r === 'ops' ? 'ops-dashboard' : r === 'admin' ? 'admin-dashboard' : r === 'doctor' ? 'doctor-dashboard' : r === 'marketing' ? 'marketing-dashboard' : 'dashboard', true);
+    go(homeRouteFor(r), true); // the canonical role -> home map (covers therapist/academy too)
   };
   return (
     <ScrollView ref={signInScrollRef} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingTop: insets.top + 90, paddingBottom: 40 + signInKbH, paddingHorizontal: 22, minHeight: '100%' }}>
@@ -196,6 +213,26 @@ export function SignIn() {
 const inputStyle = { width: '100%' as const, paddingVertical: 15, paddingHorizontal: 16, borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.03)', marginBottom: 0 };
 
 /* ============ TODAY'S ROSTER — per-session card ============ */
+/* Centered-dialog backdrop that stays clear of the keyboard. KeyboardAvoidingView
+   is a no-op inside RN Modals on Android edge-to-edge, so this tracks the keyboard
+   itself and pads the centered layout up; pair with maxHeight + an inner ScrollView
+   on the card so small screens can always reach every field. */
+function KbCenter({ onDismiss, children }: { onDismiss: () => void; children: React.ReactNode }) {
+  const [kb, setKb] = React.useState(0);
+  React.useEffect(() => {
+    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const s = Keyboard.addListener(showEvt, (e: any) => setKb(e.endCoordinates?.height ?? 0));
+    const h = Keyboard.addListener(hideEvt, () => setKb(0));
+    return () => { s.remove(); h.remove(); };
+  }, []);
+  return (
+    <Pressable onPress={onDismiss} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'center', padding: 22, paddingBottom: 22 + kb }}>
+      {children}
+    </Pressable>
+  );
+}
+
 const PRE_WINDOW_MS = 60 * 60 * 1000; // 1h before
 const POST_WINDOW_MS = 2 * 60 * 60 * 1000; // 2h after
 
@@ -324,7 +361,7 @@ function RescheduleSheet({ row, visible, onClose }: { row: RosterRow; visible: b
               </View>
 
               {label('NEW DATE')}
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 4 }} style={{ marginBottom: 16 }}>
+              <ScrollView keyboardShouldPersistTaps="handled" horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 4 }} style={{ marginBottom: 16 }}>
                 {days.map((d) => {
                   const sel = date === d.iso;
                   return (
@@ -444,7 +481,7 @@ export function DistanceSheet({ row, visible, onClose }: { row: { client_id: str
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable onPress={onClose} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' }}>
-        <Pressable onPress={() => {}} style={{ backgroundColor: C.sheetBg, borderTopLeftRadius: 26, borderTopRightRadius: 26, borderWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 9, paddingBottom: insets.bottom + 18 }}>
+        <Pressable onPress={() => {}} style={{ maxHeight: '90%', backgroundColor: C.sheetBg, borderTopLeftRadius: 26, borderTopRightRadius: 26, borderWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 9, paddingBottom: insets.bottom + 18 }}>
           <View style={{ alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.14)', marginBottom: 14 }} />
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 }}>
             <IconChip icon="map" color={C.blue} />
@@ -522,6 +559,142 @@ export function DistanceSheet({ row, visible, onClose }: { row: { client_id: str
           ) : null}
         </Pressable>
       </Pressable>
+    </Modal>
+  );
+}
+
+/* ---------- Add own session (trainers with no current manager team) ----------
+   A trainer in a team gets their roster from the day plan; a trainer in no team
+   had only the CRM request flow. This adds today/tomorrow directly. The rules
+   live in the trainer_add_own_session RPC — this sheet just mirrors them. */
+function AddOwnSessionSheet({ visible, onClose, trainerId, initialDay = 0 }: { visible: boolean; onClose: () => void; trainerId: string; initialDay?: 0 | 1 }) {
+  const insets = useSafeAreaInsets();
+  const kbH = useKeyboardHeight();
+  const clientsQ = useMyClients(trainerId);
+  const addM = useAddOwnSession();
+  const [clientId, setClientId] = React.useState<string | null>(null);
+  const [clientQ, setClientQ] = React.useState('');
+  const [day, setDay] = React.useState<0 | 1>(initialDay);
+  const [time, setTime] = React.useState('09:00');
+  const [modality, setModality] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (visible) { setClientId(null); setClientQ(''); setDay(initialDay); setTime('09:00'); setModality(null); addM.reset(); }
+  }, [visible, initialDay]);
+
+  const clients = clientsQ.data ?? [];
+  const filtered = clientQ.trim()
+    ? clients.filter((c) => c.full_name.toLowerCase().includes(clientQ.trim().toLowerCase()))
+    : clients;
+  // Today / tomorrow in IST — the only two the RPC accepts.
+  const dayIso = (offset: number) => {
+    const d = new Date(Date.now() + offset * 864e5);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+  const dayLabel = (offset: number) =>
+    new Date(Date.now() + offset * 864e5).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
+  const timeOk = /^([01]\d|2[0-3]):[0-5]\d$/.test(time);
+  const canSave = !!clientId && !!modality && timeOk && !addM.isPending;
+  const err = addM.error as Error | null;
+
+  const save = () => {
+    if (!canSave) return;
+    addM.mutate({ clientId: clientId!, date: dayIso(day), time, modality: modality! }, {
+      onSuccess: () => { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}); onClose(); },
+    });
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={{ flex: 1, justifyContent: 'flex-end' }}>
+        <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel="Close" importantForAccessibility="no-hide-descendants"
+          style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.62)' }} />
+        <View accessibilityViewIsModal style={{ maxHeight: '88%', backgroundColor: C.sheetBg, borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.16)', paddingHorizontal: 18, paddingTop: 14, paddingBottom: 14 + insets.bottom + kbH }}>
+          <View style={{ width: 40, height: 4, borderRadius: 99, backgroundColor: 'rgba(255,255,255,0.2)', alignSelf: 'center', marginBottom: 12 }} />
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9, marginBottom: 4 }}>
+            <Serif style={{ flex: 1, fontSize: 19 }}>Add a session</Serif>
+            <Pressable onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel="Close"
+              style={{ width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.06)' }}>
+              <Icon name="close" size={14} color={C.muted} strokeWidth={2.2} />
+            </Pressable>
+          </View>
+          <Body style={{ fontSize: 11.5, color: C.muted2, marginBottom: 12 }}>Today or tomorrow only. It appears on your roster straight away, ready to log.</Body>
+
+          <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 14, paddingBottom: 8 }}>
+            <View style={{ gap: 7 }}>
+              <Mono style={{ fontSize: 9, letterSpacing: 0.8, color: C.muted3 }}>DAY</Mono>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                {([0, 1] as const).map((o) => {
+                  const on = day === o;
+                  return (
+                    <Pressable key={o} onPress={() => setDay(o)} accessibilityRole="button" accessibilityState={{ selected: on }}
+                      style={{ flex: 1, alignItems: 'center', paddingVertical: 11, borderRadius: 11, backgroundColor: on ? hexA(C.orange, 0.14) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: on ? hexA(C.orange, 0.4) : 'rgba(255,255,255,0.09)' }}>
+                      <Text style={{ fontFamily: on ? F.bodyBold : F.bodySemi, fontSize: 12.5, color: on ? C.orange : C.muted }}>{o === 0 ? 'Today' : 'Tomorrow'}</Text>
+                      <Mono style={{ fontSize: 8.5, color: C.muted3, marginTop: 2 }}>{dayLabel(o).toUpperCase()}</Mono>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+
+            <View style={{ gap: 7 }}>
+              <Mono style={{ fontSize: 9, letterSpacing: 0.8, color: C.muted3 }}>CLIENT</Mono>
+              <TextInput value={clientQ} onChangeText={setClientQ} placeholder="Search your clients" placeholderTextColor={C.muted3}
+                accessibilityLabel="Search your clients"
+                style={{ fontFamily: F.body, fontSize: 14, color: '#fff', paddingVertical: 10, paddingHorizontal: 12, borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }} />
+              <View style={{ maxHeight: 190, borderRadius: 11, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' }}>
+                <ScrollView keyboardShouldPersistTaps="handled" nestedScrollEnabled>
+                  {clientsQ.isPending ? (
+                    <View style={{ paddingVertical: 18, alignItems: 'center' }}><ActivityIndicator color={C.orange} /></View>
+                  ) : !filtered.length ? (
+                    <Body style={{ fontSize: 12, color: C.muted3, textAlign: 'center', paddingVertical: 16 }}>No clients match.</Body>
+                  ) : filtered.map((c) => {
+                    const on = clientId === c.client_id;
+                    return (
+                      <Pressable key={c.client_id} onPress={() => setClientId(c.client_id)} accessibilityRole="button" accessibilityState={{ selected: on }}
+                        style={{ minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 11, paddingHorizontal: 12, backgroundColor: on ? hexA(C.orange, 0.12) : 'transparent' }}>
+                        <Text style={{ flex: 1, fontFamily: on ? F.bodyBold : F.body, fontSize: 13.5, color: on ? C.orange : C.ink }}>{c.full_name}</Text>
+                        {on ? <Icon name="checks" size={13} color={C.orange} strokeWidth={2.6} /> : null}
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+            </View>
+
+            <View style={{ gap: 7 }}>
+              <Mono style={{ fontSize: 9, letterSpacing: 0.8, color: C.muted3 }}>TIME (HH:MM · IST)</Mono>
+              <TextInput value={time} onChangeText={setTime} placeholder="09:00" placeholderTextColor={C.muted3} keyboardType="numbers-and-punctuation"
+                accessibilityLabel="Session time"
+                style={{ fontFamily: F.body, fontSize: 14, color: '#fff', paddingVertical: 10, paddingHorizontal: 12, borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: timeOk || !time ? 'rgba(255,255,255,0.1)' : hexA(C.red, 0.5) }} />
+            </View>
+
+            <View style={{ gap: 7 }}>
+              <Mono style={{ fontSize: 9, letterSpacing: 0.8, color: C.muted3 }}>MODALITY</Mono>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}>
+                {TRAINER_MODALITIES.map((m) => {
+                  const on = modality === m;
+                  return (
+                    <Pressable key={m} onPress={() => setModality(m)} accessibilityRole="button" accessibilityState={{ selected: on }}
+                      style={{ minHeight: 36, justifyContent: 'center', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 999, backgroundColor: on ? hexA(C.orange, 0.14) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: on ? hexA(C.orange, 0.4) : 'rgba(255,255,255,0.09)' }}>
+                      <Text style={{ fontFamily: on ? F.bodyBold : F.body, fontSize: 12, color: on ? C.orange : C.muted }}>{m}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+
+            {err ? <Body style={{ fontSize: 11.5, color: C.red }}>{err.message}</Body> : null}
+          </ScrollView>
+
+          <Pressable onPress={save} disabled={!canSave} accessibilityRole="button" accessibilityLabel="Add the session"
+            style={{ marginTop: 12, borderRadius: 13, overflow: 'hidden', opacity: canSave ? 1 : 0.5 }}>
+            <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ alignItems: 'center', paddingVertical: 13 }}>
+              <Text style={{ fontFamily: F.bodyBold, fontSize: 13.5, color: '#fff' }}>{addM.isPending ? 'Adding…' : 'Add to my roster'}</Text>
+            </LinearGradient>
+          </Pressable>
+        </View>
+      </View>
     </Modal>
   );
 }
@@ -637,7 +810,7 @@ function RequestRosterSheet({ visible, onClose, trainerId }: { visible: boolean;
                   <Icon name="search" size={14} color={C.muted3} strokeWidth={2} />
                   <TextInput value={clientQ} onChangeText={setClientQ} placeholder="Search your clients…" placeholderTextColor={C.muted3} style={{ flex: 1, paddingVertical: 10, fontFamily: F.bodySemi, fontSize: 13, color: '#fff' }} />
                 </View>
-                <View style={{ maxHeight: 190, borderRadius: 13, borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)', overflow: 'hidden' }}>
+                <View style={{ maxHeight: 300, borderRadius: 13, borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)', overflow: 'hidden' }}>
                   <ScrollView nestedScrollEnabled keyboardShouldPersistTaps="handled">
                     {clientsQ.isLoading ? (
                       <Body style={{ fontSize: 12, color: C.muted3, textAlign: 'center', paddingVertical: 16 }}>Loading clients…</Body>
@@ -659,7 +832,7 @@ function RequestRosterSheet({ visible, onClose, trainerId }: { visible: boolean;
             {!isFull ? (
               <>
                 {label('DATE *')}
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 4 }} style={{ marginBottom: 16 }}>
+                <ScrollView keyboardShouldPersistTaps="handled" horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 4 }} style={{ marginBottom: 16 }}>
                   {days.map((d) => {
                     const sel = date === d.iso;
                     return (
@@ -852,7 +1025,6 @@ function RosterCard({ row, trainerName, highlight, onAddWorkout, plans, devPos }
     });
     return () => { s.remove(); h.remove(); };
   }, []);
-  const [reschedOpen, setReschedOpen] = React.useState(false);
   const [distOpen, setDistOpen] = React.useState(false);
   const [text, setText] = React.useState('');
   const [missedCat, setMissedCat] = React.useState<string | null>(null);
@@ -892,7 +1064,6 @@ function RosterCard({ row, trainerName, highlight, onAddWorkout, plans, devPos }
   const trainerHasMissedRemark = Array.isArray(row.missed_remarks) && row.missed_remarks.some((r: any) => r?.by_role === 'trainer');
   const isOpenPast = row.is_open_past === true;
   const canAddWorkout = !isCancelled && !isOpenPast && (isPending || windowState === 'inside');
-  const showReschedule = !logged && !isCancelled && !isPending;
   const isCarryover = istDate(new Date(row.scheduled_datetime)) !== istDate();
   const winStart = istTimeParts(new Date(t - PRE_WINDOW_MS).toISOString());
   const winEnd = istTimeParts(new Date(t + POST_WINDOW_MS).toISOString());
@@ -903,7 +1074,8 @@ function RosterCard({ row, trainerName, highlight, onAddWorkout, plans, devPos }
     : logged
     ? { label: 'Logged', color: C.green, hint: null }
     : isOpenPast
-    ? { label: 'Overdue', color: C.red, hint: trainerHasMissedRemark ? 'Remark saved · reschedule to put it back on the plan' : 'Missed session — reschedule it or add a remark' }
+    /* Reschedule was removed from this card, so the hints no longer point at it. */
+    ? { label: 'Overdue', color: C.red, hint: trainerHasMissedRemark ? 'Remark saved' : 'Missed session · add a remark' }
     : isPending
     ? {
         label: 'Reschedule pending',
@@ -917,7 +1089,7 @@ function RosterCard({ row, trainerName, highlight, onAddWorkout, plans, devPos }
     ? { label: 'Ready to log', color: C.green, hint: `Log window open until ${winEnd.time} ${winEnd.ampm}` }
     : windowState === 'before'
     ? { label: 'Upcoming', color: C.blue, hint: `Logging opens at ${winStart.time} ${winStart.ampm}` }
-    : { label: 'Window closed', color: C.red, hint: `Closed at ${winEnd.time} ${winEnd.ampm} — reschedule to log this session` };
+    : { label: 'Window closed', color: C.red, hint: `Closed at ${winEnd.time} ${winEnd.ampm}` };
 
   // Android new-arch rule: never unmount a Modal while its TextInput is still
   // focused — dismiss the keyboard, let it settle, THEN close.
@@ -1053,9 +1225,12 @@ function RosterCard({ row, trainerName, highlight, onAddWorkout, plans, devPos }
         );
       })() : null}
 
+      {/* Reschedule requests were removed from this card on 2026-09-05 (user's call).
+          The reschedule STATUS chips above stay: a request raised from CRM or web
+          still has to be visible here. RescheduleSheet is left in the file so
+          putting the button back is a one-line change. */}
       {isCancelled || logged ? null : isOpenPast ? (
         <View style={{ flexDirection: 'row', gap: 8 }}>
-          <Btn primary label="Reschedule" icon="calendar" color={C.orange} onPress={() => setReschedOpen(true)} />
           <Pulse active={!trainerHasMissedRemark}>
             <Btn label={trainerHasMissedRemark ? 'Remark Logged' : 'Missed Remark'} icon="alert" color={C.gold} disabled={trainerHasMissedRemark} onPress={() => { setText(''); setMissedCat(null); cancelM.reset(); missedM.reset(); setModal('missed'); }} />
           </Pulse>
@@ -1065,14 +1240,10 @@ function RosterCard({ row, trainerName, highlight, onAddWorkout, plans, devPos }
           {canAddWorkout || windowState === 'before' ? (
             <Btn primary={canAddWorkout} label="Log Workout" icon="plus" color={C.green} disabled={!canAddWorkout} onPress={onAddWorkout} />
           ) : null}
-          {showReschedule ? (
-            <Btn primary={!canAddWorkout && windowState === 'after'} label="Reschedule" icon="calendar" color={C.orange} onPress={() => setReschedOpen(true)} />
-          ) : null}
           <Btn label="Cancel" icon="close" color={C.red} onPress={openCancelPicker} />
         </View>
       )}
 
-      {reschedOpen ? <RescheduleSheet row={row} visible onClose={() => setReschedOpen(false)} /> : null}
       {distOpen ? <DistanceSheet row={row} visible onClose={() => setDistOpen(false)} /> : null}
 
       {/* Cancel type picker (web CancelTypePickerDialog): Normal vs Paid, paid double-confirms */}
@@ -1485,7 +1656,13 @@ export function Dashboard() {
   const { height: dashWinH } = useWindowDimensions();
 
   const [rosterDay, setRosterDay] = React.useState(0); // 0 = today, ±N days (IST)
-  const [reqRosterOpen, setReqRosterOpen] = React.useState(false);
+  const [addOwnOpen, setAddOwnOpen] = React.useState(false);
+  /* useMyManagerTeam resolves the CURRENT competition batch (ongoing rows, else
+     the latest team_start) and returns null when I am in none of them — exactly
+     the "not in the latest managers team" case. Only decide once it has loaded,
+     so the button never flickers in for a team member. */
+  const myTeamQ = useMyManagerTeam();
+  const teamlessTrainer = !myTeamQ.isPending && !myTeamQ.data;
   const rosterQ = useTodayRoster(trainerId, rosterDay);
   // One silent device fix for the roster cards' inline distance estimates
   // (permission is guaranteed for trainers by the LocationGate — never prompts).
@@ -1566,6 +1743,10 @@ export function Dashboard() {
   // When browsing another day the carry-over/attention grouping doesn't apply.
   const todayIst = istDate();
   const isTodayView = rosterDay === 0;
+  /* Sessions can only be added for today or tomorrow, so the Add Session button is
+     live only on those two days. On any other day it stays visible but disabled,
+     rather than opening a sheet that cannot honour the day being viewed. */
+  const canAddForViewedDay = rosterDay === 0 || rosterDay === 1;
   const attentionRows = isTodayView ? rosterRows.filter((r) => r.is_open_past || istDate(new Date(r.scheduled_datetime)) !== todayIst) : [];
   const todayRows = isTodayView ? rosterRows.filter((r) => !r.is_open_past && istDate(new Date(r.scheduled_datetime)) === todayIst) : rosterRows;
   const missedNeedingRemark = attentionRows.filter((r) => r.is_open_past).length;
@@ -1639,14 +1820,25 @@ export function Dashboard() {
           3 hours (auto-hide), dismissible earlier. */}
       {syncedNotices.map((n) => {
         const tp = istTimeParts(n.syncedAt);
+        const pending = n.tone === 'link_pending';
+        const col = pending ? C.gold : C.green;
         return (
-          <View key={n.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 11, padding: 12, borderRadius: 14, backgroundColor: hexA(C.green, 0.08), borderWidth: 1, borderColor: hexA(C.green, 0.32) }}>
-            <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: hexA(C.green, 0.15), alignItems: 'center', justifyContent: 'center' }}>
-              <Icon name="checks" size={16} color={C.green} strokeWidth={2.4} />
+          <View key={n.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 11, padding: 12, borderRadius: 14, backgroundColor: hexA(col, 0.08), borderWidth: 1, borderColor: hexA(col, 0.32) }}>
+            <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: hexA(col, 0.15), alignItems: 'center', justifyContent: 'center' }}>
+              <Icon name={pending ? 'clock' : 'checks'} size={16} color={col} strokeWidth={2.4} />
             </View>
             <View style={{ flex: 1 }}>
-              <Body style={{ fontSize: 13, fontFamily: F.bodySemi, color: '#fff' }} numberOfLines={1}>{n.label} — saved to server ✓</Body>
-              <Body style={{ fontSize: 11, color: hexA(C.green, 0.9), marginTop: 1 }}>Synced {tp.time} {tp.ampm} · kept its original log time</Body>
+              {pending ? (
+                <>
+                  <Body style={{ fontSize: 13, fontFamily: F.bodySemi, color: '#fff' }} numberOfLines={1}>{n.label}</Body>
+                  <Body style={{ fontSize: 11, color: hexA(col, 0.9), marginTop: 1 }}>Workout saved. Roster sync is still finishing, nothing needed from you.</Body>
+                </>
+              ) : (
+                <>
+                  <Body style={{ fontSize: 13, fontFamily: F.bodySemi, color: '#fff' }} numberOfLines={1}>{n.label} — saved to server ✓</Body>
+                  <Body style={{ fontSize: 11, color: hexA(C.green, 0.9), marginTop: 1 }}>Synced {tp.time} {tp.ampm} · kept its original log time</Body>
+                </>
+              )}
             </View>
             <Pressable onPress={() => dismissSyncedNotice(n.id)} hitSlop={8} style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center', justifyContent: 'center' }}>
               <Icon name="close" size={12} color={C.muted} strokeWidth={2.3} />
@@ -1691,6 +1883,10 @@ export function Dashboard() {
           </Pressable>
         );
       })()}
+
+      {/* My Crew — team chat per manager_score competition row, directly after
+         the Sessions This Month card. Renders nothing without a current team. */}
+      <ManagerTeamChatCard />
 
       {/* ---- Pilates Run Rate — pilates-head specialization only ---- */}
       {dashCaps.data.isPilatesHead ? <PilatesRunRateCard /> : null}
@@ -1890,7 +2086,7 @@ export function Dashboard() {
         </Card>
       ) : null}
 
-      <RequestRosterSheet visible={reqRosterOpen} onClose={() => setReqRosterOpen(false)} trainerId={trainerId} />
+      <AddOwnSessionSheet visible={addOwnOpen} onClose={() => setAddOwnOpen(false)} trainerId={trainerId} initialDay={rosterDay === 1 ? 1 : 0} />
 
       <View style={{ gap: 13 }}>
         {sectionLabel('QUICK ACTIONS')}
@@ -1943,6 +2139,10 @@ export function Dashboard() {
 
       {/* Client Threads — one team chat per client (trainers + CRMs + doctors) */}
       <ClientThreadsCard onPress={() => go('client-threads')} unread={threadUnread} />
+
+      {/* QHP Refresh Pending — clients whose last QHP was 40+ days ago; tap to
+          propose a slot into the client's thread with the CRM tagged. */}
+      <QhpRefreshPendingCard trainerId={trainerId} />
 
       <View style={{ flexDirection: 'row', gap: 11 }}>
         {/* Today's sessions — circular progress against today's schedule; opens the roster. */}
@@ -2026,8 +2226,25 @@ export function Dashboard() {
 
             <View style={{ flexDirection: 'row', gap: 10 }}>
               <ActionBtn label="Trial Workout" icon="sparkle" accent onPress={() => go('workout')} />
-              <ActionBtn label="Request Roster" icon="layers" onPress={() => setReqRosterOpen(true)} />
+              {/* Request Roster was hidden on 2026-09-05 (user's call), so a trainer
+                  in a manager team now gets their roster only from the day plan.
+                  A trainer in NO current team keeps the direct add, which is their
+                  only route onto the roster. Only today and tomorrow can be added,
+                  so the label follows the day being viewed and the button goes
+                  quiet beyond tomorrow. RequestRosterSheet is left in the file so
+                  putting the button back is a one-line change. */}
+              {teamlessTrainer ? (
+                <ActionBtn
+                  label={rosterDay === 1 ? "Add Tomorrow" : "Add Session"}
+                  icon="calPlus"
+                  disabled={!canAddForViewedDay}
+                  onPress={() => setAddOwnOpen(true)}
+                />
+              ) : null}
             </View>
+            {teamlessTrainer && !canAddForViewedDay ? (
+              <Mono style={{ fontSize: 8.5, letterSpacing: 0.6, color: C.faint }}>SESSIONS CAN ONLY BE ADDED FOR TODAY OR TOMORROW</Mono>
+            ) : null}
             {rosterQ.isPending && rosterQ.fetchStatus === 'paused' ? (
               /* Offline with no cached copy of this day — say so instead of spinning forever. */
               <View style={{ alignItems: 'center', gap: 8, paddingVertical: 18, paddingHorizontal: 20 }}>
@@ -2347,7 +2564,7 @@ export function Dashboard() {
                 <Text style={{ fontFamily: F.bodyBold, fontSize: 15, color: '#fff' }}>Clients with QHP In Progress</Text>
                 <Body style={{ fontSize: 11.5, color: C.muted2, marginTop: 3 }}>These clients have an assessor assigned and the QHP is not yet completed.</Body>
               </View>
-              <Pressable onPress={() => setInProgressOpen(false)} style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center', justifyContent: 'center' }}>
+              <Pressable onPress={() => setInProgressOpen(false)} hitSlop={8} style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center', justifyContent: 'center' }}>
                 <Icon name="close" size={13} color="#B8B2AC" strokeWidth={2.3} />
               </Pressable>
             </View>
@@ -3715,7 +3932,7 @@ export function ClientDetail() {
         Alert.alert('Permission needed', "Allow location access to capture the client's home location.");
         return;
       }
-      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      const pos = await withTimeout(Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }), GPS_MS, 'GPS fix');
       await saveLocM.mutateAsync({ clientId, lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy ?? null });
       Alert.alert('Location saved', `${clientName}'s home location has been captured.`);
     } catch (e: any) {
@@ -3766,7 +3983,9 @@ export function ClientDetail() {
 
   // Weekly goals from DB
   const dbGoals = (goalsQ.data ?? []).map((g: any) => ({
+    id: g.id,
     range: `${g.week_start_date ? istDayLabel(g.week_start_date) : ''}${g.week_end_date ? ' – ' + istDayLabel(g.week_end_date) : ''}`.trim() || 'Week',
+    recommendation: g.recommendation ?? null,
     steps: g.steps_target != null ? `${g.steps_target}` : '—',
     sleep: g.sleep_target_hours != null ? `${g.sleep_target_hours}` : '—',
     nutrition: g.nutrition_target != null ? `${g.nutrition_target}` : '—',
@@ -3873,47 +4092,40 @@ export function ClientDetail() {
   const [selWeek, setSelWeek] = React.useState(0);
   const [selDay, setSelDay] = React.useState(0);
 
-  // 7-slot arrays (Mon..Sun); null = not logged / future day.
+  // 7-slot arrays (Mon..Sun), built LIVE from useWeeklyHealthSummary (web
+  // WeeklyHealthSummary parity: workout_analysis counts, nutrition_tracker,
+  // daily_health_metrics sleep with daily_sleep_logs fallback, daily_goals
+  // targets). workout null = future day (web renders those as em-dash, not
+  // Missed); steps are shown in thousands.
   type TW = {
     range: string; label: string; goals: string; done: boolean;
     dates: string[];
     workout: ('done' | 'missed' | null)[];
     steps: (number | null)[]; nutrition: (number | null)[]; sleep: (number | null)[];
+    z2Min: (number | null)[];
+    meals: any[][]; // per-day meals_analysis entries (B2C app logs)
+    stepsGoalK: number; nutritionGoal: number; sleepGoal: number;
+    z2cTarget: number | null; z2cDone: number;
   };
-  const trendWeeks: TW[] = [
-    {
-      range: 'Jun 29 – 5', label: 'This Week', goals: '0/1', done: false,
-      dates: ['Jun 29', 'Jun 30', 'Jul 1', 'Jul 2', 'Jul 3', 'Jul 4', 'Jul 5'],
-      workout: ['missed', 'done', 'missed', null, null, null, null],
-      steps: [5.0, 1.4, 0.2, null, null, null, null],
-      nutrition: [7, 6, 1, null, null, null, null],
-      sleep: [9.6, 7.9, 8.9, null, null, null, null],
-    },
-    {
-      range: 'Jun 22 – 28', label: 'Last Week', goals: '1/1', done: true,
-      dates: ['Jun 22', 'Jun 23', 'Jun 24', 'Jun 25', 'Jun 26', 'Jun 27', 'Jun 28'],
-      workout: ['done', null, 'done', null, 'done', 'missed', null],
-      steps: [8.2, 5.4, 6.9, 7.2, 7.9, 3.1, 6.6],
-      nutrition: [8, 7, 7, 6, 8, 5, 7],
-      sleep: [7.4, 8.1, 7.6, 7.9, 8.3, 6.9, 8.0],
-    },
-    {
-      range: 'Jun 15 – 21', label: '2 wks ago', goals: '1/2', done: false,
-      dates: ['Jun 15', 'Jun 16', 'Jun 17', 'Jun 18', 'Jun 19', 'Jun 20', 'Jun 21'],
-      workout: ['done', 'missed', null, 'done', null, 'missed', null],
-      steps: [7.1, 3.3, 4.8, 6.2, 5.1, 2.9, 4.4],
-      nutrition: [6, 4, 5, 7, 6, 3, 5],
-      sleep: [6.8, 7.2, 6.5, 7.8, 7.1, 6.2, 7.4],
-    },
-    {
-      range: 'Jun 8 – 14', label: '3 wks ago', goals: '0/1', done: false,
-      dates: ['Jun 8', 'Jun 9', 'Jun 10', 'Jun 11', 'Jun 12', 'Jun 13', 'Jun 14'],
-      workout: ['missed', null, 'missed', null, null, 'missed', null],
-      steps: [2.1, 3.4, 1.8, 2.9, 2.2, 1.5, 2.6],
-      nutrition: [5, 4, 3, 5, 4, 3, 4],
-      sleep: [6.5, 6.8, 6.1, 7.0, 6.4, 5.9, 6.7],
-    },
-  ];
+  const weeklyQ = useWeeklyHealthSummary(clientId);
+  const trendWeeks: TW[] = React.useMemo(() => (weeklyQ.data ?? []).map((w) => ({
+    range: w.label,
+    label: w.subLabel,
+    goals: `${w.goalsHit}/${w.goalsTotal}`,
+    done: w.goalsTotal > 0 && w.goalsHit >= w.goalsTotal,
+    dates: w.days.map((d) => d.dateLabel),
+    workout: w.days.map((d) => (d.isFuture ? null : d.workoutCount > 0 ? 'done' as const : 'missed' as const)),
+    steps: w.days.map((d) => (d.steps != null ? Number((d.steps / 1000).toFixed(1)) : null)),
+    nutrition: w.days.map((d) => d.nutrition),
+    sleep: w.days.map((d) => d.sleepHours),
+    z2Min: w.days.map((d) => d.z2Minutes),
+    meals: w.days.map((d) => (Array.isArray(d.meals) ? d.meals : [])),
+    stepsGoalK: w.goal.stepsTarget != null ? Number((w.goal.stepsTarget / 1000).toFixed(1)) : 8,
+    nutritionGoal: w.goal.nutritionTarget ?? 10,
+    sleepGoal: w.goal.sleepTarget ?? 8,
+    z2cTarget: w.goal.z2cTarget,
+    z2cDone: w.goal.z2cDone,
+  })), [weeklyQ.data]);
   const [openClientSession, setOpenClientSession] = React.useState<number | null>(null);
   const [openClientAi, setOpenClientAi] = React.useState<number | null>(null);
   const [openPlan, setOpenPlan] = React.useState<string | null>(null);
@@ -3930,23 +4142,55 @@ export function ClientDetail() {
     setOpenPlan(null);
   }, [clientId, clientInitialTab]);
 
-  // Weekly goals
-  const WEEKS = ['29 Jun – 5 Jul', '6 Jul – 12 Jul', '13 Jul – 19 Jul', '20 Jul – 26 Jul'];
-  type WeekGoal = { range: string; steps: string; sleep: string; nutrition: string; cardio: string; recovery: boolean };
-  const [goals, setGoals] = React.useState<WeekGoal[]>([]);
+  // Weekly goals — real Monday-start IST weeks: the CURRENT week + the next 3
+  // (web WeeklyGoals parity; the old hardcoded demo list wrote nothing to the DB).
+  const goalWeeks = React.useMemo(() => {
+    const [ty, tm, td] = istDate().split('-').map(Number);
+    const anchor = new Date(Date.UTC(ty, tm - 1, td, 12)); // noon UTC — DST-proof day anchor
+    const dow = (anchor.getUTCDay() + 6) % 7; // Mon=0
+    const lab = (d: Date) => d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+    return Array.from({ length: 4 }, (_, i) => {
+      const s = new Date(Date.UTC(ty, tm - 1, td - dow + i * 7, 12));
+      const e = new Date(s.getTime() + 6 * 864e5);
+      return { start: s.toISOString().slice(0, 10), label: `${lab(s)} – ${lab(e)}` };
+    });
+  }, [clientId]);
+  const saveGoalsM = useSaveWeeklyGoals();
+  const deleteGoalM = useDeleteWeeklyGoal();
   const [goalFormOpen, setGoalFormOpen] = React.useState(false);
-  const [gSteps, setGSteps] = React.useState('8000');
-  const [gSleep, setGSleep] = React.useState('7.5');
-  const [gNutrition, setGNutrition] = React.useState('7');
-  const [gCardio, setGCardio] = React.useState('150');
-  const [gRecovery, setGRecovery] = React.useState(true);
-  const [gRepeat, setGRepeat] = React.useState(false);
-  const saveGoals = () => {
-    const existing = new Set(goals.map((g) => g.range));
-    const targets = (gRepeat ? WEEKS : WEEKS.slice(0, 1)).filter((w) => !existing.has(w));
-    const mk = (range: string): WeekGoal => ({ range, steps: gSteps, sleep: gSleep, nutrition: gNutrition, cardio: gCardio, recovery: gRecovery });
-    setGoals((g) => [...g, ...targets.map(mk)]);
-    setGoalFormOpen(false);
+  const [gWeek, setGWeek] = React.useState(0); // which of the 4 weeks the form is for
+  const [gAlso, setGAlso] = React.useState<Set<number>>(new Set()); // later weeks to copy to
+  const [gRecommend, setGRecommend] = React.useState('');
+  const [gSteps, setGSteps] = React.useState('');
+  const [gSleep, setGSleep] = React.useState('');
+  const [gNutrition, setGNutrition] = React.useState('');
+  const [gCardio, setGCardio] = React.useState('');
+  const saveGoals = async () => {
+    const num = (s: string) => { const t = s.trim(); if (!t) return null; const n = Number(t); return isNaN(n) ? null : n; };
+    const sleep = num(gSleep), steps = num(gSteps), nutrition = num(gNutrition), z2c = num(gCardio);
+    // At least ONE target is required — an all-empty week is meaningless.
+    if (sleep == null && steps == null && nutrition == null && z2c == null) {
+      Alert.alert('Set at least one target', 'Fill in sleep, steps, nutrition or Zone 2 cardio before saving.');
+      return;
+    }
+    const weekStartDates = [goalWeeks[gWeek], ...[0, 1, 2, 3].filter((i) => i > gWeek && gAlso.has(i)).map((i) => goalWeeks[i])].map((w) => w.start);
+    try {
+      await saveGoalsM.mutateAsync({
+        clientId: clientId!,
+        weekStartDates,
+        sleep,
+        steps,
+        nutrition: nutrition != null ? Math.max(0, Math.min(10, nutrition)) : null,
+        z2c: z2c != null ? Math.round(z2c) : null, // Zone 2 = sessions per week (a count, not minutes)
+        recommendation: gRecommend.trim() || null,
+      });
+      setGoalFormOpen(false);
+      setGWeek(0);
+      setGAlso(new Set());
+      setGSteps(''); setGSleep(''); setGNutrition(''); setGCardio(''); setGRecommend('');
+    } catch (e: any) {
+      Alert.alert("Couldn't save goals", e?.message ?? 'Try again.');
+    }
   };
   return (
     <Page gap={16} pt={6}>
@@ -4142,6 +4386,17 @@ export function ClientDetail() {
       {clientTab === 'weekly' ? (
         <AiWeeklyReportTab clientId={clientId} />
       ) : clientTab === 'trends' ? (
+        weeklyQ.isLoading ? (
+          <Card colors={['rgba(46,28,18,0.4)', 'rgba(18,14,14,0.5)']} border="rgba(255,150,90,0.09)" style={{ padding: 20 }}>
+            <Body style={{ color: C.muted2, textAlign: 'center', paddingVertical: 14 }}>Loading trends…</Body>
+          </Card>
+        ) : weeklyQ.isError || trendWeeks.length === 0 ? (
+          <Card colors={['rgba(46,28,18,0.4)', 'rgba(18,14,14,0.5)']} border="rgba(255,150,90,0.09)" style={{ padding: 20 }}>
+            <Body style={{ color: weeklyQ.isError ? C.red : C.muted2, textAlign: 'center', paddingVertical: 14 }}>
+              {weeklyQ.isError ? "Couldn't load trends." : 'No trend data yet.'}
+            </Body>
+          </Card>
+        ) : (
         <>
           {/* Week selector */}
           <HScroll>
@@ -4280,9 +4535,66 @@ export function ClientDetail() {
                           color={wc === C.muted2 ? '#999189' : wc}
                         />
                       </View>
-                      {metric('STEPS', stepsV, 8, 'k', C.blue)}
-                      {metric('NUTRITION', nutV, 10, '', C.gold)}
-                      {metric('SLEEP', sleepV, 8, 'h', C.purple)}
+                      {metric('STEPS', stepsV, w.stepsGoalK, 'k', C.blue)}
+                      {metric('NUTRITION', nutV, w.nutritionGoal, '', C.gold)}
+                      {metric('SLEEP', sleepV, w.sleepGoal, 'h', C.purple)}
+                      {w.z2cTarget != null ? (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 2 }}>
+                          <Mono style={{ flex: 1, fontSize: 9, letterSpacing: 0.8, color: C.muted3 }}>ZONE 2 CARDIO</Mono>
+                          {w.z2Min[selDay] != null ? (
+                            <Badge text={w.z2Min[selDay] ? `Done · ${w.z2Min[selDay]}m` : 'Done'} color={C.green} />
+                          ) : null}
+                          <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: w.z2cDone >= w.z2cTarget ? C.green : C.gold }}>{w.z2cDone}/{w.z2cTarget} this week</Text>
+                        </View>
+                      ) : null}
+
+                      {/* Daily Meals — what the client logged in the B2C app that day
+                          (nutrition_tracker.meals_analysis). */}
+                      {(() => {
+                        const meals = [...(w.meals[selDay] ?? [])].sort((a: any, b: any) => String(a?.timestamp ?? '').localeCompare(String(b?.timestamp ?? '')));
+                        const n1 = (v: any) => { const n = Number(v); return isFinite(n) ? Math.round(n * 10) / 10 : 0; };
+                        const tot = meals.reduce((acc: any, m: any) => ({ cal: acc.cal + n1(m?.calories), p: acc.p + n1(m?.protein), c: acc.c + n1(m?.carbs), f: acc.f + n1(m?.fats) }), { cal: 0, p: 0, c: 0, f: 0 });
+                        return (
+                          <View style={{ gap: 7, paddingTop: 4, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)' }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                              <Mono style={{ flex: 1, fontSize: 9, letterSpacing: 0.8, color: C.muted3 }}>DAILY MEALS{meals.length ? ` · ${meals.length}` : ''}</Mono>
+                              {meals.length ? (
+                                <Text style={{ fontFamily: F.bodyBold, fontSize: 11, color: C.gold }}>{Math.round(tot.cal)} kcal</Text>
+                              ) : null}
+                            </View>
+                            {meals.length === 0 ? (
+                              <Body style={{ fontSize: 11.5, color: C.muted3 }}>No meals logged this day.</Body>
+                            ) : (
+                              <>
+                                {meals.map((m: any, mi: number) => (
+                                  <View key={m?.id ?? mi} style={{ padding: 10, borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.03)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)', gap: 5 }}>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                      <Body style={{ flex: 1, fontSize: 12.5, fontFamily: F.bodySemi, color: '#fff' }} numberOfLines={2}>{m?.meal_name || 'Meal'}</Body>
+                                      {m?.timestamp ? (
+                                        <Mono style={{ fontSize: 8.5, color: C.muted3 }}>{istTimeParts(m.timestamp).time} {istTimeParts(m.timestamp).ampm}</Mono>
+                                      ) : null}
+                                    </View>
+                                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 5 }}>
+                                      {([
+                                        [`${Math.round(n1(m?.calories))} kcal`, C.gold],
+                                        [`P ${n1(m?.protein)}g`, C.green],
+                                        [`C ${n1(m?.carbs)}g`, C.blue],
+                                        [`F ${n1(m?.fats)}g`, C.orange],
+                                        ...(m?.fiber != null && n1(m.fiber) > 0 ? [[`Fb ${n1(m.fiber)}g`, C.purple] as [string, string]] : []),
+                                      ] as [string, string][]).map(([lab, col]) => (
+                                        <View key={lab} style={{ paddingVertical: 2.5, paddingHorizontal: 8, borderRadius: 999, backgroundColor: hexA(col, 0.09), borderWidth: 1, borderColor: hexA(col, 0.28) }}>
+                                          <Text style={{ fontFamily: F.bodySemi, fontSize: 9.5, color: col }}>{lab}</Text>
+                                        </View>
+                                      ))}
+                                    </View>
+                                  </View>
+                                ))}
+                                <Body style={{ fontSize: 10.5, color: C.muted2 }}>Day total: {Math.round(tot.cal)} kcal · P {Math.round(tot.p * 10) / 10}g · C {Math.round(tot.c * 10) / 10}g · F {Math.round(tot.f * 10) / 10}g</Body>
+                              </>
+                            )}
+                          </View>
+                        );
+                      })()}
                     </View>
                   );
                 })()}
@@ -4306,6 +4618,7 @@ export function ClientDetail() {
             );
           })()}
         </>
+        )
       ) : clientTab === 'progression' ? (
         <>
           {/* Age Scores — twin gauges + toggleable trend */}
@@ -4559,17 +4872,33 @@ export function ClientDetail() {
             <View style={{ padding: 14, borderRadius: 16, backgroundColor: 'rgba(0,0,0,0.28)', borderWidth: 1, borderColor: hexA(C.orange, 0.22), gap: 13 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Icon name="calendar" size={15} color={C.orange} strokeWidth={2} />
-                <Body style={{ flex: 1, fontSize: 14, fontFamily: F.bodySemi, color: '#fff' }}>Week of {WEEKS[0]}</Body>
+                <Body style={{ flex: 1, fontSize: 14, fontFamily: F.bodySemi, color: '#fff' }}>Week {gWeek + 1} · {goalWeeks[gWeek].label}</Body>
                 <Pressable onPress={() => setGoalFormOpen(false)}>
                   <Icon name="close" size={15} color={C.muted} strokeWidth={2.2} />
                 </Pressable>
               </View>
+              {/* Which week this form is for — current week or any of the next 3 */}
+              <View style={{ flexDirection: 'row', gap: 7 }}>
+                {goalWeeks.map((w, i) => {
+                  const on = gWeek === i;
+                  return (
+                    <Pressable
+                      key={w.start}
+                      onPress={() => { setGWeek(i); setGAlso((prev) => new Set([...prev].filter((x) => x > i))); }}
+                      style={{ flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 11, gap: 1, backgroundColor: on ? hexA(C.orange, 0.15) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: on ? hexA(C.orange, 0.5) : 'rgba(255,255,255,0.07)' }}
+                    >
+                      <Text style={{ fontFamily: on ? F.bodyBold : F.bodySemi, fontSize: 11.5, color: on ? C.orange : C.muted }}>Wk {i + 1}</Text>
+                      <Mono style={{ fontSize: 7, color: on ? hexA(C.orange, 0.8) : C.muted3 }}>{w.label.split(' – ')[0]}</Mono>
+                    </Pressable>
+                  );
+                })}
+              </View>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
                 {([
-                  ['STEPS / DAY', gSteps, setGSteps, 'e.g. 8000'],
                   ['SLEEP (HRS)', gSleep, setGSleep, 'e.g. 7.5'],
+                  ['STEPS / DAY', gSteps, setGSteps, 'e.g. 10000'],
                   ['NUTRITION (0–10)', gNutrition, setGNutrition, '0–10'],
-                  ['ZONE 2 CARDIO (MIN/WK)', gCardio, setGCardio, 'e.g. 150'],
+                  ['ZONE 2 CARDIO (TIMES/WK)', gCardio, setGCardio, 'e.g. 3'],
                 ] as const).map(([lab, val, setter, ph]) => (
                   <View key={lab} style={{ width: '47%', flexGrow: 1 }}>
                     <Mono style={{ fontSize: 9, letterSpacing: 0.8, color: C.mono2, marginBottom: 6 }}>{lab}</Mono>
@@ -4585,50 +4914,75 @@ export function ClientDetail() {
                 ))}
               </View>
               <View>
-                <Mono style={{ fontSize: 9, letterSpacing: 0.8, color: C.mono2, marginBottom: 7 }}>RECOVERY RECOMMENDED</Mono>
-                <View style={{ flexDirection: 'row', gap: 8 }}>
-                  {([['Yes', true], ['No', false]] as const).map(([lab, v]) => (
-                    <Pressable key={lab} onPress={() => setGRecovery(v)} style={{ flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: 11, backgroundColor: gRecovery === v ? hexA(C.green, 0.14) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: gRecovery === v ? hexA(C.green, 0.35) : 'rgba(255,255,255,0.07)' }}>
-                      <Text style={{ fontFamily: F.bodySemi, fontSize: 12.5, color: gRecovery === v ? C.green : C.muted }}>{lab}</Text>
-                    </Pressable>
-                  ))}
-                </View>
+                <Mono style={{ fontSize: 9, letterSpacing: 0.8, color: C.mono2, marginBottom: 7 }}>RECOVERY RECOMMENDATION</Mono>
+                <TextInput
+                  value={gRecommend}
+                  onChangeText={setGRecommend}
+                  placeholder="Cognitive entertainment, Physiotherapy, Yoga, etc."
+                  placeholderTextColor={C.muted3}
+                  multiline
+                  style={{ minHeight: 64, textAlignVertical: 'top', paddingVertical: 11, paddingHorizontal: 13, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.03)', color: '#fff', fontFamily: F.body, fontSize: 13.5 }}
+                />
               </View>
-              {/* Apply to the next 3 weeks */}
-              <Pressable onPress={() => setGRepeat(!gRepeat)} style={{ flexDirection: 'row', alignItems: 'center', gap: 11, padding: 12, borderRadius: 12, backgroundColor: gRepeat ? hexA(C.blue, 0.1) : 'rgba(255,255,255,0.03)', borderWidth: 1, borderColor: gRepeat ? hexA(C.blue, 0.35) : 'rgba(255,255,255,0.07)' }}>
-                <View style={{ width: 21, height: 21, borderRadius: 6, alignItems: 'center', justifyContent: 'center', borderWidth: gRepeat ? 0 : 2, borderColor: 'rgba(255,255,255,0.2)', backgroundColor: gRepeat ? C.blue : 'transparent' }}>
-                  {gRepeat ? <Icon path="M20 6 9 17l-5-5" size={12} color="#0c0808" strokeWidth={3.2} /> : null}
+              {/* Also apply to LATER weeks only (web: per-week checkboxes) */}
+              {gWeek < 3 ? (
+                <View>
+                  <Mono style={{ fontSize: 9, letterSpacing: 0.8, color: C.mono2, marginBottom: 7 }}>ALSO APPLY TO</Mono>
+                  <View style={{ flexDirection: 'row', gap: 7 }}>
+                    {[1, 2, 3].filter((i) => i > gWeek).map((i) => {
+                      const on = gAlso.has(i);
+                      return (
+                        <Pressable
+                          key={i}
+                          onPress={() => setGAlso((prev) => { const next = new Set(prev); if (next.has(i)) next.delete(i); else next.add(i); return next; })}
+                          style={{ flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: 11, gap: 2, backgroundColor: on ? hexA(C.blue, 0.12) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: on ? hexA(C.blue, 0.4) : 'rgba(255,255,255,0.07)' }}
+                        >
+                          <Text style={{ fontFamily: on ? F.bodyBold : F.bodySemi, fontSize: 11.5, color: on ? '#A9BCFF' : C.muted }}>Week {i + 1}</Text>
+                          <Mono style={{ fontSize: 7.5, color: C.muted3 }}>{goalWeeks[i].label}</Mono>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
                 </View>
-                <View style={{ flex: 1 }}>
-                  <Body style={{ fontSize: 13, fontFamily: F.bodySemi, color: gRepeat ? '#A9BCFF' : C.ink }}>Apply to the next 3 weeks</Body>
-                  <Body style={{ fontSize: 11, color: C.muted2, marginTop: 1 }}>{WEEKS.slice(1).join(' · ')}</Body>
-                </View>
-              </Pressable>
-              <GradientButton label={gRepeat ? 'Set Goals for 4 Weeks' : 'Set Goals for This Week'} icon="checks" onPress={saveGoals} />
+              ) : null}
+              <GradientButton
+                label={saveGoalsM.isPending ? 'Saving…' : `Set Goals for ${1 + gAlso.size} Week${gAlso.size ? 's' : ''}`}
+                icon="checks"
+                onPress={() => { if (!saveGoalsM.isPending) saveGoals(); }}
+              />
             </View>
           ) : null}
 
-          {dbGoals.length === 0 && goals.length === 0 && !goalFormOpen ? (
+          {dbGoals.length === 0 && !goalFormOpen ? (
             <View style={{ alignItems: 'center', gap: 10, paddingVertical: 14 }}>
               <Icon name="target" size={30} color="#4C4640" strokeWidth={1.6} />
               <Body style={{ fontSize: 13.5, color: C.muted3 }}>No weekly goals set yet — tap “New Week”.</Body>
             </View>
           ) : null}
 
-          {[...dbGoals, ...goals].map((g) => (
-            <View key={g.range} style={{ padding: 13, borderRadius: 14, backgroundColor: 'rgba(0,0,0,0.25)', borderWidth: 1, borderColor: hexA(C.green, 0.18) }}>
+          {dbGoals.map((g) => (
+            <View key={g.id} style={{ padding: 13, borderRadius: 14, backgroundColor: 'rgba(0,0,0,0.25)', borderWidth: 1, borderColor: hexA(C.green, 0.18) }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 11 }}>
                 <Icon name="calendar" size={14} color={C.green} strokeWidth={2} />
                 <Body style={{ flex: 1, fontSize: 13.5, fontFamily: F.bodySemi, color: '#fff' }}>{g.range}</Body>
-                {g.recovery ? <Badge text="Recovery" color={C.purple} /> : null}
                 <Badge text="Set" color={C.green} />
+                <Pressable
+                  hitSlop={8}
+                  onPress={() => Alert.alert('Delete this week?', `Remove the goals for ${g.range}?`, [
+                    { text: 'Cancel', style: 'cancel' },
+                    { text: 'Delete', style: 'destructive', onPress: () => deleteGoalM.mutateAsync({ id: g.id, clientId: clientId! }).catch((e: any) => Alert.alert("Couldn't delete", e?.message ?? 'Try again.')) },
+                  ])}
+                  style={{ width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: hexA(C.red, 0.1), borderWidth: 1, borderColor: hexA(C.red, 0.3) }}
+                >
+                  <Icon name="trash" size={12} color={C.red} strokeWidth={2.2} />
+                </Pressable>
               </View>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                 {([
                   ['STEPS', `${g.steps}/day`, C.orange],
                   ['SLEEP', `${g.sleep} hrs`, C.blue],
                   ['NUTRITION', `${g.nutrition}/10`, C.gold],
-                  ['ZONE 2', `${g.cardio} min`, C.green],
+                  ['ZONE 2', `${g.cardio}×/wk`, C.green],
                 ] as const).map(([lab, val, col]) => (
                   <View key={lab} style={{ width: '47%', flexGrow: 1, paddingVertical: 8, paddingHorizontal: 11, borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.03)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' }}>
                     <Mono style={{ fontSize: 8.5, color: C.muted3 }}>{lab}</Mono>
@@ -4636,6 +4990,12 @@ export function ClientDetail() {
                   </View>
                 ))}
               </View>
+              {g.recommendation ? (
+                <View style={{ marginTop: 8, paddingVertical: 8, paddingHorizontal: 11, borderRadius: 11, backgroundColor: hexA(C.purple, 0.07), borderWidth: 1, borderColor: hexA(C.purple, 0.2) }}>
+                  <Mono style={{ fontSize: 8.5, color: hexA(C.purple, 0.8) }}>RECOVERY</Mono>
+                  <Body style={{ fontSize: 12, color: C.ink, marginTop: 2, lineHeight: 17 }}>{g.recommendation}</Body>
+                </View>
+              ) : null}
             </View>
           ))}
         </Card>
@@ -4820,6 +5180,17 @@ export function ClientDetail() {
                     <View style={{ flex: 1 }}>
                       <Body style={{ fontSize: 14.5, fontFamily: F.bodySemi, color: '#fff' }}>{p.plan_name || 'Training Plan'}</Body>
                       <Body style={{ fontSize: 11.5, color: C.muted2, marginTop: 1 }}>{meta}</Body>
+                      {(() => {
+                        // Created + expiry dates (expiry = approved_at + 42d, the shared rule).
+                        const created = p.created_at ? `Created ${istDayLabel(p.created_at)}` : null;
+                        const expiry = p.approved_at
+                          ? `${p.expired ? 'Expired' : 'Expires'} ${istDayLabel(new Date(new Date(p.approved_at).getTime() + PLAN_VALID_DAYS * 864e5).toISOString())}`
+                          : stat === 'approved' ? null : 'Expires 42d after approval';
+                        const line = [created, expiry].filter(Boolean).join(' · ');
+                        return line ? (
+                          <Body style={{ fontSize: 10, color: p.expired ? C.gold : C.muted3, marginTop: 2 }}>{line}</Body>
+                        ) : null;
+                      })()}
                     </View>
                     <Badge text={statMeta.label} color={c} />
                     {quickEditable ? (
@@ -4926,16 +5297,76 @@ const styles_trendTile = { flex: 1, alignItems: 'center' as const, gap: 4, paddi
 const MODALITY_COLORS = [C.orange, C.blue, C.green, C.purple, C.gold, C.red];
 const modalityColor = (m: string) => MODALITY_COLORS[Math.abs([...(m || '')].reduce((a, c) => a + c.charCodeAt(0), 0)) % MODALITY_COLORS.length];
 
+/* Month calendar grid — shared by the Roster tab and the top date picker.
+   Month arrows are the way into past/future months; TODAY jumps back. */
+function MonthGrid({ year, month, selDay, todayDay, isCurrentMonth, byDay, onShiftMonth, onSelectDay, onToday }: {
+  year: number; month: number; selDay: number; todayDay: number; isCurrentMonth: boolean;
+  byDay: Record<number, { modality: string }[]>;
+  onShiftMonth: (delta: number) => void; onSelectDay: (day: number) => void; onToday: () => void;
+}) {
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const firstWeekday = new Date(year, month, 1).getDay(); // 0=Sun
+  const monthLabel = new Date(year, month, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  const cells: (number | null)[] = [];
+  for (let i = 0; i < firstWeekday; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+  while (cells.length % 7 !== 0) cells.push(null);
+  const weeks: (number | null)[][] = [];
+  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+  return (
+    <Card colors={['rgba(46,28,18,0.4)', 'rgba(18,14,14,0.5)']} border="rgba(255,150,90,0.09)" radius={20} style={{ padding: 16 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 14 }}>
+        <Serif style={{ flex: 1, fontSize: 19 }}>{monthLabel}</Serif>
+        {!isCurrentMonth || selDay !== todayDay ? (
+          <Pressable onPress={onToday} style={{ paddingVertical: 5, paddingHorizontal: 11, borderRadius: 999, backgroundColor: hexA(C.orange, 0.12), borderWidth: 1, borderColor: hexA(C.orange, 0.45), marginRight: 9 }}>
+            <Mono style={{ fontSize: 9, letterSpacing: 0.8, color: C.orange }}>TODAY</Mono>
+          </Pressable>
+        ) : null}
+        <Pressable style={navBtnSm} onPress={() => onShiftMonth(-1)}><Icon path="M15 6l-6 6 6 6" size={13} color={C.muted} strokeWidth={2.2} /></Pressable>
+        <View style={{ width: 7 }} />
+        <Pressable style={navBtnSm} onPress={() => onShiftMonth(1)}><Icon name="chevRight" size={13} color={C.muted} strokeWidth={2.2} /></Pressable>
+      </View>
+      <View style={{ flexDirection: 'row', marginBottom: 8 }}>
+        {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => (
+          <Text key={i} style={{ flex: 1, textAlign: 'center', fontFamily: F.mono, fontSize: 9, color: C.muted3 }}>{d}</Text>
+        ))}
+      </View>
+      {weeks.map((wk, wi) => (
+        <View key={wi} style={{ flexDirection: 'row', marginBottom: 6 }}>
+          {wk.map((d, di) => {
+            const sel = d === selDay;
+            const today = isCurrentMonth && d === todayDay;
+            const dots = d && byDay[d] ? byDay[d].map((s) => modalityColor(s.modality)) : [];
+            return (
+              <Pressable key={di} disabled={!d} onPress={() => d && onSelectDay(d)} style={{ flex: 1, alignItems: 'center', gap: 4, paddingVertical: 4 }}>
+                <View style={{ width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: sel ? C.orangeGradB : 'transparent', borderWidth: today && !sel ? 1.5 : 0, borderColor: hexA(C.orange, 0.55) }}>
+                  <Text style={{ fontFamily: sel || today ? F.bodyBold : F.body, fontSize: 12.5, color: sel ? '#fff' : today ? C.orange : d ? C.ink3 : 'transparent' }}>{d ?? 0}</Text>
+                </View>
+                <View style={{ flexDirection: 'row', gap: 2.5, height: 5 }}>
+                  {dots.slice(0, 3).map((c, ci) => (
+                    <View key={ci} style={{ width: 4.5, height: 4.5, borderRadius: 3, backgroundColor: c }} />
+                  ))}
+                </View>
+              </Pressable>
+            );
+          })}
+        </View>
+      ))}
+    </Card>
+  );
+}
+
 export function Sessions() {
   const trainerId = useTrainerId();
   const [sessTab, setSessTab] = React.useState<'training' | 'roster' | 'missed'>('training');
   const [missedFilter, setMissedFilter] = React.useState<'unresolved' | 'resolved' | 'all'>('all');
 
-  // IST "today" parts.
-  const todayIso = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }); // YYYY-MM-DD
+  // IST "today" parts (server-anchored clock — device clocks drift).
+  const todayIso = istToday(); // YYYY-MM-DD
   const [ty, tmo, td] = todayIso.split('-').map(Number);
   const [ref, setRef] = React.useState({ year: ty, month: tmo - 1 }); // month 0-indexed
   const [selDay, setSelDay] = React.useState(td);
+  const [calOpen, setCalOpen] = React.useState(false);
 
   const monthQ = useTrainerMonthSessions(trainerId, ref);
   const byDay = monthQ.data?.byDay ?? {};
@@ -4943,7 +5374,6 @@ export function Sessions() {
 
   const isCurrentMonth = ref.year === ty && ref.month === tmo - 1;
   const daysInMonth = new Date(ref.year, ref.month + 1, 0).getDate();
-  const firstWeekday = new Date(ref.year, ref.month, 1).getDay(); // 0=Sun
   const monthLabel = new Date(ref.year, ref.month, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
   const selDayClamped = Math.min(selDay, daysInMonth);
   const dayList = byDay[selDayClamped] ?? [];
@@ -4956,11 +5386,22 @@ export function Sessions() {
   };
   const shiftDay = (delta: number) => {
     const n = selDayClamped + delta;
-    if (n >= 1 && n <= daysInMonth) setSelDay(n);
+    if (n >= 1 && n <= daysInMonth) { setSelDay(n); return; }
+    // Cross the month boundary (day 0 = last day of the previous month).
+    const d = new Date(ref.year, ref.month, n);
+    setRef({ year: d.getFullYear(), month: d.getMonth() });
+    setSelDay(d.getDate());
+  };
+  const goToday = () => {
+    setRef({ year: ty, month: tmo - 1 });
+    setSelDay(td);
   };
 
-  const attendedCount = dayList.filter((s) => s.logged || s.status === 'completed').length;
-  const upcomingCount = dayList.length - attendedCount;
+  const isDone = (s: { logged: boolean; status: string }) => s.logged || s.status === 'completed';
+  const attendedCount = dayList.filter(isDone).length;
+  const cancelledCount = dayList.filter((s) => !isDone(s) && s.status === 'cancelled').length;
+  const missedCount = dayList.filter((s) => !isDone(s) && s.status !== 'cancelled' && s.is_past).length;
+  const upcomingCount = dayList.length - attendedCount - cancelledCount - missedCount;
 
   const missedRows = missedFilter === 'resolved' ? [] : missed;
   const now = Date.now();
@@ -4972,16 +5413,31 @@ export function Sessions() {
         <Pressable style={navBtn} onPress={() => shiftDay(-1)}>
           <Icon path="M15 6l-6 6 6 6" size={15} color={C.muted} strokeWidth={2.2} />
         </Pressable>
-        <View style={{ flex: 1, alignItems: 'center' }}>
+        <Pressable style={{ flex: 1, alignItems: 'center' }} onPress={() => setCalOpen((v) => !v)}>
           <Mono style={{ fontSize: 10, letterSpacing: 2, color: C.mono2 }}>
             {isCurrentMonth && selDayClamped === td ? 'TODAY' : 'SELECTED'} · {dayList.length} SESSION{dayList.length === 1 ? '' : 'S'}
           </Mono>
-          <Serif style={{ fontSize: 23, marginTop: 3 }}>{selDateLabel}</Serif>
-        </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 3 }}>
+            <Serif style={{ fontSize: 23 }}>{selDateLabel}</Serif>
+            <Icon name="calendar" size={14} color={calOpen ? C.orange : C.muted} strokeWidth={2} />
+          </View>
+        </Pressable>
         <Pressable style={navBtn} onPress={() => shiftDay(1)}>
           <Icon name="chevRight" size={15} color={C.muted} strokeWidth={2.2} />
         </Pressable>
       </View>
+
+      {/* Tap-to-open date picker — jump to any date in any month (the Roster tab
+          already renders its own grid, so the picker hides there). */}
+      {calOpen && sessTab !== 'roster' ? (
+        <MonthGrid
+          year={ref.year} month={ref.month} selDay={selDayClamped} todayDay={td}
+          isCurrentMonth={isCurrentMonth} byDay={byDay}
+          onShiftMonth={shiftMonth}
+          onSelectDay={(d) => { setSelDay(d); setCalOpen(false); }}
+          onToday={() => { goToday(); setCalOpen(false); }}
+        />
+      ) : null}
 
       {/* Underline tabs */}
       <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.07)' }}>
@@ -5011,7 +5467,9 @@ export function Sessions() {
       ) : sessTab === 'training' ? (
         <>
           <Body style={{ fontSize: 12.5, color: C.muted, marginTop: -6 }}>
-            <Text style={{ color: C.green }}>✓ {attendedCount} logged</Text> · {upcomingCount} upcoming
+            <Text style={{ color: C.green }}>✓ {attendedCount} logged</Text>
+            {missedCount > 0 ? <Text style={{ color: C.red }}> · {missedCount} missed</Text> : null}
+            {' · '}{upcomingCount} upcoming
           </Body>
           <Card colors={['rgba(46,28,18,0.4)', 'rgba(18,14,14,0.5)']} border="rgba(255,150,90,0.09)" radius={20} style={{ paddingHorizontal: 16, paddingVertical: 4 }}>
             {dayList.length === 0 ? (
@@ -5024,6 +5482,8 @@ export function Sessions() {
                 const tp = istTimeParts(s.scheduled_datetime);
                 const attended = s.logged || s.status === 'completed';
                 const cancelled = s.status === 'cancelled';
+                const missedRow = !attended && !cancelled && s.is_past;
+                const stColor = cancelled || missedRow ? C.red : attended ? C.green : C.blue;
                 return (
                   <View key={s.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 15, borderTopWidth: i === 0 ? 0 : 1, borderTopColor: 'rgba(255,255,255,0.05)' }}>
                     <View style={{ width: 66 }}>
@@ -5034,11 +5494,18 @@ export function Sessions() {
                       <Body style={{ fontSize: 15, fontFamily: F.bodySemi, color: '#fff' }}>{s.client_name}</Body>
                       <Body style={{ fontSize: 11.5, color: C.muted2, marginTop: 2 }}>{s.modality}</Body>
                     </View>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                      <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: cancelled ? C.red : attended ? C.green : C.blue }} />
-                      <Body style={{ fontSize: 12, fontFamily: F.bodySemi, color: cancelled ? C.red : attended ? C.green : C.blue }}>
-                        {cancelled ? 'Cancelled' : attended ? 'Logged' : 'Upcoming'}
-                      </Body>
+                    <View style={{ alignItems: 'flex-end', gap: 3 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: stColor }} />
+                        <Body style={{ fontSize: 12, fontFamily: F.bodySemi, color: stColor }}>
+                          {cancelled ? 'Cancelled' : attended ? 'Logged' : missedRow ? 'Missed' : 'Upcoming'}
+                        </Body>
+                      </View>
+                      {attended ? (
+                        <Mono style={{ fontSize: 8, letterSpacing: 0.6, color: s.acknowledged ? C.green : C.gold }}>
+                          {s.acknowledged ? '✓ ACKNOWLEDGED' : 'NOT ACKNOWLEDGED'}
+                        </Mono>
+                      ) : null}
                     </View>
                   </View>
                 );
@@ -5049,48 +5516,11 @@ export function Sessions() {
       ) : sessTab === 'roster' ? (
         <>
           {/* Month grid */}
-          <Card colors={['rgba(46,28,18,0.4)', 'rgba(18,14,14,0.5)']} border="rgba(255,150,90,0.09)" radius={20} style={{ padding: 16 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 14 }}>
-              <Serif style={{ flex: 1, fontSize: 19 }}>{monthLabel}</Serif>
-              <Pressable style={navBtnSm} onPress={() => shiftMonth(-1)}><Icon path="M15 6l-6 6 6 6" size={13} color={C.muted} strokeWidth={2.2} /></Pressable>
-              <View style={{ width: 7 }} />
-              <Pressable style={navBtnSm} onPress={() => shiftMonth(1)}><Icon name="chevRight" size={13} color={C.muted} strokeWidth={2.2} /></Pressable>
-            </View>
-            <View style={{ flexDirection: 'row', marginBottom: 8 }}>
-              {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => (
-                <Text key={i} style={{ flex: 1, textAlign: 'center', fontFamily: F.mono, fontSize: 9, color: C.muted3 }}>{d}</Text>
-              ))}
-            </View>
-            {(() => {
-              const cells: (number | null)[] = [];
-              for (let i = 0; i < firstWeekday; i++) cells.push(null);
-              for (let d = 1; d <= daysInMonth; d++) cells.push(d);
-              while (cells.length % 7 !== 0) cells.push(null);
-              const weeks: (number | null)[][] = [];
-              for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
-              return weeks.map((wk, wi) => (
-                <View key={wi} style={{ flexDirection: 'row', marginBottom: 6 }}>
-                  {wk.map((d, di) => {
-                    const sel = d === selDayClamped;
-                    const today = isCurrentMonth && d === td;
-                    const dots = d && byDay[d] ? byDay[d].map((s) => modalityColor(s.modality)) : [];
-                    return (
-                      <Pressable key={di} disabled={!d} onPress={() => d && setSelDay(d)} style={{ flex: 1, alignItems: 'center', gap: 4, paddingVertical: 4 }}>
-                        <View style={{ width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: sel ? C.orangeGradB : 'transparent', borderWidth: today && !sel ? 1.5 : 0, borderColor: hexA(C.orange, 0.55) }}>
-                          <Text style={{ fontFamily: sel || today ? F.bodyBold : F.body, fontSize: 12.5, color: sel ? '#fff' : today ? C.orange : d ? C.ink3 : 'transparent' }}>{d ?? 0}</Text>
-                        </View>
-                        <View style={{ flexDirection: 'row', gap: 2.5, height: 5 }}>
-                          {dots.slice(0, 3).map((c, ci) => (
-                            <View key={ci} style={{ width: 4.5, height: 4.5, borderRadius: 3, backgroundColor: c }} />
-                          ))}
-                        </View>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              ));
-            })()}
-          </Card>
+          <MonthGrid
+            year={ref.year} month={ref.month} selDay={selDayClamped} todayDay={td}
+            isCurrentMonth={isCurrentMonth} byDay={byDay}
+            onShiftMonth={shiftMonth} onSelectDay={setSelDay} onToday={goToday}
+          />
 
           {/* Selected day sessions */}
           <View>
@@ -5199,6 +5629,8 @@ function RpeSlider({ value, onChange, colorFn, labelFn }: { value: number | null
   const onChangeRef = React.useRef(onChange);
   onChangeRef.current = onChange;
   const [drag, setDrag] = React.useState<number | null>(null);
+  // Unmounted mid-touch → the release never fires; never leave swipe-back locked.
+  React.useEffect(() => () => { backSwipeLock.locked = false; }, []);
 
   const measure = () => {
     viewRef.current?.measureInWindow((x, _y, w) => {
@@ -5302,6 +5734,258 @@ function RpeSlider({ value, onChange, colorFn, labelFn }: { value: number | null
   );
 }
 
+
+/* ---------- Memoised exercise card (Workout Log) ----------
+   Extracted from Workout() so a keystroke re-renders ONE card, not the whole
+   ~1,300-element form. Every prop is either per-card data (ex, ei) or a
+   stable handler/flag, so React.memo actually short-circuits. */
+const SET_COMMIT_MS = 250;
+const pendingSetCommits = new Map<number, () => void>();
+let setInputSeq = 0;
+/* Push every debounced set edit into state NOW — called before submit and before
+   any structural change (add/remove/reorder) so an index-based commit can never
+   land on the wrong set. */
+function flushPendingSetCommits() {
+  const fns = [...pendingSetCommits.values()];
+  pendingSetCommits.clear();
+  fns.forEach((f) => f());
+}
+/* Uncontrolled-feeling input: typing only re-renders this leaf; the value is
+   committed to the exercises state on blur / end-editing / a short debounce. */
+const SetInput = React.memo(function SetInput({ value, digits, onCommit, onBlur, onEndEditing, ...rest }: { value: string; digits?: boolean; onCommit: (v: string) => void } & TextInputProps) {
+  const [local, setLocal] = React.useState(value);
+  const committedRef = React.useRef(value);
+  const latestRef = React.useRef(value);
+  const idRef = React.useRef(++setInputSeq);
+  const timer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onCommitRef = React.useRef(onCommit); onCommitRef.current = onCommit;
+  // External changes (template load, plan prefill, draft restore) win over local text.
+  React.useEffect(() => {
+    if (value !== committedRef.current) { committedRef.current = value; latestRef.current = value; setLocal(value); }
+  }, [value]);
+  const commit = React.useCallback(() => {
+    if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+    pendingSetCommits.delete(idRef.current);
+    if (latestRef.current !== committedRef.current) { committedRef.current = latestRef.current; onCommitRef.current(latestRef.current); }
+  }, []);
+  React.useEffect(() => () => { if (timer.current) clearTimeout(timer.current); pendingSetCommits.delete(idRef.current); }, []);
+  const onChange = (t: string) => {
+    // Keyboard-suggestion guard (Android): a suggestion tap REPLACES the text with a
+    // word; digits-only fields keep the previous value instead of being wiped.
+    const next = digits ? (t.replace(/[^0-9]/g, '') || (t.trim() ? latestRef.current : '')) : t;
+    latestRef.current = next;
+    setLocal(next);
+    pendingSetCommits.set(idRef.current, commit);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(commit, SET_COMMIT_MS);
+  };
+  return <TextInput {...rest} value={local} onChangeText={onChange} onBlur={(e) => { commit(); onBlur?.(e); }} onEndEditing={(e) => { commit(); onEndEditing?.(e); }} />;
+});
+
+const setIncomplete = (e: WExercise, s: WSet) => (e.measurement === 'duration' ? !s.duration.trim() : !s.reps.trim());
+
+type ExerciseCardProps = {
+  ex: WExercise; ei: number;
+  drag: ReturnType<typeof useDragReorder>;
+  pairNames: { primary: { id: string; name: string }; second: { id: string; name: string } } | null;
+  clientName: string;
+  isActivityModality: boolean; isBoxingModality: boolean; isAerobicsModality: boolean; isPilatesModality: boolean;
+  prevSetsFor: (name: string) => PrevSet[] | undefined;
+  updateEx: (i: number, patch: Partial<WExercise>) => void;
+  updateSet: (ei: number, si: number, patch: Partial<WSet>) => void;
+  addSet: (ei: number) => void;
+  removeSet: (ei: number, si: number) => void;
+  removeExercise: (i: number) => void;
+};
+const ExerciseCard = React.memo(function ExerciseCard(props: ExerciseCardProps) {
+  const { ex, ei, drag, pairNames, clientName, isActivityModality, isBoxingModality, isAerobicsModality, isPilatesModality, prevSetsFor, updateEx, updateSet, addSet, removeSet, removeExercise } = props;
+  return (
+          <Animated.View onLayout={drag.rowLayout('wl', ei)} style={drag.rowStyle('wl', ei)}>
+          <Card colors={['rgba(46,28,18,0.4)', 'rgba(18,14,14,0.5)']} radius={20} style={{ padding: 16, gap: 12 }}>
+            {/* Couple session: stamp WHOSE exercise this is on every card — the
+                "Logging for" banner scrolls away, and mid-list the trainer must
+                always know which client's values they are entering. */}
+            {pairNames ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', paddingVertical: 3.5, paddingHorizontal: 10, borderRadius: 999, backgroundColor: hexA(C.orange, 0.11), borderWidth: 1, borderColor: hexA(C.orange, 0.35), marginBottom: -3 }}>
+                <Icon name="user" size={10} color={C.orange} strokeWidth={2.4} />
+                <Text numberOfLines={1} style={{ fontFamily: F.bodyBold, fontSize: 10.5, color: C.orange, maxWidth: 160 }}>{clientName.split(' ')[0]}'s exercise</Text>
+              </View>
+            ) : null}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              {/* Drag-to-reorder grip: hold and move to change the position */}
+              <View {...drag.handle('wl', ei)} accessibilityRole="button" accessibilityLabel={`Drag to reorder ${ex.name || 'exercise'}`} accessibilityHint="Hold and move up or down" hitSlop={{ top: 8, bottom: 8, left: 8, right: 4 }} style={{ width: 34, height: 30, borderRadius: 9, alignItems: 'center', justifyContent: 'center', backgroundColor: hexA(C.orange, drag.dragging?.list === 'wl' && drag.dragging.index === ei ? 0.2 : 0.07), borderWidth: 1, borderColor: hexA(C.orange, drag.dragging?.list === 'wl' && drag.dragging.index === ei ? 0.55 : 0.22) }}>
+                <Icon path="M4 9h16M4 15h16" size={15} color={drag.dragging?.list === 'wl' && drag.dragging.index === ei ? C.orange : C.ink3} strokeWidth={2.2} />
+              </View>
+              {/* Tap the name row to expand/collapse the card — added exercises start
+                  collapsed so a long list stays scannable. */}
+              <Pressable onPress={() => updateEx(ei, { collapsed: !ex.collapsed })} style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <View style={{ width: 26, height: 26, borderRadius: 8, backgroundColor: hexA(C.orange, 0.13), alignItems: 'center', justifyContent: 'center' }}>
+                  <Text style={{ fontFamily: F.mono, fontSize: 12, color: C.orange }}>{ei + 1}</Text>
+                </View>
+                <Body style={{ flex: 1, fontSize: 15, fontFamily: F.bodySemi, color: '#fff' }} numberOfLines={1}>{ex.name}</Body>
+                {ex.collapsed ? (
+                  <>
+                    {!isActivityModality ? (
+                      <View style={{ paddingVertical: 3, paddingHorizontal: 8, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }}>
+                        <Text style={{ fontFamily: F.bodySemi, fontSize: 9.5, color: C.muted2 }}>{ex.sets.length} set{ex.sets.length === 1 ? '' : 's'}</Text>
+                      </View>
+                    ) : null}
+                    {(isActivityModality ? !ex.completed : ex.sets.some((s) => setIncomplete(ex, s))) ? (
+                      <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: C.gold }} />
+                    ) : (
+                      <Icon name="checks" size={13} color={C.green} strokeWidth={2.5} />
+                    )}
+                  </>
+                ) : null}
+                {isActivityModality && ex.activityType && !ex.collapsed ? (
+                  <View style={{ paddingVertical: 3, paddingHorizontal: 9, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }}>
+                    <Text style={{ fontFamily: F.bodySemi, fontSize: 10, color: C.muted2 }}>{ex.activityType}</Text>
+                  </View>
+                ) : null}
+                <Icon name={ex.collapsed ? 'chevDown' : 'chevUp'} size={13} color={C.muted3} strokeWidth={2.3} />
+              </Pressable>
+              <Pressable onPress={() => removeExercise(ei)} hitSlop={12} accessibilityRole="button" accessibilityLabel={`Remove ${ex.name || 'exercise'}`}><Icon name="close" size={16} color={C.muted2} strokeWidth={2.2} /></Pressable>
+            </View>
+
+            {ex.collapsed ? null : isActivityModality ? (
+              <>
+                {/* Mark as completed — the activity model (Yoga/Boxing) */}
+                <Pressable onPress={() => updateEx(ei, { completed: !ex.completed })} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4 }}>
+                  <View style={{ width: 24, height: 24, borderRadius: 7, alignItems: 'center', justifyContent: 'center', backgroundColor: ex.completed ? C.green : 'rgba(255,255,255,0.05)', borderWidth: 1.5, borderColor: ex.completed ? C.green : 'rgba(255,255,255,0.18)' }}>
+                    {ex.completed ? <Icon path="M20 6 9 17l-5-5" size={14} color="#0c0808" strokeWidth={3} /> : null}
+                  </View>
+                  <Text style={{ fontFamily: F.bodySemi, fontSize: 13.5, color: ex.completed ? '#fff' : C.muted }}>Mark as completed</Text>
+                </Pressable>
+                {isBoxingModality && ex.completed ? (
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <View style={{ flex: 1 }}>
+                      <Mono style={{ fontSize: 9, letterSpacing: 0.8, color: C.mono2, marginBottom: 5 }}>DURATION (MIN)</Mono>
+                      <SetInput value={ex.durationMin ?? ''} digits accessibilityLabel={`Duration in minutes`} onCommit={(v) => updateEx(ei, { durationMin: v })} keyboardType="number-pad" placeholder="—" placeholderTextColor={C.muted3} style={[cellInput, { textAlign: 'left', paddingHorizontal: 12 }]} />
+                    </View>
+                    {/^.*pad ?work.*$/i.test(ex.name) ? (
+                      <View style={{ flex: 1 }}>
+                        <Mono style={{ fontSize: 9, letterSpacing: 0.8, color: C.mono2, marginBottom: 5 }}>ROUNDS</Mono>
+                        <SetInput value={ex.rounds ?? ''} digits accessibilityLabel={`Rounds`} onCommit={(v) => updateEx(ei, { rounds: v })} keyboardType="number-pad" placeholder="—" placeholderTextColor={C.muted3} style={[cellInput, { textAlign: 'left', paddingHorizontal: 12 }]} />
+                      </View>
+                    ) : null}
+                  </View>
+                ) : null}
+              </>
+            ) : (
+              <>
+                <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 2 }}>
+                  <Text style={[colHead, { width: 30 }]}>SET</Text>
+                  <Text style={[colHead, { flex: 1 }]}>{ex.measurement === 'duration' ? (isAerobicsModality ? 'DURATION (MIN)' : 'DURATION (SEC)') : 'REPS'}</Text>
+                  {!isAerobicsModality ? <Text style={[colHead, { flex: 1 }]}>LOAD (KG)</Text> : null}
+                  <View style={{ width: 26 }} />
+                </View>
+                {ex.sets.map((st, si) => {
+                  const missing = setIncomplete(ex, st); // primary metric empty → must be filled to log
+                  const prevSets = prevSetsFor(ex.name);
+                  const prevSet = prevSets?.[si];
+                  // Placeholders: the plan target, else the last session's value (web parity).
+                  const metricPh = ex.measurement === 'duration'
+                    ? (st.durationPlan ? `Plan ${st.durationPlan}` : prevSet?.durationSeconds != null ? `Last: ${prevSet.durationSeconds}s` : '—')
+                    : (st.repsPlan ? `Plan ${st.repsPlan}` : prevSet?.reps != null ? `Last: ${prevSet.reps}` : '—');
+                  const loadPh = st.loadPlan ? `Plan ${st.loadPlan}` : prevSet?.load ? `Last: ${prevSet.load}` : '—';
+                  // ≥2× sanity warning (warn-only, web getDoubleValueWarning): vs previous
+                  // set, or the last session's first set for set #1.
+                  const warnFor = (field: 'reps' | 'load'): string | null => {
+                    const cur = parseFloat(field === 'reps' ? st.reps : st.load);
+                    if (!isFinite(cur) || cur === 0) return null;
+                    let ref: number | null = null;
+                    if (si > 0) {
+                      const p = ex.sets[si - 1];
+                      const v = parseFloat(field === 'reps' ? p.reps : p.load);
+                      if (isFinite(v) && v > 0) ref = v;
+                    } else {
+                      const p0 = prevSets?.[0];
+                      const v = field === 'reps' ? p0?.reps : p0?.load != null ? parseFloat(String(p0.load)) : null;
+                      if (v != null && isFinite(Number(v)) && Number(v) > 0) ref = Number(v);
+                    }
+                    if (ref != null && cur >= ref * 2) return `${field === 'reps' ? 'Reps' : 'Load'} is ${Math.round(cur / ref)}× the ${si > 0 ? 'previous set' : 'last session'} (${ref}) — is this correct?`;
+                    return null;
+                  };
+                  const warn = warnFor('reps') ?? warnFor('load');
+                  return (
+                  <View key={si} style={{ gap: 6 }}>
+                    <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+                      <View style={[cell, { width: 30, backgroundColor: 'rgba(255,255,255,0.04)' }]}><Text style={{ fontFamily: F.mono, fontSize: 13, color: C.muted }}>{si + 1}</Text></View>
+                      {/* Keyboard-suggestion guard: an Android suggestion tap REPLACES the
+                          field text with a word; stripped to digits that becomes '' and
+                          silently wiped the typed value. Non-empty input that strips to
+                          nothing now keeps the previous value (backspace still clears). */}
+                      {ex.measurement === 'duration' ? (
+                        <SetInput value={st.duration} digits accessibilityLabel={`Set ${si + 1} duration in seconds`} onCommit={(v) => updateSet(ei, si, { duration: v })} keyboardType="number-pad" placeholder={metricPh} placeholderTextColor={missing ? hexA(C.gold, 0.8) : C.muted3} style={[cellInput, missing ? { borderWidth: 1, borderColor: hexA(C.gold, 0.4) } : null]} />
+                      ) : (
+                        <SetInput value={st.reps} digits accessibilityLabel={`Set ${si + 1} reps`} onCommit={(v) => updateSet(ei, si, { reps: v })} keyboardType="number-pad" placeholder={metricPh} placeholderTextColor={missing ? hexA(C.gold, 0.8) : C.muted3} style={[cellInput, missing ? { borderWidth: 1, borderColor: hexA(C.gold, 0.4) } : null]} />
+                      )}
+                      {!isAerobicsModality ? (
+                        // Free text (web parity): bodyweight expressions like "BW+5" are valid loads.
+                        <SetInput value={st.load}  accessibilityLabel={`Set ${si + 1} load`}onCommit={(v) => updateSet(ei, si, { load: v })} autoCapitalize="characters" autoCorrect={false} placeholder={loadPh} placeholderTextColor={C.muted3} style={cellInput} />
+                      ) : null}
+                      <Pressable onPress={() => removeSet(ei, si)} disabled={ex.sets.length === 1} accessibilityRole="button" accessibilityLabel={`Remove set ${si + 1}`} style={{ width: 26, paddingVertical: 8, alignItems: 'center', opacity: ex.sets.length === 1 ? 0.3 : 1 }} hitSlop={10}>
+                        <Icon name="close" size={13} color={C.muted2} strokeWidth={2.2} />
+                      </Pressable>
+                    </View>
+                    {warn ? (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 2 }}>
+                        <Icon name="alert" size={11} color={C.gold} strokeWidth={2.2} />
+                        <Body style={{ flex: 1, fontSize: 10.5, color: C.gold }}>{warn}</Body>
+                      </View>
+                    ) : null}
+                    {ex.detailsOpen && !isAerobicsModality ? (
+                      <View style={{ flexDirection: 'row', gap: 6, paddingLeft: 38 }}>
+                        <SetInput value={st.rest ?? ''} digits accessibilityLabel={`Set ${si + 1} rest in seconds`} onCommit={(v) => updateSet(ei, si, { rest: v })} keyboardType="number-pad" placeholder={prevSet?.rest ? `Rest ${prevSet.rest}` : 'Rest (s)'} placeholderTextColor={C.muted3} style={[cellInput, { flex: 1 }]} />
+                        <SetInput value={st.tempo ?? ''}  accessibilityLabel={`Set ${si + 1} tempo`}onCommit={(v) => updateSet(ei, si, { tempo: v })} autoCorrect={false} placeholder={prevSet?.tempo ? `Tempo ${prevSet.tempo}` : 'Tempo 2-1-2-1'} placeholderTextColor={C.muted3} style={[cellInput, { flex: 1.2 }]} />
+                        <SetInput value={st.superset ?? ''}  accessibilityLabel={`Set ${si + 1} superset`}onCommit={(v) => updateSet(ei, si, { superset: v })} autoCapitalize="characters" autoCorrect={false} placeholder="SS A1" placeholderTextColor={C.muted3} style={[cellInput, { width: 62 }]} />
+                      </View>
+                    ) : null}
+                    {ex.detailsOpen && !isAerobicsModality ? (
+                      <View style={{ flexDirection: 'row', gap: 6, paddingLeft: 38 }}>
+                        <SetInput value={st.note ?? ''}  accessibilityLabel={`Set ${si + 1} note`}onCommit={(v) => updateSet(ei, si, { note: v })} placeholder="Set notes" placeholderTextColor={C.muted3} style={[cellInput, { flex: 1, textAlign: 'left', paddingHorizontal: 12 }]} />
+                      </View>
+                    ) : null}
+                    {ex.detailsOpen && isPilatesModality ? (
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingLeft: 38 }}>
+                        {PILATES_EQUIPMENT.map((eq) => {
+                          const sel = st.equipment === eq;
+                          return (
+                            <Pressable key={eq} onPress={() => updateSet(ei, si, { equipment: sel ? '' : eq })} style={{ paddingVertical: 5, paddingHorizontal: 10, borderRadius: 999, backgroundColor: sel ? hexA(C.purple, 0.16) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: sel ? hexA(C.purple, 0.45) : 'rgba(255,255,255,0.08)' }}>
+                              <Text style={{ fontFamily: sel ? F.bodyBold : F.body, fontSize: 10.5, color: sel ? C.purple : C.muted }}>{eq}</Text>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                    ) : null}
+                  </View>
+                  );
+                })}
+                {ex.sets.some((s) => setIncomplete(ex, s)) ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 2 }}>
+                    <Icon name="alert" size={11} color={C.gold} strokeWidth={2.2} />
+                    <Body style={{ flex: 1, fontSize: 10.5, color: C.gold }}>Every set needs {ex.measurement === 'duration' ? 'duration' : 'reps'} before you can log — load is optional for bodyweight.</Body>
+                  </View>
+                ) : null}
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <Pressable onPress={() => addSet(ei)} accessibilityRole="button" accessibilityLabel={`Add set to ${ex.name || 'exercise'}`} style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 10, borderRadius: 11, borderWidth: 1.5, borderStyle: 'dashed', borderColor: 'rgba(255,255,255,0.13)' }}>
+                    <Icon name="plus" size={14} color={C.muted} strokeWidth={2.2} />
+                    <Text style={{ fontFamily: F.bodySemi, fontSize: 12, color: C.muted }}>Add set</Text>
+                  </Pressable>
+                  {!isAerobicsModality ? (
+                    <Pressable onPress={() => updateEx(ei, { detailsOpen: !ex.detailsOpen })} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, paddingHorizontal: 14, borderRadius: 11, backgroundColor: ex.detailsOpen ? hexA(C.blue, 0.1) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: ex.detailsOpen ? hexA(C.blue, 0.35) : 'rgba(255,255,255,0.09)' }}>
+                      <Icon name={ex.detailsOpen ? 'chevUp' : 'chevDown'} size={12} color={ex.detailsOpen ? C.blue : C.muted} strokeWidth={2.3} />
+                      <Text style={{ fontFamily: F.bodySemi, fontSize: 11.5, color: ex.detailsOpen ? C.blue : C.muted }}>Details</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              </>
+            )}
+          </Card>
+          </Animated.View>
+  );
+});
+
 export function Workout() {
   const { modality, set, selectedClientId, selectedClientName, workoutScheduleId, editingOutboxId, back, canGoBack, go } = useStore();
   const insets = useSafeAreaInsets();
@@ -5320,6 +6004,14 @@ export function Workout() {
   const healthQ = useClientHealthCheck(selectedClientId);
   const saveHealthM = useSaveHealthData();
   const health = healthQ.data;
+  // Zone 2 cardio (web SleepNutritionPromptDialog block): if this week's goal has a
+  // z2c_target, the workout form asks about it — INCLUDING when sleep/nutrition are
+  // already logged (the web only asked while those were missing; that gap is closed here).
+  const z2Q = useZone2Week(selectedClientId);
+  const z2LogM = useLogZone2Session();
+  const [z2Open, setZ2Open] = React.useState(false);
+  const [z2Date, setZ2Date] = React.useState<string | null>(null);
+  const [z2Dur, setZ2Dur] = React.useState('');
   const isOnline = useIsOnline();
   // Health data entered while offline — satisfies the gate locally and syncs
   // inside the same outbox item as the workout log.
@@ -5379,7 +6071,10 @@ export function Workout() {
   };
   const healthValid = hSleep.trim() !== '' && hRating != null && hSteps.trim() !== '';
   const [sessionName, setSessionName] = React.useState('');
-  const [exercises, setExercises] = React.useState<WExercise[]>([]);
+  const [exercises, setExercisesRaw] = React.useState<WExercise[]>([]);
+  // Every write flushes the debounced SetInput edits FIRST, so a template load,
+  // picker add, reorder or remove can never race a pending index-based commit.
+  const setExercises = React.useCallback((u: React.SetStateAction<WExercise[]>) => { flushPendingSetCommits(); setExercisesRaw(u); }, []);
   const [pickerOpen, setPickerOpen] = React.useState(false);
   const [exSearch, setExSearch] = React.useState('');
   // Pilates picker sub-tab: Mat = exercises_db list, Reformer = hardcoded list.
@@ -5427,7 +6122,7 @@ export function Workout() {
 
   // Previous session values (web useClientPreviousExerciseData): placeholders + ≥2× warning.
   const prevExQ = usePreviousExerciseData(selectedClientId);
-  const prevSetsFor = (name: string) => prevExQ.data?.[name.toLowerCase().trim()];
+  const prevSetsFor = React.useCallback((name: string) => prevExQ.data?.[name.toLowerCase().trim()], [prevExQ.data]);
 
   // Training partner (web checkPartner): prompt once, share one group id across both logs.
   const partnerQ = usePartnerInfo(selectedClientId);
@@ -5468,6 +6163,13 @@ export function Workout() {
     setPairNames(null);
     AsyncStorage.removeItem(PARALLEL_STORE_KEY).catch(() => {});
   };
+  // Couple gate: the pair flow exists ONLY when the client has a defined training
+  // partner AND this trainer is actively assigned to that partner as well.
+  const partnerAssigned = !!partnerQ.data && (myClientsQ.data ?? []).some((c) => c.client_id === partnerQ.data!.id);
+  const coupleReady = !!partnerQ.data && partnerAssigned;
+  // Second leg: the trainer may finish after logging just ONE of the couple —
+  // drop the partner's pre-filled draft, forget the pair, leave the form.
+  const skipSecondLeg = () => { clearDraft(); removePair(); goBack(); };
   // ---- Per-client form isolation (web parity via the draft layer) ----
   // Each half of a couple keeps their OWN form. Switching tabs snapshots the
   // outgoing client's form into their draft and loads the incoming client's
@@ -5524,35 +6226,39 @@ export function Workout() {
   };
   // Restore a stored pair for the SAME primary client within the TTL (web localStorage parity).
   React.useEffect(() => {
-    if (!selectedClientId || editingOutboxId) return;
+    if (!selectedClientId || editingOutboxId || !partnerQ.data) return; // no defined partner → nothing to restore
     let alive = true;
     AsyncStorage.getItem(PARALLEL_STORE_KEY).then((raw) => {
       if (!alive || !raw) return;
       try {
         const s = JSON.parse(raw);
-        if (s?.primaryId === selectedClientId && s?.second?.id && Date.now() - (s.at ?? 0) < PARALLEL_TTL_MS) {
+        if (s?.primaryId === selectedClientId && s?.second?.id && s.second.id === partnerQ.data?.id && Date.now() - (s.at ?? 0) < PARALLEL_TTL_MS) {
           setPartnerPlan((prev) => prev ?? { groupId: s.groupId ?? uuidv4(), next: s.second });
           setPairNames((prev) => prev ?? { primary: { id: s.primaryId, name: s.primaryName ?? 'Client' }, second: s.second });
           setPartnerAsked(true);
-        } else if (s?.primaryId !== selectedClientId) {
+        } else if (s?.primaryId !== selectedClientId || s?.second?.id !== partnerQ.data?.id) {
           // Different primary → stale pair; second-leg switches keep state in memory.
           AsyncStorage.removeItem(PARALLEL_STORE_KEY).catch(() => {});
         }
       } catch { /* corrupt store — ignore */ }
     }).catch(() => {});
     return () => { alive = false; };
-  }, [selectedClientId, editingOutboxId]);
+  }, [selectedClientId, editingOutboxId, partnerQ.data?.id]);
 
   // Duplicate-session guard (web checkDuplicateWorkoutSession): confirm before a 2nd
   // same-day session of this modality.
   const [dupOpen, setDupOpen] = React.useState(false);
 
-  // Switching modality clears the in-progress list (its input model differs).
+  // Switching modality clears the in-progress list (its input model differs) and
+  // re-arms the plan pre-population effects so returning to yoga/boxing/aerobics
+  // loads the approved plan again instead of leaving an empty form.
   const prevModalityRef = React.useRef(modality);
   React.useEffect(() => {
     if (prevModalityRef.current !== modality) {
       prevModalityRef.current = modality;
       setExercises([]);
+      aerobicsPopulatedRef.current = null;
+      activityPopulatedRef.current = null;
     }
   }, [modality]);
 
@@ -5609,6 +6315,40 @@ export function Workout() {
     }))));
   }, [isAerobicsModality, currentPlan]);
 
+  // Yoga/Boxing pre-population: the approved plan's activities load as an UNCHECKED
+  // checklist (activity model — mark what was done). Without this the plan never
+  // surfaced for activity modalities: the body-part strip is hidden for them and
+  // only aerobics had an auto-populate, so a ✓-marked Yoga plan showed nothing.
+  const activityPopulatedRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (!isActivityModality || !currentPlan) return;
+    const key = `${mLower}:${currentPlan.plan_id}`;
+    if (activityPopulatedRef.current === key) return;
+    activityPopulatedRef.current = key;
+    setExercises((xs) => {
+      if (xs.length) return xs;
+      const seen = new Set<string>();
+      const acts = currentPlan.exercises.filter((ex) => {
+        const n = ex.exercise_name.trim().toLowerCase();
+        if (!n || seen.has(n)) return false;
+        seen.add(n);
+        return true;
+      });
+      return acts.map((ex) => ({
+        name: ex.exercise_name,
+        measurement: 'reps' as const,
+        body_part: ex.body_part ?? undefined,
+        notes: '',
+        collapsed: true,
+        completed: false,
+        activityType: 'Constant' as const,
+        rounds: isBoxingModality && /pad ?work/i.test(ex.exercise_name) ? '1' : '',
+        durationMin: '',
+        sets: [{ reps: '', load: '', duration: '' }],
+      }));
+    });
+  }, [isActivityModality, mLower, currentPlan]);
+
   // Body-part pick → pre-populate from the approved plan (web handleWorkoutNameSelect).
   const populateFromPlan = (bp: string) => {
     if (!currentPlan) return;
@@ -5643,13 +6383,29 @@ export function Workout() {
     setSessionName(bp);
   };
 
-  const updateEx = (i: number, patch: Partial<WExercise>) => setExercises((xs) => xs.map((x, k) => (k === i ? { ...x, ...patch } : x)));
-  const updateSet = (ei: number, si: number, patch: Partial<WSet>) =>
-    setExercises((xs) => xs.map((x, k) => (k === ei ? { ...x, sets: x.sets.map((s, j) => (j === si ? { ...s, ...patch } : s)) } : x)));
+  const updateEx = React.useCallback((i: number, patch: Partial<WExercise>) => setExercises((xs) => xs.map((x, k) => (k === i ? { ...x, ...patch } : x))), []);
+  const updateSet = React.useCallback((ei: number, si: number, patch: Partial<WSet>) =>
+    setExercises((xs) => xs.map((x, k) => (k === ei ? { ...x, sets: x.sets.map((s, j) => (j === si ? { ...s, ...patch } : s)) } : x))), []);
   // New sets start prefilled from the previous set — most sets repeat reps/load/duration.
-  const addSet = (ei: number) => setExercises((xs) => xs.map((x, k) => (k === ei ? { ...x, sets: [...x.sets, { ...(x.sets[x.sets.length - 1] ?? { reps: '', load: '', duration: '' }) }] } : x)));
-  const removeSet = (ei: number, si: number) => setExercises((xs) => xs.map((x, k) => (k === ei ? { ...x, sets: x.sets.filter((_, j) => j !== si) } : x)));
+  const addSet = React.useCallback((ei: number) => { flushPendingSetCommits(); setExercises((xs) => xs.map((x, k) => (k === ei ? { ...x, sets: [...x.sets, { ...(x.sets[x.sets.length - 1] ?? { reps: '', load: '', duration: '' }) }] } : x))); }, []);
+  const removeSet = React.useCallback((ei: number, si: number) => { flushPendingSetCommits(); setExercises((xs) => xs.map((x, k) => (k === ei ? { ...x, sets: x.sets.filter((_, j) => j !== si) } : x))); }, []);
   // Keeps the picker OPEN so several exercises can be added in a row (tap Done to close).
+  // One exercise per workout: a second tap on the same name is REJECTED with a
+  // warning buzz + a red shake on the picker row instead of a silent duplicate.
+  const sameEx = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+  const [dupFlash, setDupFlash] = React.useState<string | null>(null);
+  const dupShake = React.useRef(new Animated.Value(0)).current;
+  const dupTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rejectDuplicate = (n: string) => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+    setDupFlash(n.trim().toLowerCase());
+    dupShake.setValue(0);
+    Animated.sequence([1, -1, 1, -1, 0].map((v) => Animated.timing(dupShake, { toValue: v, duration: 45, useNativeDriver: true }))).start();
+    if (dupTimer.current) clearTimeout(dupTimer.current);
+    dupTimer.current = setTimeout(() => setDupFlash(null), 1100);
+  };
+  const dupShakeX = dupShake.interpolate({ inputRange: [-1, 0, 1], outputRange: [-8, 0, 8] });
+  const exercisesRef = React.useRef(exercises); exercisesRef.current = exercises;
   const addExercise = (name: string, measurement: 'reps' | 'duration' = 'reps', activityType: 'Constant' | 'Custom' = 'Constant', bodyPart?: string) => {
     const n = name.trim();
     if (!n) return;
@@ -5658,9 +6414,29 @@ export function Workout() {
     // Pilates reps-based exercises (Mat AND Reformer) prefill 10 reps on the
     // first set (web handleExercisesSelected); duration-based stay blank.
     const prefillReps = mLower === 'pilates' && measurement === 'reps' ? '10' : '';
-    setExercises((xs) => [...xs, { name: n, measurement, body_part: bodyPart, sets: [{ reps: prefillReps, load: '', duration: '' }], notes: '', activityType, completed: isActivityModality ? true : undefined, rounds: padwork ? '1' : '', durationMin: '', collapsed: true }]);
+    if (exercisesRef.current.some((x) => sameEx(x.name, n))) { rejectDuplicate(n); return; }
+    setExercises((xs) => xs.some((x) => sameEx(x.name, n)) ? xs : [...xs, { name: n, measurement, body_part: bodyPart, sets: [{ reps: prefillReps, load: '', duration: '' }], notes: '', activityType, completed: isActivityModality ? true : undefined, rounds: padwork ? '1' : '', durationMin: '', collapsed: true }]);
   };
-  const removeExercise = (i: number) => setExercises((xs) => xs.filter((_, k) => k !== i));
+  const removeExercise = React.useCallback((i: number) => { flushPendingSetCommits(); setExercises((xs) => xs.filter((_, k) => k !== i)); }, []);
+  // Reorder: move an exercise up/down in the log (web parity — order is
+  // preserved into the saved workout rows).
+  const moveExercise = React.useCallback((i: number, dir: -1 | 1) => {
+    flushPendingSetCommits();
+    setExercises((xs) => {
+      const j = i + dir;
+      if (j < 0 || j >= xs.length) return xs;
+      const next = [...xs];
+      [next[i], next[j]] = [next[j], next[i]];
+      return next;
+    });
+  }, []);
+  // Drag-to-reorder: hold the grip on an exercise card and move it; the page
+  // scroll freezes while dragging and auto-scrolls near the screen edges.
+  const dragPageRef = React.useRef<ScrollView>(null);
+  const dragOffsetRef = React.useRef(0);
+  const [pageScrollOk, setPageScrollOk] = React.useState(true);
+  const drag = useDragReorder({ scrollRef: dragPageRef, scrollOffsetRef: dragOffsetRef, setScrollEnabled: setPageScrollOk });
+  drag.setList('wl', { count: exercises.length, gap: 14, onMove: (from, to) => moveExercise(from, to > from ? 1 : -1) });
 
   // Templates for the CURRENT modality (RLS already limits to my own).
   const modNorm = (s: string) => (s || '').toLowerCase().replace(/training/g, '').replace(/[^a-z]/g, '');
@@ -5753,7 +6529,6 @@ export function Workout() {
     : exercises.some((e) => e.name.trim() && e.sets.some((s) => s.reps.trim() || s.load.trim() || s.duration.trim()));
   // Web rule: the metric (reps, or duration for timed moves) is required per set;
   // LOAD IS OPTIONAL (bodyweight sets log without a load).
-  const setIncomplete = (e: WExercise, s: WSet) => (e.measurement === 'duration' ? !s.duration.trim() : !s.reps.trim());
   // An exercise "has data" when any value was entered (or it's marked completed for
   // activity modalities). Fully-blank exercises no longer block submission — they
   // are DROPPED from the log after an explicit confirmation popup, online and
@@ -5766,10 +6541,24 @@ export function Workout() {
   const customNameMissing = isCustomModality && !customModalityName.trim();
   const canSubmit = !!selectedClientId && !!trainerId && hasValidContent && allExercisesComplete && rpe != null && !customNameMissing && !saving && !gateBlocking && !healthLoading && !gateBlocked;
 
+  // Post-save timers ("Saved ✓" → back, or → partner's leg) live in a ref so a
+  // back tap inside the window, or an unmount, cancels them: an orphaned goBack()
+  // popped a second screen and the partner-leg timer mutated selectedClientId
+  // for a form that was no longer mounted.
+  const postSaveTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  React.useEffect(() => () => { if (postSaveTimer.current) clearTimeout(postSaveTimer.current); }, []);
   const goBack = () => {
+    if (postSaveTimer.current) { clearTimeout(postSaveTimer.current); postSaveTimer.current = null; }
     if (editingOutboxId) set({ editingOutboxId: null }); // cancel leaves the queued item untouched
     canGoBack ? back() : go('dashboard');
   };
+  // Hardware back runs the same cleanup as the on-screen back (edge swipe is
+  // disabled on this route — Router NO_SWIPE_BACK).
+  const goBackRef = React.useRef(goBack); goBackRef.current = goBack;
+  React.useEffect(() => {
+    backOverride.handler = () => goBackRef.current();
+    return () => { backOverride.handler = null; };
+  }, []);
 
   // If health data is missing, open the (prefilled) health sheet straight away —
   // the trainer fills the three fields and lands right back on the unlocked form.
@@ -5808,19 +6597,21 @@ export function Workout() {
       // can never overwrite exercises the partner already picked.
       const carrySource: WExercise[] = exercises.filter(exHasData);
       const carriedName = sessionName;
-      setTimeout(() => {
+      postSaveTimer.current = setTimeout(() => {
+        postSaveTimer.current = null;
         // Second leg of the partner pair: same shared group id, no schedule slot.
         setPartnerPlan({ groupId: partnerPlan.groupId, next: null });
         setPartnerAsked(true);
         set({ selectedClientId: next.id, selectedClientName: next.name, workoutScheduleId: null });
         setDone(false); setSavedOffline(false); setSyncError(null);
         aerobicsPopulatedRef.current = null;
+        activityPopulatedRef.current = null;
         applyDraftOrCarry(next.id, carrySource, carriedName);
       }, offline ? 900 : 700);
     } else {
       // Final leg saved (solo, or both halves of a pair) → the stored pair is spent.
       AsyncStorage.removeItem('parallel_workout_session').catch(() => {});
-      setTimeout(goBack, offline ? 900 : 700);
+      postSaveTimer.current = setTimeout(goBack, offline ? 900 : 700);
     }
   };
 
@@ -5831,6 +6622,10 @@ export function Workout() {
      server rejected it (stays visible on Home with Retry/Edit/Discard). */
   const effectiveModality = isCustomModality ? (customModalityName.trim() || 'Custom') : (modality || 'strength');
   const submit = async (skipDupCheck = false) => {
+    // Debounced set edits land in state first; the tick lets React apply them so
+    // exercisesRef (mirrored at render) is fresh below.
+    flushPendingSetCommits();
+    await new Promise((r) => setTimeout(r, 0));
     if (gateBlocked) {
       Alert.alert('Session limit reached', `You've already logged ${gate?.loggedCount ?? 3} ${modLabel} sessions without an approved plan. A valid training plan is required to log more. Create and get a ${modLabel} plan approved to continue.`);
       return;
@@ -5850,7 +6645,7 @@ export function Workout() {
       const label = `${clientName} · ${modLabel} workout`;
       // Blank exercises are dropped HERE — before the payload is built — so they
       // never reach the outbox (offline) or the server (online).
-      const submitExercises = exercises.filter(exHasData);
+      const submitExercises = exercisesRef.current.filter(exHasData);
       let itemId: string;
       if (editingOutboxId) {
         // Edit-in-place: the queued item keeps its id, session id and ORIGINAL
@@ -5922,7 +6717,8 @@ export function Workout() {
 
   return (
     <View style={{ flex: 1 }}>
-      <Page gap={14} pt={6} pb={120 + (Platform.OS === 'android' ? kbH : 0)} kbAware>
+      {/* pb clears the sticky Submit bar (+ home indicator); Page adds the keyboard height itself. */}
+      <Page ref={dragPageRef} scrollEnabled={pageScrollOk} scrollOffsetRef={dragOffsetRef} gap={14} pt={6} pb={160 + insets.bottom} kbAware>
         <BackLink label="Log Workout" onPress={goBack} />
         {/* Parallel / couple tabs (web ParallelWorkoutTabs): primary client + "+ Add
             Client" (or the chosen second client). One shared group id → one package
@@ -5950,24 +6746,28 @@ export function Workout() {
                   {pairLeg === 'first' ? (
                     <>
                       <Mono style={{ fontSize: 7, color: C.muted3 }}>TAP TO SWITCH</Mono>
-                      <Pressable onPress={removePair} hitSlop={8} style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: hexA(C.red, 0.14), alignItems: 'center', justifyContent: 'center' }}>
+                      <Pressable onPress={removePair} style={{ width: 28, height: 28, marginLeft: 4, borderRadius: 14, backgroundColor: hexA(C.red, 0.14), alignItems: 'center', justifyContent: 'center' }}>
                         <Icon name="close" size={9} color={C.red} strokeWidth={2.6} />
                       </Pressable>
                     </>
-                  ) : null}
+                  ) : (
+                    <Pressable onPress={skipSecondLeg} hitSlop={8} style={{ paddingVertical: 4, paddingHorizontal: 9, borderRadius: 999, backgroundColor: hexA(C.red, 0.12), borderWidth: 1, borderColor: hexA(C.red, 0.4) }}>
+                      <Mono style={{ fontSize: 7.5, letterSpacing: 0.6, color: C.red }}>SKIP</Mono>
+                    </Pressable>
+                  )}
                 </Pressable>
-              ) : (
+              ) : coupleReady ? (
                 <Pressable onPress={() => { setPairSearch(''); setPairPickerOpen(true); }} style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 13, backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderStyle: 'dashed', borderColor: 'rgba(255,255,255,0.22)' }}>
                   <Icon name="userPlus" size={13} color={C.muted} strokeWidth={2.2} />
                   <Text style={{ fontFamily: F.bodySemi, fontSize: 12, color: C.muted }}>Add Client</Text>
                 </Pressable>
-              )}
+              ) : null}
             </View>
             {pairNames ? (
               <Body style={{ fontSize: 10, color: C.muted3, paddingLeft: 3 }}>
                 {pairLeg === 'first'
                   ? `Parallel session — each client keeps their own form. After saving ${pairNames.primary.name.split(' ')[0]}'s log, the form switches to ${pairNames.second.name.split(' ')[0]}. The pair shares one package session.`
-                  : `Second leg — ${pairNames.primary.name.split(' ')[0]}'s own saved selection is kept (or the partner's exercises are pre-filled if they had none). Add or remove freely.`}
+                  : `Second leg — ${pairNames.primary.name.split(' ')[0]}'s own saved selection is kept (or the partner's exercises are pre-filled if they had none). Add or remove freely, or tap SKIP to finish without logging ${pairNames.second.name.split(' ')[0]}.`}
               </Body>
             ) : null}
           </View>
@@ -5978,45 +6778,35 @@ export function Workout() {
           hard-crashes Android on the new architecture. */}
       <Modal visible={pairPickerOpen} transparent animationType="slide" onRequestClose={closePairPicker}>
         <View style={{ flex: 1, justifyContent: 'flex-end' }}>
-          <Pressable onPress={closePairPicker} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)' }} />
-          <View style={{ maxHeight: '78%', backgroundColor: C.sheetBg, borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 12, paddingBottom: kbH > 0 ? kbH + 14 : insets.bottom + 16 }}>
+          <Pressable onPress={closePairPicker} accessibilityRole="button" accessibilityLabel="Close" importantForAccessibility="no-hide-descendants" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)' }} />
+          <View accessibilityViewIsModal style={{ maxHeight: '78%', backgroundColor: C.sheetBg, borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 12, paddingBottom: kbH > 0 ? kbH + 14 : insets.bottom + 16 }}>
             <View style={{ alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.14)', marginBottom: 12 }} />
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 }}>
               <View style={{ width: 34, height: 34, borderRadius: 12, backgroundColor: hexA(C.purple, 0.14), alignItems: 'center', justifyContent: 'center' }}>
                 <Icon name="userPlus" size={15} color={C.purple} strokeWidth={2.1} />
               </View>
               <View style={{ flex: 1 }}>
-                <Serif style={{ fontSize: 18 }}>Add Parallel Client</Serif>
-                <Body style={{ fontSize: 11, color: C.muted2 }}>Log a second session alongside {clientName.split(' ')[0]} — one shared package session.</Body>
+                <Serif style={{ fontSize: 18 }}>Add Client</Serif>
+                <Body style={{ fontSize: 11, color: C.muted2 }}>Couple session — {clientName.split(' ')[0]} trains with a partner. Both logs share one package session.</Body>
               </View>
               <Pressable onPress={closePairPicker} hitSlop={8} style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center', justifyContent: 'center' }}>
                 <Icon name="close" size={13} color="#B8B2AC" strokeWidth={2.3} />
               </Pressable>
             </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', marginBottom: 10 }}>
-              <Icon name="search" size={14} color={C.muted3} strokeWidth={2} />
-              <TextInput value={pairSearch} onChangeText={setPairSearch} placeholder="Search your clients…" placeholderTextColor={C.muted3} autoCorrect={false} style={{ flex: 1, fontFamily: F.body, fontSize: 13.5, color: '#fff', padding: 0 }} />
-            </View>
-            <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-              {(myClientsQ.data ?? [])
-                .filter((c) => c.client_id !== selectedClientId)
-                .filter((c) => !pairSearch.trim() || (c.full_name ?? '').toLowerCase().includes(pairSearch.trim().toLowerCase()))
-                .map((c) => (
-                  <Pressable
-                    key={c.client_id}
-                    onPress={() => { Keyboard.dismiss(); startPair({ id: c.client_id, name: c.full_name }); setTimeout(() => { setPairPickerOpen(false); setPairSearch(''); }, 80); }}
-                    style={{ flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' }}
-                  >
-                    <Avatar initial={initials(c.full_name)} size={34} colors={['#7C8FE8', '#9A7BEA']} fontSize={12} />
-                    <View style={{ flex: 1 }}>
-                      <Body numberOfLines={1} style={{ fontSize: 13.5, fontFamily: F.bodySemi, color: '#fff' }}>{c.full_name}</Body>
-                      {c.subscription_type ? <Body style={{ fontSize: 10, color: C.muted3, marginTop: 1 }}>{c.subscription_type}</Body> : null}
-                    </View>
-                    <Icon name="chevRight" size={13} color={C.muted3} strokeWidth={2.2} />
-                  </Pressable>
-                ))}
-              {myClientsQ.isLoading ? <ActivityIndicator color={C.orange} style={{ paddingVertical: 20 }} /> : null}
-            </ScrollView>
+            {/* Couple session: the ONLY selectable second client is the defined training partner. */}
+            {partnerQ.data ? (
+              <Pressable
+                onPress={() => { Keyboard.dismiss(); startPair(partnerQ.data!); setTimeout(() => { setPairPickerOpen(false); setPairSearch(''); }, 80); }}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 12, paddingHorizontal: 12, borderRadius: 14, backgroundColor: hexA(C.purple, 0.1), borderWidth: 1, borderColor: hexA(C.purple, 0.4) }}
+              >
+                <Avatar initial={initials(partnerQ.data.name)} size={36} colors={['#7C8FE8', '#9A7BEA']} fontSize={12} />
+                <View style={{ flex: 1 }}>
+                  <Body numberOfLines={1} style={{ fontSize: 14, fontFamily: F.bodySemi, color: '#fff' }}>{partnerQ.data.name}</Body>
+                  <Mono style={{ fontSize: 8, letterSpacing: 0.6, color: C.purple, marginTop: 2 }}>COUPLE · TRAINS WITH {clientName.split(' ')[0].toUpperCase()} · ONE SHARED PACKAGE SESSION</Mono>
+                </View>
+                <Icon name="chevRight" size={14} color={C.purple} strokeWidth={2.2} />
+              </Pressable>
+            ) : null}
           </View>
         </View>
       </Modal>
@@ -6143,6 +6933,96 @@ export function Workout() {
           ) : null}
         </Card>
 
+        {/* Zone 2 Cardio — shown whenever this week's goal has a target, independent
+            of the health gate, so an under-target week always prompts the trainer. */}
+        {z2Q.data && z2Q.data.target > 0 ? (() => {
+          const z = z2Q.data!;
+          const doneCount = z.sessions.length;
+          const met = doneCount >= z.target;
+          const taken = new Set(z.sessions.map((s) => String(s.date).slice(0, 10)));
+          const weekDays: string[] = Array.from({ length: 7 }, (_, i) =>
+            new Date(new Date(z.weekStart + 'T12:00:00Z').getTime() + i * 864e5).toISOString().slice(0, 10));
+          const dLab = (ymd: string) => new Date(ymd + 'T12:00:00Z').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', timeZone: 'UTC' });
+          const logZ2 = async () => {
+            if (!z2Date || z2LogM.isPending) return;
+            const dur = z2Dur.trim() ? Math.round(Number(z2Dur)) : null;
+            try {
+              await z2LogM.mutateAsync({ goalId: z.goalId, clientId: selectedClientId as string, date: z2Date, durationMin: dur != null && !isNaN(dur) ? dur : null });
+              setZ2Open(false); setZ2Date(null); setZ2Dur('');
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+            } catch (e: any) { Alert.alert("Couldn't log Zone 2", e?.message ?? 'Try again.'); }
+          };
+          return (
+            <Card colors={['rgba(56,34,21,0.45)', 'rgba(18,14,14,0.5)']} border={hexA(met ? C.green : C.orange, 0.22)} radius={18} style={{ padding: 14, gap: 11 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <View style={{ width: 32, height: 32, borderRadius: 11, backgroundColor: hexA(met ? C.green : C.orange, 0.13), alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon name="activity" size={16} color={met ? C.green : C.orange} strokeWidth={2.2} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Body style={{ fontSize: 14, fontFamily: F.bodySemi, color: '#fff' }}>Zone 2 Cardio</Body>
+                  <Body style={{ fontSize: 10.5, color: C.muted3, marginTop: 1 }}>Weekly target for {clientName}</Body>
+                </View>
+                <Badge text={`${doneCount}/${z.target} this week`} color={met ? C.green : C.gold} />
+              </View>
+              {z.sessions.length ? (
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                  {z.sessions.map((s, i) => (
+                    <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 4, paddingHorizontal: 10, borderRadius: 999, backgroundColor: hexA(C.green, 0.08), borderWidth: 1, borderColor: hexA(C.green, 0.28) }}>
+                      <Icon name="checks" size={10} color={C.green} strokeWidth={2.4} />
+                      <Text style={{ fontFamily: F.bodySemi, fontSize: 10.5, color: C.green }}>{dLab(String(s.date).slice(0, 10))}{s.duration_minutes ? ` · ${s.duration_minutes}m` : ''}</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+              {met ? (
+                <Body style={{ fontSize: 11.5, color: hexA(C.green, 0.9) }}>Target met for this week. Extra sessions can still be logged.</Body>
+              ) : null}
+              {!z2Open ? (
+                <Pressable onPress={() => { setZ2Open(true); setZ2Date(null); setZ2Dur(''); }} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 11, borderRadius: 12, backgroundColor: hexA(C.orange, 0.12), borderWidth: 1, borderColor: hexA(C.orange, 0.4) }}>
+                  <Icon name="plus" size={13} color={C.orange} strokeWidth={2.6} />
+                  <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: C.orange }}>{met ? 'Log another session' : 'Yes, log a session'}</Text>
+                </Pressable>
+              ) : (
+                <View style={{ gap: 10 }}>
+                  <View>
+                    <Mono style={{ fontSize: 9, letterSpacing: 0.8, color: C.mono2, marginBottom: 6 }}>WHICH DAY? (THIS GOAL WEEK)</Mono>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                      {weekDays.map((d) => {
+                        const used = taken.has(d);
+                        const on = z2Date === d;
+                        return (
+                          <Pressable key={d} disabled={used} onPress={() => setZ2Date(d)} style={{ paddingVertical: 7, paddingHorizontal: 11, borderRadius: 10, backgroundColor: on ? hexA(C.orange, 0.16) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: on ? hexA(C.orange, 0.55) : 'rgba(255,255,255,0.08)', opacity: used ? 0.35 : 1 }}>
+                            <Text style={{ fontFamily: on ? F.bodyBold : F.bodySemi, fontSize: 11, color: on ? C.orange : used ? C.muted3 : C.ink }}>{dLab(d)}</Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </View>
+                  <View style={{ flexDirection: 'row', gap: 9, alignItems: 'flex-end' }}>
+                    <View style={{ flex: 1 }}>
+                      <Mono style={{ fontSize: 9, letterSpacing: 0.8, color: C.mono2, marginBottom: 6 }}>DURATION (MIN, OPTIONAL)</Mono>
+                      <TextInput
+                        value={z2Dur}
+                        onChangeText={setZ2Dur}
+                        placeholder="e.g. 30"
+                        placeholderTextColor={C.muted3}
+                        keyboardType="numeric"
+                        style={{ paddingVertical: 10, paddingHorizontal: 13, borderRadius: 11, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.03)', color: '#fff', fontFamily: F.mono, fontSize: 13.5 }}
+                      />
+                    </View>
+                    <Pressable onPress={() => { setZ2Open(false); setZ2Date(null); }} style={{ paddingVertical: 11, paddingHorizontal: 13, borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }}>
+                      <Text style={{ fontFamily: F.bodySemi, fontSize: 12, color: C.muted }}>Cancel</Text>
+                    </Pressable>
+                    <Pressable onPress={logZ2} disabled={!z2Date || z2LogM.isPending} style={{ paddingVertical: 11, paddingHorizontal: 16, borderRadius: 11, backgroundColor: z2Date ? C.orange : 'rgba(255,255,255,0.06)', opacity: z2LogM.isPending ? 0.6 : 1 }}>
+                      <Text style={{ fontFamily: F.bodyBold, fontSize: 12, color: z2Date ? '#1A0F08' : C.muted3 }}>{z2LogM.isPending ? 'Logging…' : 'Log'}</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              )}
+            </Card>
+          );
+        })() : null}
+
         {gateBlocking ? (
           <Card colors={['rgba(56,34,21,0.5)', 'rgba(18,14,14,0.5)']} border="rgba(255,150,90,0.12)" radius={22} style={{ padding: 24, alignItems: 'center', gap: 16, marginTop: 8 }}>
             {/* Icon chips */}
@@ -6241,174 +7121,7 @@ export function Workout() {
           </View>
         ) : null}
         {exercises.map((ex, ei) => (
-          <Card key={ei} colors={['rgba(46,28,18,0.4)', 'rgba(18,14,14,0.5)']} radius={20} style={{ padding: 16, gap: 12 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-              {/* Tap the name row to expand/collapse the card — added exercises start
-                  collapsed so a long list stays scannable. */}
-              <Pressable onPress={() => updateEx(ei, { collapsed: !ex.collapsed })} style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                <View style={{ width: 26, height: 26, borderRadius: 8, backgroundColor: hexA(C.orange, 0.13), alignItems: 'center', justifyContent: 'center' }}>
-                  <Text style={{ fontFamily: F.mono, fontSize: 12, color: C.orange }}>{ei + 1}</Text>
-                </View>
-                <Body style={{ flex: 1, fontSize: 15, fontFamily: F.bodySemi, color: '#fff' }} numberOfLines={1}>{ex.name}</Body>
-                {ex.collapsed ? (
-                  <>
-                    {!isActivityModality ? (
-                      <View style={{ paddingVertical: 3, paddingHorizontal: 8, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }}>
-                        <Text style={{ fontFamily: F.bodySemi, fontSize: 9.5, color: C.muted2 }}>{ex.sets.length} set{ex.sets.length === 1 ? '' : 's'}</Text>
-                      </View>
-                    ) : null}
-                    {(isActivityModality ? !ex.completed : ex.sets.some((s) => setIncomplete(ex, s))) ? (
-                      <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: C.gold }} />
-                    ) : (
-                      <Icon name="checks" size={13} color={C.green} strokeWidth={2.5} />
-                    )}
-                  </>
-                ) : null}
-                {isActivityModality && ex.activityType && !ex.collapsed ? (
-                  <View style={{ paddingVertical: 3, paddingHorizontal: 9, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }}>
-                    <Text style={{ fontFamily: F.bodySemi, fontSize: 10, color: C.muted2 }}>{ex.activityType}</Text>
-                  </View>
-                ) : null}
-                <Icon name={ex.collapsed ? 'chevDown' : 'chevUp'} size={13} color={C.muted3} strokeWidth={2.3} />
-              </Pressable>
-              <Pressable onPress={() => removeExercise(ei)} hitSlop={8}><Icon name="close" size={16} color={C.muted2} strokeWidth={2.2} /></Pressable>
-            </View>
-
-            {ex.collapsed ? null : isActivityModality ? (
-              <>
-                {/* Mark as completed — the activity model (Yoga/Boxing) */}
-                <Pressable onPress={() => updateEx(ei, { completed: !ex.completed })} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4 }}>
-                  <View style={{ width: 24, height: 24, borderRadius: 7, alignItems: 'center', justifyContent: 'center', backgroundColor: ex.completed ? C.green : 'rgba(255,255,255,0.05)', borderWidth: 1.5, borderColor: ex.completed ? C.green : 'rgba(255,255,255,0.18)' }}>
-                    {ex.completed ? <Icon path="M20 6 9 17l-5-5" size={14} color="#0c0808" strokeWidth={3} /> : null}
-                  </View>
-                  <Text style={{ fontFamily: F.bodySemi, fontSize: 13.5, color: ex.completed ? '#fff' : C.muted }}>Mark as completed</Text>
-                </Pressable>
-                {isBoxingModality && ex.completed ? (
-                  <View style={{ flexDirection: 'row', gap: 8 }}>
-                    <View style={{ flex: 1 }}>
-                      <Mono style={{ fontSize: 9, letterSpacing: 0.8, color: C.mono2, marginBottom: 5 }}>DURATION (MIN)</Mono>
-                      <TextInput value={ex.durationMin ?? ''} onChangeText={(t) => { const v = t.replace(/[^0-9]/g, ''); updateEx(ei, { durationMin: v || (t.trim() ? ex.durationMin ?? '' : '') }); }} keyboardType="number-pad" placeholder="—" placeholderTextColor={C.muted3} style={[cellInput, { textAlign: 'left', paddingHorizontal: 12 }]} />
-                    </View>
-                    {/^.*pad ?work.*$/i.test(ex.name) ? (
-                      <View style={{ flex: 1 }}>
-                        <Mono style={{ fontSize: 9, letterSpacing: 0.8, color: C.mono2, marginBottom: 5 }}>ROUNDS</Mono>
-                        <TextInput value={ex.rounds ?? ''} onChangeText={(t) => { const v = t.replace(/[^0-9]/g, ''); updateEx(ei, { rounds: v || (t.trim() ? ex.rounds ?? '' : '') }); }} keyboardType="number-pad" placeholder="—" placeholderTextColor={C.muted3} style={[cellInput, { textAlign: 'left', paddingHorizontal: 12 }]} />
-                      </View>
-                    ) : null}
-                  </View>
-                ) : null}
-              </>
-            ) : (
-              <>
-                <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 2 }}>
-                  <Text style={[colHead, { width: 30 }]}>SET</Text>
-                  <Text style={[colHead, { flex: 1 }]}>{ex.measurement === 'duration' ? (isAerobicsModality ? 'DURATION (MIN)' : 'DURATION (SEC)') : 'REPS'}</Text>
-                  {!isAerobicsModality ? <Text style={[colHead, { flex: 1 }]}>LOAD (KG)</Text> : null}
-                  <View style={{ width: 26 }} />
-                </View>
-                {ex.sets.map((st, si) => {
-                  const missing = setIncomplete(ex, st); // primary metric empty → must be filled to log
-                  const prevSets = prevSetsFor(ex.name);
-                  const prevSet = prevSets?.[si];
-                  // Placeholders: the plan target, else the last session's value (web parity).
-                  const metricPh = ex.measurement === 'duration'
-                    ? (st.durationPlan ? `Plan ${st.durationPlan}` : prevSet?.durationSeconds != null ? `Last: ${prevSet.durationSeconds}s` : '—')
-                    : (st.repsPlan ? `Plan ${st.repsPlan}` : prevSet?.reps != null ? `Last: ${prevSet.reps}` : '—');
-                  const loadPh = st.loadPlan ? `Plan ${st.loadPlan}` : prevSet?.load ? `Last: ${prevSet.load}` : '—';
-                  // ≥2× sanity warning (warn-only, web getDoubleValueWarning): vs previous
-                  // set, or the last session's first set for set #1.
-                  const warnFor = (field: 'reps' | 'load'): string | null => {
-                    const cur = parseFloat(field === 'reps' ? st.reps : st.load);
-                    if (!isFinite(cur) || cur === 0) return null;
-                    let ref: number | null = null;
-                    if (si > 0) {
-                      const p = ex.sets[si - 1];
-                      const v = parseFloat(field === 'reps' ? p.reps : p.load);
-                      if (isFinite(v) && v > 0) ref = v;
-                    } else {
-                      const p0 = prevSets?.[0];
-                      const v = field === 'reps' ? p0?.reps : p0?.load != null ? parseFloat(String(p0.load)) : null;
-                      if (v != null && isFinite(Number(v)) && Number(v) > 0) ref = Number(v);
-                    }
-                    if (ref != null && cur >= ref * 2) return `${field === 'reps' ? 'Reps' : 'Load'} is ${Math.round(cur / ref)}× the ${si > 0 ? 'previous set' : 'last session'} (${ref}) — is this correct?`;
-                    return null;
-                  };
-                  const warn = warnFor('reps') ?? warnFor('load');
-                  return (
-                  <View key={si} style={{ gap: 6 }}>
-                    <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
-                      <View style={[cell, { width: 30, backgroundColor: 'rgba(255,255,255,0.04)' }]}><Text style={{ fontFamily: F.mono, fontSize: 13, color: C.muted }}>{si + 1}</Text></View>
-                      {/* Keyboard-suggestion guard: an Android suggestion tap REPLACES the
-                          field text with a word; stripped to digits that becomes '' and
-                          silently wiped the typed value. Non-empty input that strips to
-                          nothing now keeps the previous value (backspace still clears). */}
-                      {ex.measurement === 'duration' ? (
-                        <TextInput value={st.duration} onChangeText={(t) => { const v = t.replace(/[^0-9]/g, ''); updateSet(ei, si, { duration: v || (t.trim() ? st.duration : '') }); }} keyboardType="number-pad" placeholder={metricPh} placeholderTextColor={missing ? hexA(C.gold, 0.8) : C.muted3} style={[cellInput, missing ? { borderWidth: 1, borderColor: hexA(C.gold, 0.4) } : null]} />
-                      ) : (
-                        <TextInput value={st.reps} onChangeText={(t) => { const v = t.replace(/[^0-9]/g, ''); updateSet(ei, si, { reps: v || (t.trim() ? st.reps : '') }); }} keyboardType="number-pad" placeholder={metricPh} placeholderTextColor={missing ? hexA(C.gold, 0.8) : C.muted3} style={[cellInput, missing ? { borderWidth: 1, borderColor: hexA(C.gold, 0.4) } : null]} />
-                      )}
-                      {!isAerobicsModality ? (
-                        // Free text (web parity): bodyweight expressions like "BW+5" are valid loads.
-                        <TextInput value={st.load} onChangeText={(t) => updateSet(ei, si, { load: t })} autoCapitalize="characters" autoCorrect={false} placeholder={loadPh} placeholderTextColor={C.muted3} style={cellInput} />
-                      ) : null}
-                      <Pressable onPress={() => removeSet(ei, si)} disabled={ex.sets.length === 1} style={{ width: 26, alignItems: 'center', opacity: ex.sets.length === 1 ? 0.3 : 1 }} hitSlop={6}>
-                        <Icon name="close" size={13} color={C.muted2} strokeWidth={2.2} />
-                      </Pressable>
-                    </View>
-                    {warn ? (
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 2 }}>
-                        <Icon name="alert" size={11} color={C.gold} strokeWidth={2.2} />
-                        <Body style={{ flex: 1, fontSize: 10.5, color: C.gold }}>{warn}</Body>
-                      </View>
-                    ) : null}
-                    {ex.detailsOpen && !isAerobicsModality ? (
-                      <View style={{ flexDirection: 'row', gap: 6, paddingLeft: 38 }}>
-                        <TextInput value={st.rest ?? ''} onChangeText={(t) => { const v = t.replace(/[^0-9]/g, ''); updateSet(ei, si, { rest: v || (t.trim() ? st.rest ?? '' : '') }); }} keyboardType="number-pad" placeholder={prevSet?.rest ? `Rest ${prevSet.rest}` : 'Rest (s)'} placeholderTextColor={C.muted3} style={[cellInput, { flex: 1 }]} />
-                        <TextInput value={st.tempo ?? ''} onChangeText={(t) => updateSet(ei, si, { tempo: t })} autoCorrect={false} placeholder={prevSet?.tempo ? `Tempo ${prevSet.tempo}` : 'Tempo 2-1-2-1'} placeholderTextColor={C.muted3} style={[cellInput, { flex: 1.2 }]} />
-                        <TextInput value={st.superset ?? ''} onChangeText={(t) => updateSet(ei, si, { superset: t })} autoCapitalize="characters" autoCorrect={false} placeholder="SS A1" placeholderTextColor={C.muted3} style={[cellInput, { width: 62 }]} />
-                      </View>
-                    ) : null}
-                    {ex.detailsOpen && !isAerobicsModality ? (
-                      <View style={{ flexDirection: 'row', gap: 6, paddingLeft: 38 }}>
-                        <TextInput value={st.note ?? ''} onChangeText={(t) => updateSet(ei, si, { note: t })} placeholder="Set notes" placeholderTextColor={C.muted3} style={[cellInput, { flex: 1, textAlign: 'left', paddingHorizontal: 12 }]} />
-                      </View>
-                    ) : null}
-                    {ex.detailsOpen && isPilatesModality ? (
-                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingLeft: 38 }}>
-                        {PILATES_EQUIPMENT.map((eq) => {
-                          const sel = st.equipment === eq;
-                          return (
-                            <Pressable key={eq} onPress={() => updateSet(ei, si, { equipment: sel ? '' : eq })} style={{ paddingVertical: 5, paddingHorizontal: 10, borderRadius: 999, backgroundColor: sel ? hexA(C.purple, 0.16) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: sel ? hexA(C.purple, 0.45) : 'rgba(255,255,255,0.08)' }}>
-                              <Text style={{ fontFamily: sel ? F.bodyBold : F.body, fontSize: 10.5, color: sel ? C.purple : C.muted }}>{eq}</Text>
-                            </Pressable>
-                          );
-                        })}
-                      </View>
-                    ) : null}
-                  </View>
-                  );
-                })}
-                {ex.sets.some((s) => setIncomplete(ex, s)) ? (
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 2 }}>
-                    <Icon name="alert" size={11} color={C.gold} strokeWidth={2.2} />
-                    <Body style={{ flex: 1, fontSize: 10.5, color: C.gold }}>Every set needs {ex.measurement === 'duration' ? 'duration' : 'reps'} before you can log — load is optional for bodyweight.</Body>
-                  </View>
-                ) : null}
-                <View style={{ flexDirection: 'row', gap: 8 }}>
-                  <Pressable onPress={() => addSet(ei)} style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 10, borderRadius: 11, borderWidth: 1.5, borderStyle: 'dashed', borderColor: 'rgba(255,255,255,0.13)' }}>
-                    <Icon name="plus" size={14} color={C.muted} strokeWidth={2.2} />
-                    <Text style={{ fontFamily: F.bodySemi, fontSize: 12, color: C.muted }}>Add set</Text>
-                  </Pressable>
-                  {!isAerobicsModality ? (
-                    <Pressable onPress={() => updateEx(ei, { detailsOpen: !ex.detailsOpen })} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, paddingHorizontal: 14, borderRadius: 11, backgroundColor: ex.detailsOpen ? hexA(C.blue, 0.1) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: ex.detailsOpen ? hexA(C.blue, 0.35) : 'rgba(255,255,255,0.09)' }}>
-                      <Icon name={ex.detailsOpen ? 'chevUp' : 'chevDown'} size={12} color={ex.detailsOpen ? C.blue : C.muted} strokeWidth={2.3} />
-                      <Text style={{ fontFamily: F.bodySemi, fontSize: 11.5, color: ex.detailsOpen ? C.blue : C.muted }}>Details</Text>
-                    </Pressable>
-                  ) : null}
-                </View>
-              </>
-            )}
-          </Card>
+          <ExerciseCard key={ei} ex={ex} ei={ei} drag={drag} pairNames={pairNames} clientName={clientName} isActivityModality={isActivityModality} isBoxingModality={isBoxingModality} isAerobicsModality={isAerobicsModality} isPilatesModality={isPilatesModality} prevSetsFor={prevSetsFor} updateEx={updateEx} updateSet={updateSet} addSet={addSet} removeSet={removeSet} removeExercise={removeExercise} />
         ))}
 
         {exercises.length === 0 ? (
@@ -6519,8 +7232,13 @@ export function Workout() {
         </View>
       </View>
 
-      {/* Training-partner prompt (web TrainingPartnerPromptDialog) */}
-      <Modal visible={partnerPromptVisible} transparent animationType="fade" onRequestClose={() => setPartnerAsked(true)}>
+      {/* Training-partner prompt (web TrainingPartnerPromptDialog).
+          NEVER shown while another Modal on this screen is up: two stacked RN
+          Modals wedge the iOS presentation stack when the top one dismisses
+          (frozen screen), and interrupting the health/templates/picker forms is
+          bad UX anyway. partnerAsked stays false, so the prompt simply appears
+          the moment the other modal closes. */}
+      <Modal visible={partnerPromptVisible && coupleReady && !healthOpen && !templatesOpen && !pairPickerOpen && !dupOpen} transparent animationType="fade" onRequestClose={() => setPartnerAsked(true)}>
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', alignItems: 'center', justifyContent: 'center', padding: 22 }}>
           <View style={{ width: '100%', maxWidth: 350, backgroundColor: '#12100E', borderWidth: 1, borderColor: hexA(C.purple, 0.3), borderRadius: 20, padding: 20, gap: 13 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
@@ -6547,7 +7265,7 @@ export function Workout() {
       {/* Duplicate-session confirmation (web DuplicateWorkoutSessionDialog) */}
       <Modal visible={dupOpen} transparent animationType="fade" onRequestClose={() => setDupOpen(false)}>
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', alignItems: 'center', justifyContent: 'center', padding: 22 }}>
-          <View style={{ width: '100%', maxWidth: 350, backgroundColor: '#12100E', borderWidth: 1, borderColor: hexA(C.gold, 0.35), borderRadius: 20, padding: 20, gap: 13 }}>
+          <View accessibilityViewIsModal style={{ width: '100%', maxWidth: 350, backgroundColor: '#12100E', borderWidth: 1, borderColor: hexA(C.gold, 0.35), borderRadius: 20, padding: 20, gap: 13 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
               <View style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: hexA(C.gold, 0.14), alignItems: 'center', justifyContent: 'center' }}>
                 <Icon name="alert" size={17} color={C.gold} strokeWidth={2.2} />
@@ -6571,8 +7289,8 @@ export function Workout() {
 
       {/* Blank-exercise warning — only exercises WITH values are saved; the rest are dropped */}
       <Modal visible={blankOpen} transparent animationType="fade" onRequestClose={() => setBlankOpen(false)}>
-        <Pressable onPress={() => setBlankOpen(false)} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', alignItems: 'center', justifyContent: 'center', padding: 22 }}>
-          <Pressable onPress={() => {}} style={{ width: '100%', maxWidth: 350, backgroundColor: '#12100E', borderWidth: 1, borderColor: hexA(C.gold, 0.35), borderRadius: 20, padding: 20, gap: 13 }}>
+        <Pressable onPress={() => setBlankOpen(false)} accessibilityRole="button" accessibilityLabel="Close" style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', alignItems: 'center', justifyContent: 'center', padding: 22 }}>
+          <Pressable onPress={() => {}} accessible={false} accessibilityViewIsModal style={{ width: '100%', maxWidth: 350, backgroundColor: '#12100E', borderWidth: 1, borderColor: hexA(C.gold, 0.35), borderRadius: 20, padding: 20, gap: 13 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
               <View style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: hexA(C.gold, 0.14), alignItems: 'center', justifyContent: 'center' }}>
                 <Icon name="alert" size={17} color={C.gold} strokeWidth={2.2} />
@@ -6582,7 +7300,7 @@ export function Workout() {
             <Body style={{ fontSize: 12.5, color: C.ink3, lineHeight: 19 }}>
               Only these exercises have values and will be saved — the blank one{blankExercises.length === 1 ? '' : 's'} ({blankExercises.map((e) => e.name).join(', ')}) will be removed from this session.
             </Body>
-            <ScrollView style={{ maxHeight: 190 }} showsVerticalScrollIndicator={false}>
+            <ScrollView style={{ maxHeight: 300 }} showsVerticalScrollIndicator={false}>
               <View style={{ gap: 6 }}>
                 {exercises.filter(exHasData).map((e, i) => (
                   <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8, paddingHorizontal: 11, borderRadius: 11, backgroundColor: hexA(C.green, 0.06), borderWidth: 1, borderColor: hexA(C.green, 0.25) }}>
@@ -6607,8 +7325,8 @@ export function Workout() {
 
       {/* Immutable-log confirmation — trainer verifies date/time before commit */}
       <Modal visible={confirmOpen} transparent animationType="fade" onRequestClose={() => setConfirmOpen(false)}>
-        <Pressable onPress={() => setConfirmOpen(false)} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', alignItems: 'center', justifyContent: 'center', padding: 22 }}>
-          <Pressable onPress={() => {}} style={{ width: '100%', maxWidth: 350, backgroundColor: '#12100E', borderWidth: 1, borderColor: 'rgba(255,150,90,0.16)', borderRadius: 20, padding: 20, gap: 14 }}>
+        <Pressable onPress={() => setConfirmOpen(false)} accessibilityRole="button" accessibilityLabel="Close" style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', alignItems: 'center', justifyContent: 'center', padding: 22 }}>
+          <Pressable onPress={() => {}} accessible={false} accessibilityViewIsModal style={{ width: '100%', maxWidth: 350, backgroundColor: '#12100E', borderWidth: 1, borderColor: 'rgba(255,150,90,0.16)', borderRadius: 20, padding: 20, gap: 14 }}>
             <Serif style={{ fontSize: 19 }}>{editingOutboxId ? 'Update this pending log?' : 'Log this session?'}</Serif>
             {editingOutboxId ? <Body style={{ fontSize: 11.5, color: C.gold }}>This log keeps its original date & time — only the contents change.</Body> : null}
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 13, backgroundColor: 'rgba(0,0,0,0.3)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)' }}>
@@ -6641,8 +7359,8 @@ export function Workout() {
 
       {/* Health data dialog */}
       <Modal visible={healthOpen} transparent animationType="slide" onRequestClose={closeHealthSheet}>
-        <Pressable onPress={() => !saveHealthM.isPending && closeHealthSheet()} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' }}>
-          <Pressable onPress={() => {}} style={{ maxHeight: Math.min(winH * 0.9, winH - kbH - insets.top - 12), backgroundColor: '#0E0A09', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 14, paddingBottom: (kbH > 0 ? 12 : insets.bottom + 18), marginBottom: kbH }}>
+        <Pressable onPress={() => !saveHealthM.isPending && closeHealthSheet()} accessibilityRole="button" accessibilityLabel="Close" style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' }}>
+          <Pressable onPress={() => {}} accessible={false} accessibilityViewIsModal style={{ maxHeight: Math.min(winH * 0.9, winH - kbH - insets.top - 12), backgroundColor: '#0E0A09', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 14, paddingBottom: (kbH > 0 ? 12 : insets.bottom + 18), marginBottom: kbH }}>
             <View style={{ width: 40, height: 4, borderRadius: 99, backgroundColor: 'rgba(255,255,255,0.2)', alignSelf: 'center', marginBottom: 16 }} />
             <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 16 }}>
               <View style={{ flexDirection: 'row' }}>
@@ -6771,18 +7489,12 @@ export function Workout() {
               </Pressable>
             </View>
 
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, paddingHorizontal: 14, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', marginBottom: 10 }}>
-              <Icon name="search" size={17} color={C.muted3} strokeWidth={2} />
-              <TextInput value={exSearch} onChangeText={setExSearch} placeholder="Search exercises…" placeholderTextColor={C.muted3} autoCorrect={false} style={{ flex: 1, fontFamily: F.body, fontSize: 15, color: '#fff', padding: 0 }} />
-            </View>
-
-            {/* Add custom exercise */}
-            {!customFormOpen ? (
-              <Pressable onPress={() => { setCustomName(exSearch.trim()); setCustomMeasure('reps'); setCustomFormOpen(true); }} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 13, borderRadius: 13, borderWidth: 1.5, borderStyle: 'dashed', borderColor: hexA(C.orange, 0.32), backgroundColor: hexA(C.orange, 0.05), marginBottom: 12 }}>
-                <Icon name="plus" size={15} color={C.orange} strokeWidth={2.6} />
-                <Text style={{ fontFamily: F.bodyBold, fontSize: 13.5, color: C.orange }}>Add Custom Exercise</Text>
-              </Pressable>
-            ) : (
+            {/* CUSTOM FORM OPEN → the sheet shows ONLY the form, scrollable and
+                keyboard-aware, and the floating Continue bar hides. On small
+                phones the keyboard + static header used to push the absolutely-
+                positioned bar ONTO the form's Add button (overlap, no scroll). */}
+            {customFormOpen ? (
+              <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: (kbH > 0 ? kbH : insets.bottom) + 24 }}>
               <View style={{ padding: 13, borderRadius: 14, backgroundColor: hexA(C.orange, 0.06), borderWidth: 1, borderColor: hexA(C.orange, 0.28), gap: 10, marginBottom: 12 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                   <Mono style={{ flex: 1, fontSize: 10, letterSpacing: 1, color: C.orange }}>CUSTOM EXERCISE</Mono>
@@ -6820,7 +7532,18 @@ export function Workout() {
                   </LinearGradient>
                 </Pressable>
               </View>
-            )}
+              </ScrollView>
+            ) : (
+            <>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, paddingHorizontal: 14, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', marginBottom: 10 }}>
+              <Icon name="search" size={17} color={C.muted3} strokeWidth={2} />
+              <TextInput value={exSearch} onChangeText={setExSearch} placeholder="Search exercises…" placeholderTextColor={C.muted3} autoCorrect={false} style={{ flex: 1, fontFamily: F.body, fontSize: 15, color: '#fff', padding: 0 }} />
+            </View>
+
+            <Pressable onPress={() => { setCustomName(exSearch.trim()); setCustomMeasure('reps'); setCustomFormOpen(true); }} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 13, borderRadius: 13, borderWidth: 1.5, borderStyle: 'dashed', borderColor: hexA(C.orange, 0.32), backgroundColor: hexA(C.orange, 0.05), marginBottom: 12 }}>
+              <Icon name="plus" size={15} color={C.orange} strokeWidth={2.6} />
+              <Text style={{ fontFamily: F.bodyBold, fontSize: 13.5, color: C.orange }}>Add Custom Exercise</Text>
+            </Pressable>
 
             {/* Pilates: Mat (DB) vs Reformer (hardcoded) sub-tabs */}
             {mLower === 'pilates' ? (
@@ -6882,8 +7605,10 @@ export function Workout() {
                   ) : null}
                   renderItem={({ item: e }: { item: any }) => {
                     const added = addedCounts[e.name.trim().toLowerCase()] ?? 0;
+                    const dupHere = dupFlash === e.name.trim().toLowerCase();
                     return (
-                      <Pressable onPress={() => addExercise(e.name, e.measurement_type === 'duration' ? 'duration' : 'reps', 'Constant', e.muscle_group ?? undefined)} style={{ flexDirection: 'row', alignItems: 'center', gap: 11, padding: 13, borderRadius: 13, backgroundColor: added ? hexA(C.green, 0.07) : 'rgba(255,255,255,0.03)', borderWidth: 1, borderColor: added ? hexA(C.green, 0.3) : 'rgba(255,255,255,0.07)' }}>
+                      <Animated.View style={{ transform: [{ translateX: dupHere ? dupShakeX : 0 }] }}>
+                      <Pressable onPress={() => addExercise(e.name, e.measurement_type === 'duration' ? 'duration' : 'reps', 'Constant', e.muscle_group ?? undefined)} style={{ flexDirection: 'row', alignItems: 'center', gap: 11, padding: 13, borderRadius: 13, backgroundColor: dupHere ? hexA(C.red, 0.1) : added ? hexA(C.green, 0.07) : 'rgba(255,255,255,0.03)', borderWidth: 1, borderColor: dupHere ? hexA(C.red, 0.5) : added ? hexA(C.green, 0.3) : 'rgba(255,255,255,0.07)' }}>
                         <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: hexA(C.orange, 0.1), alignItems: 'center', justifyContent: 'center' }}>
                           <Icon name={e.measurement_type === 'duration' ? 'clock' : 'dumbbell'} size={15} color={C.orange} strokeWidth={1.9} />
                         </View>
@@ -6891,22 +7616,33 @@ export function Workout() {
                           <Body style={{ fontSize: 14, fontFamily: F.bodySemi, color: '#fff' }} numberOfLines={1}>{e.name}</Body>
                           {e.muscle_group || e.equipment || e.measurement_type === 'duration' ? <Body style={{ fontSize: 11.5, color: C.muted2, marginTop: 1 }}>{[e.measurement_type === 'duration' ? 'Duration' : null, e.muscle_group, e.equipment].filter(Boolean).join(' · ')}</Body> : null}
                         </View>
-                        {added ? (
+                        {dupHere ? (
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 4, paddingHorizontal: 9, borderRadius: 999, backgroundColor: hexA(C.red, 0.14), borderWidth: 1, borderColor: hexA(C.red, 0.45) }}>
+                            <Icon name="close" size={11} color={C.red} strokeWidth={2.6} />
+                            <Text style={{ fontFamily: F.bodyBold, fontSize: 11, color: C.red }}>Not added · already in workout</Text>
+                          </View>
+                        ) : added ? (
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 4, paddingHorizontal: 9, borderRadius: 999, backgroundColor: hexA(C.green, 0.14), borderWidth: 1, borderColor: hexA(C.green, 0.35) }}>
                             <Icon path="M20 6 9 17l-5-5" size={12} color={C.green} strokeWidth={2.6} />
-                            <Text style={{ fontFamily: F.bodyBold, fontSize: 11, color: C.green }}>Added{added > 1 ? ` ×${added}` : ''}</Text>
+                            <Text style={{ fontFamily: F.bodyBold, fontSize: 11, color: C.green }}>Added</Text>
                           </View>
                         ) : (
                           <Icon name="plus" size={16} color={C.muted} strokeWidth={2.4} />
                         )}
                       </Pressable>
+                      </Animated.View>
                     );
                   }}
                 />
               );
             })()}
+            </>
+            )}
 
-            {/* Bottom confirm bar — always visible, list scrolls clear of it */}
+            {/* Bottom confirm bar — hidden while the custom form is open (it used
+                to ride the keyboard up and overlap the form's Add button on small
+                screens); the list scrolls clear of it otherwise. */}
+            {customFormOpen ? null : (
             <View style={{ position: 'absolute', left: 18, right: 18, bottom: (kbH > 0 ? kbH + 10 : insets.bottom + 12) }}>
               <Pressable onPress={() => setPickerOpen(false)}>
                 {exercises.length > 0 ? (
@@ -6921,6 +7657,7 @@ export function Workout() {
                 )}
               </Pressable>
             </View>
+            )}
           </Pressable>
         </Pressable>
       </Modal>
@@ -7063,9 +7800,25 @@ function TemplateBuilderSheet({ trainerId, visible, onClose, onSaved }: { traine
   const secRmSet = (id: string, ei: number, si: number) => patchSection(id, (xs) => xs.map((x, k) => (k === ei ? { ...x, sets: x.sets.filter((_, j) => j !== si) } : x)));
   const secRmEx = (id: string, ei: number) => patchSection(id, (xs) => xs.filter((_, k) => k !== ei));
 
+  // One exercise per template section: a second tap on the same name is REJECTED with a
+  // warning buzz + a red shake on the picker row instead of a silent duplicate.
+  const sameEx = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+  const [dupFlash, setDupFlash] = React.useState<string | null>(null);
+  const dupShake = React.useRef(new Animated.Value(0)).current;
+  const dupTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rejectDuplicate = (n: string) => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+    setDupFlash(n.trim().toLowerCase());
+    dupShake.setValue(0);
+    Animated.sequence([1, -1, 1, -1, 0].map((v) => Animated.timing(dupShake, { toValue: v, duration: 45, useNativeDriver: true }))).start();
+    if (dupTimer.current) clearTimeout(dupTimer.current);
+    dupTimer.current = setTimeout(() => setDupFlash(null), 1100);
+  };
+  const dupShakeX = dupShake.interpolate({ inputRange: [-1, 0, 1], outputRange: [-8, 0, 8] });
   const addExercise = (n: string, measurement: 'reps' | 'duration' = 'reps') => {
     const nm = n.trim(); if (!nm || !pickerFor) return;
-    patchSection(pickerFor, (xs) => [...xs, { name: nm, measurement, sets: [{ reps: '', load: '', duration: '', note: '' }], notes: '' }]);
+    if (sections.find((s) => s.id === pickerFor)?.exercises.some((x) => sameEx(x.name, nm))) { rejectDuplicate(nm); return; }
+    patchSection(pickerFor, (xs) => xs.some((x) => sameEx(x.name, nm)) ? xs : [...xs, { name: nm, measurement, sets: [{ reps: '', load: '', duration: '', note: '' }], notes: '' }]);
   };
 
   const hasContent = sections.some((s) => s.exercises.some((e) => e.name.trim() && e.sets.some((st) => st.reps.trim() || st.load.trim() || st.duration.trim())));
@@ -7113,7 +7866,7 @@ function TemplateBuilderSheet({ trainerId, visible, onClose, onSaved }: { traine
                 <TextInput value={st.load} onChangeText={(t) => secUpdSet(id, ei, si, { load: t.replace(/[^0-9.]/g, '') })} keyboardType="decimal-pad" placeholder="—" placeholderTextColor={C.muted3} style={[cellInput]} />
               </>
             )}
-            <Pressable onPress={() => secRmSet(id, ei, si)} disabled={ex.sets.length === 1} style={{ width: 22, alignItems: 'center', opacity: ex.sets.length === 1 ? 0.3 : 1 }} hitSlop={6}><Icon name="close" size={12} color={C.muted2} strokeWidth={2.2} /></Pressable>
+            <Pressable onPress={() => secRmSet(id, ei, si)} disabled={ex.sets.length === 1} style={{ width: 22, paddingVertical: 8, alignItems: 'center', opacity: ex.sets.length === 1 ? 0.3 : 1 }} hitSlop={10}><Icon name="close" size={12} color={C.muted2} strokeWidth={2.2} /></Pressable>
           </View>
         ))}
         <Pressable onPress={() => secAddSet(id, ei)} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 8, borderRadius: 10, borderWidth: 1.5, borderStyle: 'dashed', borderColor: 'rgba(255,255,255,0.13)' }}><Icon name="plus" size={12} color={C.muted} strokeWidth={2.2} /><Text style={{ fontFamily: F.bodySemi, fontSize: 11.5, color: C.muted }}>Add set</Text></Pressable>
@@ -7146,14 +7899,16 @@ function TemplateBuilderSheet({ trainerId, visible, onClose, onSaved }: { traine
         <Body style={{ color: C.muted2, textAlign: 'center', paddingVertical: 14, fontSize: 12 }}>Loading…</Body>
       ) : (
         dbList.slice(0, 50).map((e) => (
-          <Pressable key={e.name} onPress={() => addExercise(e.name, e.measurement_type === 'duration' ? 'duration' : 'reps')} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.03)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)' }}>
+          <Animated.View key={e.name} style={{ transform: [{ translateX: dupFlash === e.name.trim().toLowerCase() ? dupShakeX : 0 }] }}>
+          <Pressable onPress={() => addExercise(e.name, e.measurement_type === 'duration' ? 'duration' : 'reps')} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, borderRadius: 11, backgroundColor: dupFlash === e.name.trim().toLowerCase() ? hexA(C.red, 0.1) : 'rgba(255,255,255,0.03)', borderWidth: 1, borderColor: dupFlash === e.name.trim().toLowerCase() ? hexA(C.red, 0.5) : 'rgba(255,255,255,0.07)' }}>
             <Icon name={e.measurement_type === 'duration' ? 'clock' : 'dumbbell'} size={14} color={C.orange} strokeWidth={1.9} />
             <View style={{ flex: 1 }}>
               <Body style={{ fontSize: 13, color: '#fff' }} numberOfLines={1}>{e.name}</Body>
               {e.measurement_type === 'duration' ? <Mono style={{ fontSize: 8.5, color: C.muted3, marginTop: 1 }}>DURATION</Mono> : null}
             </View>
-            <Icon name="plus" size={14} color={C.muted} strokeWidth={2.4} />
+            {dupFlash === e.name.trim().toLowerCase() ? <Mono style={{ fontSize: 8, letterSpacing: 0.5, color: C.red }}>NOT ADDED · ALREADY IN</Mono> : <Icon name="plus" size={14} color={C.muted} strokeWidth={2.4} />}
           </Pressable>
+          </Animated.View>
         ))
       )}
     </View>
@@ -7236,7 +7991,7 @@ function TemplateBuilderSheet({ trainerId, visible, onClose, onSaved }: { traine
                 <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
                   <TextInput value={bpName} onChangeText={setBpName} placeholder="Body part / workout (e.g. Chest)" placeholderTextColor={C.muted3} autoFocus onSubmitEditing={addBodyPart} style={{ flex: 1, paddingVertical: 12, paddingHorizontal: 13, borderRadius: 12, borderWidth: 1, borderColor: hexA(C.orange, 0.35), backgroundColor: 'rgba(0,0,0,0.25)', color: '#fff', fontFamily: F.body, fontSize: 14.5 }} />
                   <Pressable onPress={addBodyPart} disabled={!bpName.trim()} style={{ opacity: bpName.trim() ? 1 : 0.5 }}><LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ paddingVertical: 12, paddingHorizontal: 16, borderRadius: 12 }}><Text style={{ fontFamily: F.bodyBold, fontSize: 13, color: '#fff' }}>Add</Text></LinearGradient></Pressable>
-                  <Pressable onPress={() => { setBpOpen(false); setBpName(''); }} hitSlop={8}><Icon name="close" size={16} color={C.muted} strokeWidth={2.3} /></Pressable>
+                  <Pressable onPress={() => { setBpOpen(false); setBpName(''); }} hitSlop={12}><Icon name="close" size={16} color={C.muted} strokeWidth={2.3} /></Pressable>
                 </View>
               ) : (
                 <Pressable onPress={() => setBpOpen(true)} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14, borderRadius: 14, borderWidth: 1.5, borderStyle: 'dashed', borderColor: hexA(C.orange, 0.32), backgroundColor: hexA(C.orange, 0.05) }}><Icon name="plus" size={16} color={C.orange} strokeWidth={2.6} /><Text style={{ fontFamily: F.bodyBold, fontSize: 14, color: C.orange }}>Add Body Part / Workout</Text></Pressable>
@@ -7479,6 +8234,7 @@ export function Qhp() {
 }
 
 function QhpAssessor() {
+  const { height: winH } = useWindowDimensions(); // report preview must fit short screens
   const [qhpView, setQhpView] = React.useState<'upcoming' | 'completed' | 'noreport' | 'missing'>('upcoming');
   const [formOpen, setFormOpen] = React.useState(false);
 
@@ -7513,7 +8269,7 @@ function QhpAssessor() {
         Alert.alert('Permission needed', "Allow location access to capture the client's home location.");
         return;
       }
-      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      const pos = await withTimeout(Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }), GPS_MS, 'GPS fix');
       await saveHomeLocM.mutateAsync({ clientId, lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy ?? null });
       qhpQc.invalidateQueries({ queryKey: ['qhp-assessments'] }); // hide the pin on this card
       Alert.alert('Location saved', `${clientName}'s home location has been captured.`);
@@ -7622,6 +8378,8 @@ function QhpAssessor() {
   const [detailFor, setDetailFor] = React.useState<{ id: string; mode: 'details' | 'ai' } | null>(null);
   const qhpDetailQ = useQhpReviewDetail(detailFor?.id ?? null);
   const [briefingFor, setBriefingFor] = React.useState<import('../lib/qhpQueries').QhpRow | null>(null);
+  // Voice memo (web QHPVoiceMemoDialog): one write-once recording per completed QHP.
+  const [memoFor, setMemoFor] = React.useState<import('../lib/qhpQueries').QhpRow | null>(null);
 
   const listState = (emptyText: string, count: number) =>
     listsQ.isLoading ? (
@@ -7943,13 +8701,20 @@ function QhpAssessor() {
                     <Text style={{ fontFamily: F.bodySemi, fontSize: 12, color: C.purple }}>View Health Briefing</Text>
                   </Pressable>
                 ) : null}
+                {/* Voice memo: record once, then the player replaces the button for good. */}
+                {q.voice_memo_path
+                  ? <QhpVoiceMemoPlayer path={q.voice_memo_path} sec={q.voice_memo_duration_sec} recordedAt={q.voice_memo_recorded_at} />
+                  : <QhpVoiceMemoButton onPress={() => setMemoFor(q)} />}
               </View>
             ))}
 
+          <QhpVoiceMemoDialog row={memoFor} userId={session?.user?.id ?? trainerId} onClose={() => setMemoFor(null)} />
+
           {/* HeartMath quick-add modal (web AddHeartMathDialog contract) */}
           <Modal visible={!!hmFor} transparent animationType="fade" onRequestClose={() => setHmFor(null)}>
-            <Pressable onPress={() => setHmFor(null)} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'center', padding: 22 }}>
-              <Pressable onPress={() => {}} style={{ borderRadius: 18, backgroundColor: '#141010', borderWidth: 1, borderColor: hexA(C.red, 0.3), padding: 18, gap: 12 }}>
+            <KbCenter onDismiss={() => setHmFor(null)}>
+              <Pressable onPress={() => {}} style={{ maxHeight: '100%', borderRadius: 18, backgroundColor: '#141010', borderWidth: 1, borderColor: hexA(C.red, 0.3), padding: 18, gap: 12 }}>
+                <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 12 }}>
                 <Text style={{ fontFamily: F.bodyBold, fontSize: 15, color: '#fff' }}>Add HeartMath Report</Text>
                 <Body style={{ fontSize: 12, color: C.muted2 }}>{hmFor?.name} — enter the four HeartMath values.</Body>
                 {(['MHRR', 'SDNN', 'RMSSD', 'normalizedCoherence'] as const).map((k) => (
@@ -7982,8 +8747,9 @@ function QhpAssessor() {
                     <Text style={{ fontFamily: F.bodyBold, fontSize: 13, color: C.red }}>{heartMathM.isPending ? 'Saving…' : 'Save'}</Text>
                   </Pressable>
                 </View>
+                </ScrollView>
               </Pressable>
-            </Pressable>
+            </KbCenter>
           </Modal>
         </>
       ) : qhpView === 'noreport' ? (
@@ -8034,12 +8800,13 @@ function QhpAssessor() {
 
       {/* Request reschedule (assessor → manager review) */}
       <Modal visible={!!reschedFor} transparent animationType="fade" onRequestClose={() => setReschedFor(null)}>
-        <Pressable onPress={() => setReschedFor(null)} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'center', padding: 22 }}>
-          <Pressable onPress={() => {}} style={{ borderRadius: 18, backgroundColor: '#141010', borderWidth: 1, borderColor: hexA(C.blue, 0.3), padding: 18, gap: 12 }}>
+        <KbCenter onDismiss={() => setReschedFor(null)}>
+          <Pressable onPress={() => {}} style={{ maxHeight: '100%', borderRadius: 18, backgroundColor: '#141010', borderWidth: 1, borderColor: hexA(C.blue, 0.3), padding: 18, gap: 12 }}>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 12 }}>
             <Text style={{ fontFamily: F.bodyBold, fontSize: 15, color: '#fff' }}>Request Reschedule</Text>
             <Body style={{ fontSize: 12, color: C.muted2 }}>{reschedFor?.client_name} — proposes a new slot; the QHP Manager reviews it.</Body>
             <Mono style={{ fontSize: 9.5, letterSpacing: 1.2, color: C.mono2 }}>PROPOSED DATE</Mono>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 7 }}>
+            <ScrollView keyboardShouldPersistTaps="handled" horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 7 }}>
               {Array.from({ length: 14 }, (_, di) => di).map((di) => {
                 const d = new Date(Date.now() + di * 864e5);
                 const act = rrDay === di;
@@ -8078,8 +8845,9 @@ function QhpAssessor() {
               <Pressable onPress={() => setReschedFor(null)} style={{ flex: 1, alignItems: 'center', paddingVertical: 11, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' }}><Text style={{ fontFamily: F.bodySemi, fontSize: 13, color: C.muted }}>Cancel</Text></Pressable>
               <Pressable onPress={submitReschedReq} disabled={reschedReqM.isPending || rrRemark.trim().length < 10} style={{ flex: 1, alignItems: 'center', paddingVertical: 11, borderRadius: 12, backgroundColor: hexA(C.blue, rrRemark.trim().length >= 10 ? 0.16 : 0.06), borderWidth: 1, borderColor: hexA(C.blue, rrRemark.trim().length >= 10 ? 0.45 : 0.2) }}><Text style={{ fontFamily: F.bodyBold, fontSize: 13, color: rrRemark.trim().length >= 10 ? C.blue : C.muted3 }}>{reschedReqM.isPending ? 'Sending…' : 'Send Request'}</Text></Pressable>
             </View>
+            </ScrollView>
           </Pressable>
-        </Pressable>
+        </KbCenter>
       </Modal>
 
       {/* Medical History sheet */}
@@ -8223,9 +8991,9 @@ function QhpAssessor() {
                 <View style={{ padding: 10 }}>
                   {medPreview?.fileUrl ? (
                     /\.(png|jpe?g|webp|gif)(\?|#|$)/i.test(medPreview.fileUrl) ? (
-                      <Image source={{ uri: medPreview.fileUrl }} style={{ width: '100%', height: 440, borderRadius: 14, backgroundColor: '#141110' }} resizeMode="contain" />
+                      <Image source={{ uri: medPreview.fileUrl }} style={{ width: '100%', height: Math.min(440, winH - 260), borderRadius: 14, backgroundColor: '#141110' }} resizeMode="contain" />
                     ) : (
-                      <PdfPreview url={medPreview.fileUrl} height={440} />
+                      <PdfPreview url={medPreview.fileUrl} height={Math.min(440, winH - 260)} />
                     )
                   ) : (
                     <Body style={{ fontSize: 12, color: C.muted3, textAlign: 'center', paddingVertical: 30 }}>No file attached to this report.</Body>
@@ -8379,7 +9147,7 @@ function QhpAssessor() {
 }
 
 /* ---------- Schedule QHP — live bottom-sheet (web CoachAssessmentSchedulingForm contract) ---------- */
-function ScheduleQhpSheet({ visible, onClose, scheduledBy, prefill }: { visible: boolean; onClose: () => void; scheduledBy: string; prefill?: { clientId: string; clientName: string; date?: string | null; time?: string | null; location?: string | null; notes?: string | null; slaDeadlineIso?: string | null; clearHold?: boolean } }) {
+function ScheduleQhpSheet({ visible, onClose, scheduledBy, prefill }: { visible: boolean; onClose: () => void; scheduledBy: string; prefill?: { clientId: string; clientName: string; date?: string | null; time?: string | null; location?: string | null; notes?: string | null; altDate?: string | null; altTime?: string | null; slaDeadlineIso?: string | null; clearHold?: boolean } }) {
   const insets = useSafeAreaInsets();
   const assessorsQ = useQhpAssessors();
   const clientsQ = useQhpClients();
@@ -8415,13 +9183,13 @@ function ScheduleQhpSheet({ visible, onClose, scheduledBy, prefill }: { visible:
     if (visible) {
       setAssessorId(null); setAssessorOpen(false);
       setClientId(prefill?.clientId ?? null); setClientName(prefill?.clientName ?? ''); setClientOpen(false); setClientSearch('');
+      // Ops-preference prefill (web: date/time/location/notes carried into the form).
+      // Uses the same coercion as the slot cards below, so the form opens already
+      // sitting on the 1st choice and that card reads as selected.
       setDate(prefill?.date ?? null);
-      // Ops-preference prefill (web: date/time/location/notes carried into the form)
-      const pt = prefill?.time ? String(prefill.time).slice(0, 5) : null;
-      if (pt && /^\d{2}:\d{2}$/.test(pt)) {
-        const [hh, mm] = pt.split(':').map(Number);
-        setHour(((hh + 11) % 12) + 1); setMinute([0, 15, 30, 45].includes(mm) ? mm : 0); setAmpm(hh >= 12 ? 'PM' : 'AM');
-      } else { setHour(9); setMinute(0); setAmpm('AM'); }
+      const p = slotParts(prefill?.time);
+      if (p) { setHour(p.hour); setMinute(p.minute); setAmpm(p.ampm); }
+      else { setHour(9); setMinute(0); setAmpm('AM'); }
       setLoc(prefill?.location ?? ''); setNotes(prefill?.notes ?? ''); setDelayReason('');
       scheduleM.reset();
     }
@@ -8442,6 +9210,35 @@ function ScheduleQhpSheet({ visible, onClose, scheduledBy, prefill }: { visible:
     [visible]
   );
   const cycle = <T,>(arr: readonly T[], cur: T, set: (v: T) => void) => set(arr[(arr.indexOf(cur) + 1) % arr.length]);
+
+  /* The time picker only offers 15-minute steps, so a preference is compared and
+     applied as the slot the picker can actually represent. Without this a 10:20
+     preference could never light up its own card: tapping it would set 10:00 and
+     the card would still read "not selected", which looks like a dead button. */
+  const slotParts = (t?: string | null) => {
+    const s = t ? String(t).slice(0, 5) : '';
+    if (!/^\d{2}:\d{2}$/.test(s)) return null;
+    const [hh, mm] = s.split(':').map(Number);
+    return { hour: ((hh + 11) % 12) + 1, minute: MINS.includes(mm) ? mm : 0, ampm: (hh >= 12 ? 'PM' : 'AM') as 'AM' | 'PM' };
+  };
+  const applySlot = (d: string, t?: string | null) => {
+    setDate(d);
+    const p = slotParts(t);
+    if (p) { setHour(p.hour); setMinute(p.minute); setAmpm(p.ampm); }
+  };
+  /* Derived, never stored: which preference the form currently sits on. Editing the
+     date strip or the time boxes deselects both on its own, so there is no second
+     piece of state to keep in step with the fields. */
+  const matchesSlot = (d: string, t?: string | null) => {
+    if (date !== d) return false;
+    const p = slotParts(t);
+    return !!p && p.hour === hour && p.minute === minute && p.ampm === ampm;
+  };
+  const prefSlots = ([
+    prefill?.date ? { rank: 1 as const, date: prefill.date, time: prefill.time } : null,
+    prefill?.altDate ? { rank: 2 as const, date: prefill.altDate, time: prefill.altTime } : null,
+  ]).filter(Boolean) as { rank: 1 | 2; date: string; time?: string | null }[];
+  const onCustomSlot = prefSlots.length > 0 && !prefSlots.some((s) => matchesSlot(s.date, s.time));
 
   const busy = scheduleM.isPending;
   const err = scheduleM.error as Error | null;
@@ -8499,7 +9296,7 @@ function ScheduleQhpSheet({ visible, onClose, scheduledBy, prefill }: { visible:
               </Pressable>
               {assessorOpen ? (
                 <View style={{ marginTop: 7, maxHeight: 260, borderRadius: 13, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', backgroundColor: '#14100D', overflow: 'hidden' }}>
-                  <ScrollView nestedScrollEnabled>
+                  <ScrollView keyboardShouldPersistTaps="handled" nestedScrollEnabled>
                     {assessorsQ.isLoading ? (
                       <Body style={{ fontSize: 12.5, color: C.muted3, textAlign: 'center', paddingVertical: 16 }}>Loading assessors…</Body>
                     ) : (
@@ -8530,7 +9327,7 @@ function ScheduleQhpSheet({ visible, onClose, scheduledBy, prefill }: { visible:
                     <Icon name="search" size={14} color={C.muted3} strokeWidth={2} />
                     <TextInput value={clientSearch} onChangeText={setClientSearch} placeholder="Search clients…" placeholderTextColor={C.muted3} autoCorrect={false} style={{ flex: 1, fontFamily: F.body, fontSize: 14, color: '#fff', padding: 0 }} />
                   </View>
-                  <ScrollView nestedScrollEnabled style={{ maxHeight: 220 }}>
+                  <ScrollView keyboardShouldPersistTaps="handled" nestedScrollEnabled style={{ maxHeight: 220 }}>
                     {clientsQ.isLoading ? (
                       <Body style={{ fontSize: 12.5, color: C.muted3, textAlign: 'center', paddingVertical: 16 }}>Loading clients…</Body>
                     ) : clientOptions.length === 0 ? (
@@ -8549,10 +9346,49 @@ function ScheduleQhpSheet({ visible, onClose, scheduledBy, prefill }: { visible:
               ) : null}
             </View>
 
+            {/* What the client asked for. Ops can capture two slots, so this is a
+                CHOICE, not a note: tap one and it fills the date and time below.
+                Only the slot left in those fields is scheduled, so the assessor
+                never sees the option that was not taken. */}
+            {prefSlots.length ? (
+              <View style={{ gap: 8 }}>
+                {label(prefSlots.length > 1 ? "CLIENT'S PREFERRED SLOTS" : "CLIENT'S PREFERRED SLOT")}
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  {prefSlots.map((s) => {
+                    const on = matchesSlot(s.date, s.time);
+                    const col = s.rank === 1 ? C.orange : C.gold;
+                    return (
+                      <Pressable
+                        key={s.rank}
+                        onPress={() => applySlot(s.date, s.time)}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: on }}
+                        accessibilityLabel={`Use the ${s.rank === 1 ? 'first' : 'second'} preference, ${fmtSlotLong(s.date, s.time)}`}
+                        style={{ flex: 1, gap: 3, padding: 11, borderRadius: 13, backgroundColor: hexA(col, on ? 0.14 : 0.05), borderWidth: 1, borderColor: hexA(col, on ? 0.5 : 0.22) }}
+                      >
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                          {on ? <Icon path="M20 6 9 17l-5-5" size={11} color={col} strokeWidth={2.8} /> : null}
+                          <Mono style={{ fontSize: 8, letterSpacing: 0.7, color: col }}>{s.rank === 1 ? '1ST CHOICE' : '2ND CHOICE'}</Mono>
+                        </View>
+                        <Body style={{ fontSize: 12, color: on ? '#fff' : C.ink3 }}>{fmtSlotLong(s.date, s.time)}</Body>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <Body style={{ fontSize: 10.5, color: C.muted3 }}>
+                  {onCustomSlot
+                    ? 'You are scheduling a different slot. The assessor sees only what you set below.'
+                    : prefSlots.length > 1
+                      ? 'Tap a slot to use it, or set your own date and time below. Only the one you pick is sent to the assessor.'
+                      : 'Tap to use it, or set your own date and time below.'}
+                </Body>
+              </View>
+            ) : null}
+
             {/* Date */}
             <View>
               {label('QHP DATE *')}
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 4 }}>
+              <ScrollView keyboardShouldPersistTaps="handled" horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingBottom: 4 }}>
                 {days.map((d) => {
                   const sel = date === d.iso;
                   return (
@@ -8815,9 +9651,8 @@ export function QhpManager() {
   const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' }) : '—');
   const fmtT = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: 'numeric', minute: '2-digit', hour12: true }).toUpperCase() : '');
 
-  if (caps.isLoading) {
-    return <Page gap={16} pt={6}><View style={{ paddingVertical: 50, alignItems: 'center' }}><ActivityIndicator color={C.orange} /></View></Page>;
-  }
+  // Unknown (loading / paused offline / errored) is not "denied".
+  if (caps.isPending || caps.isError) return <AccessPending paused={caps.isPaused} error={caps.isError} onRetry={caps.refetch} />;
   if (!isMgr) {
     return (
       <Page gap={16} pt={6}>
@@ -8963,13 +9798,15 @@ export function QhpManager() {
                       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
                         <Body style={{ fontSize: 11, color: C.muted2 }}>Joined {fmt(c.joinedAt)}</Body>
                         <Body style={{ fontSize: 11, color: urgCol, fontFamily: urg.level === 'green' ? F.body : F.bodySemi }}>Waiting {formatWaiting(c.joinedAt)}</Body>
+                        {c.bookedByName ? <Body style={{ fontSize: 11, color: C.blue }}>Set by {c.bookedByName}{c.bookedByRole ? ` (${c.bookedByRole})` : ''}</Body> : null}
                       </View>
                       {sla.overdue ? <Mono style={{ fontSize: 8.5, letterSpacing: 0.5, color: C.red }}>SLA BREACHED — SCHEDULE IMMEDIATELY</Mono> : null}
                       {urg.warning ? <Body style={{ fontSize: 10.5, color: urgCol }}>{urg.warning}</Body> : null}
-                      {c.opsPrefs && (c.opsPrefs.notes || c.opsPrefs.date || c.opsPrefs.timeFrom || c.opsPrefs.location) ? (
+                      {c.opsPrefs && (c.opsPrefs.notes || c.opsPrefs.date || c.opsPrefs.timeFrom || c.opsPrefs.location || c.opsPrefs.altDate) ? (
                         <View style={{ padding: 9, borderRadius: 10, backgroundColor: hexA(C.blue, 0.06), borderWidth: 1, borderColor: hexA(C.blue, 0.2) }}>
                           <Mono style={{ fontSize: 8, letterSpacing: 0.7, color: C.blue }}>NOTES FROM OPS</Mono>
                           {c.opsPrefs.date || c.opsPrefs.timeFrom ? <Body style={{ fontSize: 11, color: C.ink3, marginTop: 2 }}>Preferred: {c.opsPrefs.date ?? '—'}{c.opsPrefs.timeFrom ? ` · ${String(c.opsPrefs.timeFrom).slice(0, 5)}` : ''}</Body> : null}
+                          {c.opsPrefs.altDate ? <Body style={{ fontSize: 11, color: C.gold, marginTop: 1 }}>2nd: {fmtSlotLong(c.opsPrefs.altDate, c.opsPrefs.altTime)}</Body> : null}
                           {c.opsPrefs.location ? <Body style={{ fontSize: 11, color: C.ink3, marginTop: 1 }}>Location: {c.opsPrefs.location}</Body> : null}
                           {c.opsPrefs.notes ? <Body style={{ fontSize: 11, color: C.ink3, marginTop: 1 }}>{c.opsPrefs.notes}</Body> : null}
                         </View>
@@ -9002,6 +9839,7 @@ export function QhpManager() {
                       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
                         <Body style={{ fontSize: 11, color: C.muted2 }}>Joined {fmt(c.joinedAt)}</Body>
                         {at ? <Body style={{ fontSize: 11.5, color: C.muted2 }}>QHP {fmt(at)}{c.assessmentTime ? ` · ${fmtT(at)}` : ''}</Body> : <Body style={{ fontSize: 11.5, color: C.muted3 }}>Awaiting date</Body>}
+                        {c.bookedByName ? <Body style={{ fontSize: 11, color: C.blue }}>Set by {c.bookedByName}{c.bookedByRole ? ` (${c.bookedByRole})` : ''}</Body> : null}
                       </View>
                       {delayed ? <Body style={{ fontSize: 10.5, color: C.red }}>⚠️ Delayed — this is slowing down the onboarding process</Body> : null}
                       <View style={{ flexDirection: 'row', gap: 8, marginTop: 2 }}>
@@ -9176,9 +10014,9 @@ export function QhpManager() {
                             <Icon name="plus" size={11} color={C.orange} strokeWidth={2.5} />
                             <Text style={{ fontFamily: F.bodyBold, fontSize: 11, color: C.orange }}>Add QHP</Text>
                           </Pressable>
-                          <Pressable onPress={() => shift(-1)} style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.05)', alignItems: 'center', justifyContent: 'center' }}><Icon path="M15 6l-6 6 6 6" size={13} color={C.muted} strokeWidth={2.2} /></Pressable>
+                          <Pressable onPress={() => shift(-1)} hitSlop={10} style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.05)', alignItems: 'center', justifyContent: 'center' }}><Icon path="M15 6l-6 6 6 6" size={13} color={C.muted} strokeWidth={2.2} /></Pressable>
                           <View style={{ width: 7 }} />
-                          <Pressable onPress={() => shift(1)} style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.05)', alignItems: 'center', justifyContent: 'center' }}><Icon name="chevRight" size={13} color={C.muted} strokeWidth={2.2} /></Pressable>
+                          <Pressable onPress={() => shift(1)} hitSlop={10} style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.05)', alignItems: 'center', justifyContent: 'center' }}><Icon name="chevRight" size={13} color={C.muted} strokeWidth={2.2} /></Pressable>
                         </View>
                         <View style={{ flexDirection: 'row', marginBottom: 7 }}>
                           {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((w, i) => <Text key={i} style={{ flex: 1, textAlign: 'center', fontFamily: F.mono, fontSize: 9, color: C.muted3 }}>{w}</Text>)}
@@ -9224,7 +10062,7 @@ export function QhpManager() {
                                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                                   <Body numberOfLines={1} style={{ flex: 1, fontSize: 14, fontFamily: F.bodySemi, color: '#fff' }}>{a.clientName}</Body>
                                   <Badge text={lab} color={col} />
-                                  <Pressable hitSlop={8} onPress={() => Alert.alert('Delete QHP?', `${a.clientName}'s assessment will be permanently removed.`, [
+                                  <Pressable style={{ width: 32, height: 32, alignItems: 'center', justifyContent: 'center' }} onPress={() => Alert.alert('Delete QHP?', `${a.clientName}'s assessment will be permanently removed.`, [
                                     { text: 'Cancel', style: 'cancel' },
                                     { text: 'Delete', style: 'destructive', onPress: () => deleteQhpM.mutate(a.id) },
                                   ])}>
@@ -9451,8 +10289,9 @@ export function QhpManager() {
 
       {/* Hold modal */}
       <Modal visible={!!holdFor} transparent animationType="fade" onRequestClose={() => setHoldFor(null)}>
-        <Pressable onPress={() => setHoldFor(null)} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'center', padding: 22 }}>
-          <Pressable onPress={() => {}} style={{ borderRadius: 18, backgroundColor: '#141010', borderWidth: 1, borderColor: hexA(C.purple, 0.3), padding: 18, gap: 12 }}>
+        <KbCenter onDismiss={() => setHoldFor(null)}>
+          <Pressable onPress={() => {}} style={{ maxHeight: '100%', borderRadius: 18, backgroundColor: '#141010', borderWidth: 1, borderColor: hexA(C.purple, 0.3), padding: 18, gap: 12 }}>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 12 }}>
             <Text style={{ fontFamily: F.bodyBold, fontSize: 15, color: '#fff' }}>Hold QHP</Text>
             <Body style={{ fontSize: 12, color: C.muted2 }}>{holdFor?.name} — reason for putting this client's QHP on hold.</Body>
             <TextInput
@@ -9479,8 +10318,9 @@ export function QhpManager() {
               <Pressable onPress={() => { setHoldFor(null); setHoldReason(''); }} style={{ flex: 1, alignItems: 'center', paddingVertical: 11, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' }}><Text style={{ fontFamily: F.bodySemi, fontSize: 13, color: C.muted }}>Cancel</Text></Pressable>
               <Pressable onPress={submitHold} disabled={!holdReason.trim() || holdM.isPending} style={{ flex: 1, alignItems: 'center', paddingVertical: 11, borderRadius: 12, backgroundColor: hexA(C.purple, holdReason.trim() ? 0.16 : 0.06), borderWidth: 1, borderColor: hexA(C.purple, holdReason.trim() ? 0.45 : 0.2) }}><Text style={{ fontFamily: F.bodyBold, fontSize: 13, color: holdReason.trim() ? C.purple : C.muted3 }}>{holdM.isPending ? 'Holding…' : 'Put on hold'}</Text></Pressable>
             </View>
+            </ScrollView>
           </Pressable>
-        </Pressable>
+        </KbCenter>
       </Modal>
 
       {/* Approve & Schedule modal — pick assessor, then insert coach_assessment + mark request approved */}
@@ -9550,7 +10390,7 @@ export function QhpManager() {
       {/* Manager filter picker (client / trainer) — keyboard dismissed before the Modal
           unmounts (new-arch crash) and taps select even while the keyboard is open */}
       <Modal visible={!!mgrPick} transparent animationType="fade" onRequestClose={() => { Keyboard.dismiss(); setMgrPick(null); }}>
-        <Pressable onPress={() => { Keyboard.dismiss(); setMgrPick(null); }} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'center', padding: 22 }}>
+        <KbCenter onDismiss={() => { Keyboard.dismiss(); setMgrPick(null); }}>
           <Pressable onPress={() => {}} style={{ borderRadius: 18, backgroundColor: '#141010', borderWidth: 1, borderColor: 'rgba(255,150,90,0.2)', padding: 16, gap: 10, maxHeight: '75%' }}>
             <Text style={{ fontFamily: F.bodyBold, fontSize: 15, color: '#fff' }}>{mgrPick === 'client' ? 'Filter by Client' : 'Filter by Trainer'}</Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 9, paddingHorizontal: 11, borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' }}>
@@ -9589,13 +10429,14 @@ export function QhpManager() {
               })()}
             </ScrollView>
           </Pressable>
-        </Pressable>
+        </KbCenter>
       </Modal>
 
       {/* Edit request modal (web edit contract: qhp_schedule date/time/address/notes) */}
       <Modal visible={!!editFor} transparent animationType="fade" onRequestClose={() => setEditFor(null)}>
-        <Pressable onPress={() => setEditFor(null)} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'center', padding: 22 }}>
-          <Pressable onPress={() => {}} style={{ borderRadius: 18, backgroundColor: '#141010', borderWidth: 1, borderColor: hexA(C.blue, 0.3), padding: 18, gap: 11 }}>
+        <KbCenter onDismiss={() => setEditFor(null)}>
+          <Pressable onPress={() => {}} style={{ maxHeight: '100%', borderRadius: 18, backgroundColor: '#141010', borderWidth: 1, borderColor: hexA(C.blue, 0.3), padding: 18, gap: 11 }}>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 11 }}>
             <Text style={{ fontFamily: F.bodyBold, fontSize: 15, color: '#fff' }}>Edit Request</Text>
             <Body style={{ fontSize: 12, color: C.muted2 }}>{editFor?.clientName}</Body>
             <View style={{ flexDirection: 'row', gap: 8 }}>
@@ -9621,8 +10462,9 @@ export function QhpManager() {
               <Pressable onPress={() => setEditFor(null)} style={{ flex: 1, alignItems: 'center', paddingVertical: 11, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' }}><Text style={{ fontFamily: F.bodySemi, fontSize: 13, color: C.muted }}>Cancel</Text></Pressable>
               <Pressable onPress={submitEdit} disabled={editM.isPending} style={{ flex: 1, alignItems: 'center', paddingVertical: 11, borderRadius: 12, backgroundColor: hexA(C.blue, 0.16), borderWidth: 1, borderColor: hexA(C.blue, 0.45) }}><Text style={{ fontFamily: F.bodyBold, fontSize: 13, color: C.blue }}>{editM.isPending ? 'Saving…' : 'Save Changes'}</Text></Pressable>
             </View>
+            </ScrollView>
           </Pressable>
-        </Pressable>
+        </KbCenter>
       </Modal>
 
       {/* B2C credentials modal (web ClientCredentialsDialog) */}
@@ -9743,6 +10585,8 @@ export function QhpManager() {
           time: scheduleFor.opsPrefs?.timeFrom ?? null,
           location: scheduleFor.opsPrefs?.location ?? null,
           notes: scheduleFor.opsPrefs?.notes ?? null,
+          altDate: scheduleFor.opsPrefs?.altDate ?? null,
+          altTime: scheduleFor.opsPrefs?.altTime ?? null,
           slaDeadlineIso: computeQhpSlaDeadline(scheduleFor.joinedAt).toISOString(),
           clearHold: !!(d && d.taskOnHold.some((h) => h.clientId === scheduleFor.clientId)),
         } : undefined}
@@ -9753,12 +10597,13 @@ export function QhpManager() {
 
       {/* Manager reschedule modal — 14-day picker + tap-to-cycle time */}
       <Modal visible={!!reschedFor} transparent animationType="fade" onRequestClose={() => setReschedFor(null)}>
-        <Pressable onPress={() => setReschedFor(null)} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'center', padding: 22 }}>
-          <Pressable onPress={() => {}} style={{ borderRadius: 18, backgroundColor: '#141010', borderWidth: 1, borderColor: hexA(C.blue, 0.3), padding: 18, gap: 13 }}>
+        <KbCenter onDismiss={() => setReschedFor(null)}>
+          <Pressable onPress={() => {}} style={{ maxHeight: '100%', borderRadius: 18, backgroundColor: '#141010', borderWidth: 1, borderColor: hexA(C.blue, 0.3), padding: 18, gap: 13 }}>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 13 }}>
             <Text style={{ fontFamily: F.bodyBold, fontSize: 15, color: '#fff' }}>Reschedule QHP</Text>
             <Body style={{ fontSize: 12, color: C.muted2 }}>{reschedFor?.name} — pick the new date & time.</Body>
             <Mono style={{ fontSize: 9.5, letterSpacing: 1.2, color: C.mono2 }}>NEW DATE</Mono>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 7 }}>
+            <ScrollView keyboardShouldPersistTaps="handled" horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 7 }}>
               {Array.from({ length: 14 }, (_, i) => i).map((i) => {
                 const d = new Date(Date.now() + i * 864e5);
                 const activeDay = rDay === i;
@@ -9798,8 +10643,9 @@ export function QhpManager() {
               <Pressable onPress={submitResched} disabled={reschedM.isPending || rReason.trim().length < 10} style={{ flex: 1, alignItems: 'center', paddingVertical: 11, borderRadius: 12, backgroundColor: hexA(C.blue, rReason.trim().length >= 10 ? 0.16 : 0.06), borderWidth: 1, borderColor: hexA(C.blue, rReason.trim().length >= 10 ? 0.45 : 0.2), opacity: reschedM.isPending ? 0.6 : 1 }}><Text style={{ fontFamily: F.bodyBold, fontSize: 13, color: rReason.trim().length >= 10 ? C.blue : C.muted3 }}>{reschedM.isPending ? 'Saving…' : 'Reschedule'}</Text></Pressable>
             </View>
             {reschedM.isError ? <Body style={{ fontSize: 11.5, color: C.red }}>{(reschedM.error as Error).message}</Body> : null}
+            </ScrollView>
           </Pressable>
-        </Pressable>
+        </KbCenter>
       </Modal>
     </Page>
   );
@@ -10687,7 +11533,8 @@ export function MgrDash() {
     rank: e.rank,
     name: e.managerName.split(' ')[0],
     sub: e.managerName,
-    team: e.teamSize,
+    team: e.teamSize, // active members only
+    inactive: e.inactiveCount ?? 0, // ?? 0: pre-v4 rows hydrated from the persisted cache
     sess: e.totalSessions, // web parity: sessions + QHPs combined
     rawSess: e.rawSessions,
     qhp: e.qhpCount,
@@ -10701,7 +11548,7 @@ export function MgrDash() {
     expected: e.expectedSessions,
   }));
   const mgrRows = mgrLbQ.isError || !liveMgr || liveMgr.length === 0
-    ? mgrDefs.map((m) => ({ ...m, score: m.sess + m.qhp, sess: m.sess + m.qhp, rawSess: m.sess, members: [] as ManagerTeamMember[], teamStart: null as string | null, teamEnd: null as string | null, expected: null as number | null }))
+    ? mgrDefs.map((m) => ({ ...m, inactive: 0, score: m.sess + m.qhp, sess: m.sess + m.qhp, rawSess: m.sess, members: [] as ManagerTeamMember[], teamStart: null as string | null, teamEnd: null as string | null, expected: null as number | null }))
     : liveMgr;
   const podium = [mgrRows[1], mgrRows[0], mgrRows[2]].filter(Boolean); // 2nd · 1st · 3rd
   const podiumHeights = [86, 112, 70];
@@ -10901,6 +11748,8 @@ export function MgrDash() {
                         <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: col }} />
                         <Mono style={{ fontSize: 9.5, color: C.muted2 }}>{lab}</Mono>
                         <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: col }}>{val}</Text>
+                        {/* Native version of the web's grey bubble: inactive members are not in TEAM, their sessions still count. */}
+                        {lab === 'TEAM' && m.inactive > 0 ? <Mono style={{ fontSize: 8.5, color: C.muted3 }}>+{m.inactive} inactive</Mono> : null}
                       </View>
                     ))}
                   </View>
@@ -10912,18 +11761,28 @@ export function MgrDash() {
                         <Mono style={{ flex: 1, fontSize: 10.5, letterSpacing: 1.8, color: C.mono }}>TEAM BREAKDOWN</Mono>
                         <Mono style={{ fontSize: 9.5, color: C.muted3 }}>SESS · QHP · REF</Mono>
                       </View>
+                      {m.inactive > 0 ? (
+                        <Mono style={{ fontSize: 8.5, letterSpacing: 0.6, color: C.muted3 }}>{m.team} ACTIVE · {m.inactive} INACTIVE (SESSIONS STILL COUNTED)</Mono>
+                      ) : null}
                       {m.members.map((tm) => {
                         const ac = avColors(tm.name);
+                        const inactive = tm.status === 'inactive';
+                        // lastSessionDate is an IST calendar date (yyyy-MM-dd): format without a timezone shift.
+                        const lastLine = inactive ? (tm.lastSessionDate ? `Last session ${new Date(tm.lastSessionDate + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}` : 'No session logged') : null;
                         return (
-                          <View key={tm.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 13, backgroundColor: tm.isManager ? hexA(C.purple, 0.07) : 'rgba(0,0,0,0.22)', borderWidth: 1, borderColor: tm.isManager ? hexA(C.purple, 0.22) : 'rgba(255,255,255,0.06)', paddingVertical: 9, paddingHorizontal: 11 }}>
+                          <View key={tm.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 13, backgroundColor: tm.isManager ? hexA(C.purple, 0.07) : 'rgba(0,0,0,0.22)', borderWidth: 1, borderStyle: inactive ? 'dashed' : 'solid', borderColor: inactive ? 'rgba(255,255,255,0.12)' : tm.isManager ? hexA(C.purple, 0.22) : 'rgba(255,255,255,0.06)', paddingVertical: 9, paddingHorizontal: 11, opacity: inactive ? 0.7 : 1 }}>
                             <View style={{ width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: hexA(ac[0], 0.18), borderWidth: 1, borderColor: hexA(ac[0], 0.4) }}>
                               <Text style={{ fontFamily: F.bodyBold, fontSize: 11, color: ac[0] }}>{tm.name.trim().charAt(0).toUpperCase() || '?'}</Text>
                             </View>
                             <View style={{ flex: 1 }}>
-                              <Text numberOfLines={1} style={{ fontFamily: F.bodySemi, fontSize: 12.5, color: '#fff' }}>{tm.name}</Text>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                <Text numberOfLines={1} style={{ flexShrink: 1, fontFamily: F.bodySemi, fontSize: 12.5, color: inactive ? C.muted2 : '#fff', textDecorationLine: inactive ? 'line-through' : 'none' }}>{tm.name}</Text>
+                                {inactive ? <Badge text="Inactive" color={C.muted2} /> : null}
+                              </View>
                               {tm.isManager ? (
                                 <Text style={{ fontFamily: F.body, fontSize: 9.5, color: C.purple }}>Manager · not counted in totals</Text>
                               ) : null}
+                              {lastLine ? <Text style={{ fontFamily: F.body, fontSize: 9.5, color: C.muted3 }}>{lastLine}</Text> : null}
                             </View>
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                               {([

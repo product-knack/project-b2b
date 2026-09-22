@@ -62,7 +62,10 @@ function SheetShell({
           <View {...pan.panHandlers} style={{ alignItems: 'center', paddingVertical: 8, marginTop: -6, marginBottom: 8 }}>
             <View style={[styles.grabber, { marginBottom: 0 }]} />
           </View>
-          <View style={{ flex: fixedHeight ? 1 : undefined }}>
+          {/* flexShrink/minHeight let the body shrink under the sheet's maxHeight
+              so an inner ScrollView scrolls instead of being clipped (fixedHeight
+              sheets keep flex: 1). */}
+          <View style={{ flex: fixedHeight ? 1 : undefined, flexShrink: 1, minHeight: 0 }}>
             {children}
           </View>
         </Animated.View>

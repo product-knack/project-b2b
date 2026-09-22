@@ -63,7 +63,8 @@ export function Card({
   );
   if (onPress) {
     const wrapStyle: ViewStyle = { flex, flexGrow, flexShrink, flexBasis, width, minWidth, maxWidth, alignSelf };
-    return <Pressable onPress={onPress} style={wrapStyle}>{inner}</Pressable>;
+    // Pressed feedback so a tap is visibly acknowledged (prevents double-taps).
+    return <Pressable onPress={onPress} style={({ pressed }) => [wrapStyle, { opacity: pressed ? 0.82 : 1 }]}>{inner}</Pressable>;
   }
   return inner;
 }
@@ -88,7 +89,8 @@ export function GradientButton({
   style?: StyleProp<ViewStyle>;
 }) {
   return (
-    <Pressable onPress={onPress} style={style}>
+    // Pressed feedback (dim) so users see the tap register during the network round-trip.
+    <Pressable onPress={onPress} style={({ pressed }) => [style, { opacity: pressed ? 0.75 : 1 }]}>
       <LinearGradient
         colors={ORANGE_GRAD}
         start={{ x: 0, y: 0 }}

@@ -1,10 +1,11 @@
 import React from 'react';
-import { View, Text, Pressable, ScrollView, Modal, TextInput, Keyboard, Platform } from 'react-native';
+import { View, Text, Pressable, ScrollView, Modal, TextInput, Keyboard, Platform, Alert, Animated } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { C, F, hexA, ORANGE_GRAD } from '../theme';
 import { Icon } from '../icons';
 import { useStore } from '../store';
+import { backOverride } from '../gestureLock';
 import { Serif, Body, Mono, Card, GradientButton, Avatar, IconChip } from '../components/primitives';
 import { Page, BackLink } from './common';
 import { useAuth } from '../auth';
@@ -14,6 +15,7 @@ import {
   useEditWorkoutPlan, buildPlanExerciseRows, WorkoutPlanEditInput,
 } from '../lib/clientQueries';
 import { enqueueOutbox, getIsOnline, useIsOnline, getOutbox, updateOutboxItem } from '../lib/offline';
+import { useDragReorder } from '../lib/useDragReorder';
 
 /* ============ CREATE WORKOUT PLAN ============
    Mirrors the web app's Create Workout Plan form end-to-end (client, plan meta,
@@ -89,12 +91,6 @@ function prefillStrength(rows: any[]): PlanBodyPartInput[] {
   const out = order.map((bp) => ({ body_part: bp, exercises: Array.from(byBp[bp].exs.values()) }));
   return out.length ? out : [{ body_part: '', exercises: [] }];
 }
-function prefillYoga(rows: any[]): PlanYogaInput[] {
-  const acts = rows
-    .filter((r) => (r.exercise_name ?? '').trim())
-    .map((r) => ({ name: r.exercise_name as string, type: (r.activity_type === 'Custom' ? 'Custom' : 'Constant') as 'Constant' | 'Custom' }));
-  return acts.length ? acts : [{ name: '', type: 'Constant' }];
-}
 function prefillBoxing(rows: any[]) {
   let padwork = false;
   const boxSel: Record<string, string> = {};
@@ -135,15 +131,24 @@ export function CreatePlan() {
   const [desc, setDesc] = React.useState(editing?.planDescription ?? '');
   const [modality, setModality] = React.useState<PlanModality | null>(editing ? (editing.modality as PlanModality) : null);
 
-  /* ---- strength-style builder ---- */
+  /* ---- strength-style builder (Yoga included: picker + duration/notes sets,
+          web parity — the old free-text activity list is legacy-read-only) ---- */
   const [bodyParts, setBodyParts] = React.useState<PlanBodyPartInput[]>(() =>
-    editing && editing.modality !== 'Yoga' && editing.modality !== 'Boxing'
+    editing && editing.modality !== 'Boxing'
       ? prefillStrength(editing.rows)
       : [{ body_part: '', exercises: [] }]
   );
   const [openSet, setOpenSet] = React.useState<string | null>(null); // "bpi-exi-si" of the expanded advanced row
-  const isStrengthStyle = !!modality && modality !== 'Yoga' && modality !== 'Boxing';
+  const isStrengthStyle = !!modality && modality !== 'Boxing';
   const poolQ = usePlanExerciseDb(isStrengthStyle ? modality : null);
+  // Yoga is a single fixed section — seed/clear its name as the modality changes.
+  React.useEffect(() => {
+    if (modality === 'Yoga') {
+      setBodyParts((xs) => (xs.length === 1 && !xs[0].body_part.trim() ? [{ ...xs[0], body_part: 'Yoga Activities' }] : xs));
+    } else if (modality && modality !== 'Boxing') {
+      setBodyParts((xs) => (xs.length === 1 && xs[0].body_part === 'Yoga Activities' && xs[0].exercises.length === 0 ? [{ body_part: '', exercises: [] }] : xs));
+    }
+  }, [modality]);
 
   /* ---- exercise picker (multi-select, mirrors the web ExerciseSelection page) ---- */
   const [pickerFor, setPickerFor] = React.useState<number | null>(null);
@@ -156,10 +161,11 @@ export function CreatePlan() {
   // Custom exercises live for the whole form session (like the web's sessionStorage pool).
   const [customPool, setCustomPool] = React.useState<DbExercise[]>([]);
 
-  /* ---- yoga ---- */
-  const [yoga, setYoga] = React.useState<PlanYogaInput[]>(() =>
-    editing && editing.modality === 'Yoga' ? prefillYoga(editing.rows) : [{ name: '', type: 'Constant' }]
-  );
+  /* ---- yoga (LEGACY payload slot only) ----
+     Yoga plans now build through the strength-style flow above (picker + duration
+     sets, web parity). This empty array keeps the create/edit payload shape; the
+     row builders fall back to it only for old offline-queued payloads. */
+  const yoga: PlanYogaInput[] = [];
 
   /* ---- boxing ---- */
   const boxingDbQ = useBoxingPlanExercises();
@@ -188,27 +194,68 @@ export function CreatePlan() {
   const strengthHasContent = bodyParts.some((bp) => bp.exercises.some((ex) => ex.name.trim()));
   const strengthUnnamedSection = bodyParts.some((bp) => bp.exercises.some((ex) => ex.name.trim()) && !bp.body_part.trim());
   const hasContent =
-    modality === 'Yoga' ? yoga.some((a) => a.name.trim())
-    : modality === 'Boxing' ? padwork || boxSelCount > 0 || boxCustom.some((c) => c.category.trim() && c.name.trim())
+    modality === 'Boxing' ? padwork || boxSelCount > 0 || boxCustom.some((c) => c.category.trim() && c.name.trim())
     : modality ? strengthHasContent
     : false;
   const hasChanges = !!(planName.trim() || desc.trim() || hasContent || modality);
   const contentCount =
-    modality === 'Yoga' ? yoga.filter((a) => a.name.trim()).length
-    : modality === 'Boxing' ? boxSelCount + (padwork ? 1 : 0) + boxCustom.filter((c) => c.category.trim() && c.name.trim()).length
+    modality === 'Boxing' ? boxSelCount + (padwork ? 1 : 0) + boxCustom.filter((c) => c.category.trim() && c.name.trim()).length
     : bodyParts.reduce((n, bp) => n + bp.exercises.filter((e) => e.name.trim()).length, 0);
 
   const busy = createM.isPending || editM.isPending;
   const missingHint = busy || done ? null
     : !planName.trim() ? 'Give the plan a name'
     : !modality ? 'Pick a modality'
-    : !hasContent ? (modality === 'Yoga' ? 'Add at least one activity' : modality === 'Boxing' ? 'Select or add at least one activity' : 'Add at least one exercise')
-    : modality !== 'Yoga' && modality !== 'Boxing' && strengthUnnamedSection ? 'Name each workout section (e.g. Chest, Push)'
+    : !hasContent ? (modality === 'Yoga' ? 'Select at least one activity' : modality === 'Boxing' ? 'Select or add at least one activity' : 'Add at least one exercise')
+    : modality !== 'Boxing' && strengthUnnamedSection ? 'Name each workout section (e.g. Chest, Push)'
     : null;
   const canSubmit = !!selectedClientId && !!trainerId && !missingHint && !busy && !done;
 
-  const goBack = () => (canGoBack ? back() : go('client'));
+  // Post-save "Saved ✓" navigation timer: kept in a ref so leaving early (back
+  // tap inside the 900 ms window) or unmounting cancels it — an orphaned
+  // goBack() used to pop a SECOND screen.
+  const navTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleGoBack = () => { if (navTimer.current) clearTimeout(navTimer.current); navTimer.current = setTimeout(() => goBack(), 900); };
+  React.useEffect(() => () => { if (navTimer.current) clearTimeout(navTimer.current); }, []);
+  const goBack = () => {
+    if (navTimer.current) { clearTimeout(navTimer.current); navTimer.current = null; }
+    canGoBack ? back() : go('client');
+  };
   const guardedBack = () => (hasChanges && !done ? setExitConfirm(true) : goBack());
+  // Hardware back honours the unsaved-changes guard (the edge swipe is disabled
+  // on this route — Router NO_SWIPE_BACK — so a stray drag can't discard a plan).
+  const guardedBackRef = React.useRef(guardedBack); guardedBackRef.current = guardedBack;
+  React.useEffect(() => {
+    backOverride.handler = () => guardedBackRef.current();
+    return () => { backOverride.handler = null; };
+  }, []);
+
+  /* Switching modality resets the builder (the exercise pool and builder are
+     modality-specific) — when exercises are already selected, confirm first so
+     a stray tap can't silently throw the work away. */
+  const resetBuildersTo = (next: PlanModality) => {
+    setBodyParts([{ body_part: '', exercises: [] }]);
+    setOpenSet(null);
+    setPickerFor(null); setSelPick({}); setExSearch('');
+    setBoxSel({}); setBoxCustom([]); setPadwork(false); setOpenBoxCat(null);
+    setModality(next);
+  };
+  const changeModality = (next: PlanModality) => {
+    if (next === modality) return;
+    if (modality && hasContent) {
+      const what = modality === 'Boxing' || modality === 'Yoga' ? 'activities' : 'exercises';
+      Alert.alert(
+        'Change modality?',
+        `You have ${contentCount} selected ${what} for ${modality}. Changing to ${next} will discard them.`,
+        [
+          { text: 'Keep Building', style: 'cancel' },
+          { text: 'Discard & Change', style: 'destructive', onPress: () => resetBuildersTo(next) },
+        ],
+      );
+      return;
+    }
+    resetBuildersTo(next);
+  };
 
   const submit = async () => {
     if (!canSubmit) return;
@@ -243,7 +290,7 @@ export function CreatePlan() {
         else await enqueueOutbox('edit-plan', editLabel, input);
         setSavedOffline(true);
         setDone(true);
-        setTimeout(goBack, 900);
+        scheduleGoBack();
       };
       if (!getIsOnline()) {
         await finishOfflineEdit();
@@ -252,7 +299,7 @@ export function CreatePlan() {
       try {
         await editM.mutateAsync(input);
         setDone(true);
-        setTimeout(goBack, 900);
+        scheduleGoBack();
       } catch (e: any) {
         if (/network request failed|network error|failed to fetch|fetch failed|timeout/i.test(String(e?.message))) {
           await finishOfflineEdit();
@@ -282,7 +329,7 @@ export function CreatePlan() {
       await enqueueOutbox('create-plan', `${planName.trim()} · ${clientName}`, input);
       setSavedOffline(true);
       setDone(true);
-      setTimeout(goBack, 900);
+      scheduleGoBack();
     };
     if (!getIsOnline()) {
       await finishOffline();
@@ -291,7 +338,7 @@ export function CreatePlan() {
     try {
       await createM.mutateAsync(input);
       setDone(true);
-      setTimeout(goBack, 900);
+      scheduleGoBack();
     } catch (e: any) {
       if (/network request failed|network error|failed to fetch|fetch failed|timeout/i.test(String(e?.message))) {
         await finishOffline();
@@ -346,6 +393,25 @@ export function CreatePlan() {
     setPickerFor(null);
   };
   const removeExercise = (bpi: number, exi: number) => setBodyParts((xs) => xs.map((x, k) => (k === bpi ? { ...x, exercises: x.exercises.filter((_, j) => j !== exi) } : x)));
+  // Reorder: move an exercise up/down within its section (web parity).
+  const moveExercise = (bpi: number, exi: number, dir: -1 | 1) => {
+    setOpenSet(null); // the expanded advanced row is index-keyed; close it on reorder
+    setBodyParts((xs) => xs.map((x, k) => {
+      if (k !== bpi) return x;
+      const j = exi + dir;
+      if (j < 0 || j >= x.exercises.length) return x;
+      const list = [...x.exercises];
+      [list[exi], list[j]] = [list[j], list[exi]];
+      return { ...x, exercises: list };
+    }));
+  };
+  // Drag-to-reorder: hold the grip on an exercise row and move it within its
+  // workout section; the page scroll freezes and auto-scrolls near the edges.
+  const dragPageRef = React.useRef<ScrollView>(null);
+  const dragOffsetRef = React.useRef(0);
+  const [pageScrollOk, setPageScrollOk] = React.useState(true);
+  const drag = useDragReorder({ scrollRef: dragPageRef, scrollOffsetRef: dragOffsetRef, setScrollEnabled: setPageScrollOk });
+  bodyParts.forEach((bp, bpi) => drag.setList(`bp${bpi}`, { count: bp.exercises.length, gap: 12, onMove: (from, to) => moveExercise(bpi, from, to > from ? 1 : -1) }));
   const addSet = (bpi: number, exi: number) =>
     setBodyParts((xs) => xs.map((x, k) => (k === bpi ? { ...x, exercises: x.exercises.map((e, j) => (j === exi ? { ...e, sets: [...e.sets, { ...(e.sets[e.sets.length - 1] ?? emptyPlanSet()) }] } : e)) } : x)));
   const removeSet = (bpi: number, exi: number, si: number) =>
@@ -367,7 +433,8 @@ export function CreatePlan() {
 
   return (
     <View style={{ flex: 1 }}>
-      <Page gap={14} pt={6} pb={130 + (Platform.OS === 'android' ? kbH : 0)} kbAware>
+      {/* pb clears the sticky footer (+ home indicator); Page adds the keyboard height itself. */}
+      <Page ref={dragPageRef} scrollEnabled={pageScrollOk} scrollOffsetRef={dragOffsetRef} gap={14} pt={6} pb={150 + insets.bottom} kbAware>
         <BackLink label="Back" onPress={guardedBack} />
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 13 }}>
           <IconChip icon="file" color={C.orange} />
@@ -412,7 +479,7 @@ export function CreatePlan() {
                 const meta = MODALITY_META[m];
                 const active = modality === m;
                 return (
-                  <Pressable key={m} onPress={() => setModality(m)} style={{ width: '48%', flexGrow: 1, flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 10, paddingHorizontal: 11, borderRadius: 13, backgroundColor: active ? hexA(C.orange, 0.12) : 'rgba(255,255,255,0.03)', borderWidth: 1, borderColor: active ? hexA(C.orange, 0.45) : 'rgba(255,255,255,0.08)' }}>
+                  <Pressable key={m} onPress={() => changeModality(m)} style={{ width: '48%', flexGrow: 1, flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 10, paddingHorizontal: 11, borderRadius: 13, backgroundColor: active ? hexA(C.orange, 0.12) : 'rgba(255,255,255,0.03)', borderWidth: 1, borderColor: active ? hexA(C.orange, 0.45) : 'rgba(255,255,255,0.08)' }}>
                     <View style={{ width: 30, height: 30, borderRadius: 10, backgroundColor: active ? hexA(C.orange, 0.16) : 'rgba(255,255,255,0.05)', alignItems: 'center', justifyContent: 'center' }}>
                       <Icon name={meta.icon} size={15} color={active ? C.orange : C.muted} strokeWidth={2} />
                     </View>
@@ -463,41 +530,6 @@ export function CreatePlan() {
             </View>
             <Body style={{ fontSize: 13, color: C.muted3 }}>Pick a modality above to start building the plan.</Body>
           </View>
-        ) : modality === 'Yoga' ? (
-          /* ============ YOGA ============ */
-          <Card colors={['rgba(46,28,18,0.4)', 'rgba(18,14,14,0.5)']} radius={20} style={{ padding: 16, gap: 12 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-              <View style={{ width: 32, height: 32, borderRadius: 11, backgroundColor: hexA(C.purple, 0.14), borderWidth: 1, borderColor: hexA(C.purple, 0.3), alignItems: 'center', justifyContent: 'center' }}>
-                <Icon name="sparkle" size={15} color={C.purple} strokeWidth={2} />
-              </View>
-              <Serif style={{ flex: 1, fontSize: 17 }}>Yoga Activities</Serif>
-              <View style={{ paddingVertical: 3, paddingHorizontal: 9, borderRadius: 999, backgroundColor: hexA(C.purple, 0.13), borderWidth: 1, borderColor: hexA(C.purple, 0.3) }}>
-                <Text style={{ fontFamily: F.mono, fontSize: 10.5, color: C.purple }}>{yoga.filter((a) => a.name.trim()).length}</Text>
-              </View>
-            </View>
-            {yoga.map((a, i) => (
-              <View key={i} style={{ gap: 8, padding: 12, borderRadius: 14, backgroundColor: 'rgba(0,0,0,0.22)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)' }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <TextInput
-                    value={a.name}
-                    onChangeText={(t) => setYoga((xs) => xs.map((x, k) => (k === i ? { ...x, name: t } : x)))}
-                    placeholder="e.g. Asana, Pranayam, Suryanamaskar"
-                    placeholderTextColor={C.muted3}
-                    style={[inputStyle, { flex: 1 }]}
-                  />
-                  <Pressable onPress={() => setYoga((xs) => (xs.length > 1 ? xs.filter((_, k) => k !== i) : xs))} disabled={yoga.length === 1} hitSlop={8} style={{ opacity: yoga.length === 1 ? 0.3 : 1 }}>
-                    <Icon name="close" size={16} color={C.muted2} strokeWidth={2.2} />
-                  </Pressable>
-                </View>
-                <View style={{ flexDirection: 'row', gap: 7 }}>
-                  {(['Constant', 'Custom'] as const).map((t) => (
-                    <Chip key={t} text={t} active={a.type === t} onPress={() => setYoga((xs) => xs.map((x, k) => (k === i ? { ...x, type: t } : x)))} color={C.blue} />
-                  ))}
-                </View>
-              </View>
-            ))}
-            <DashedBtn small text="Add Activity" onPress={() => setYoga((xs) => [...xs, { name: '', type: 'Constant' }])} />
-          </Card>
         ) : modality === 'Boxing' ? (
           /* ============ BOXING ============ */
           <Card colors={['rgba(46,28,18,0.4)', 'rgba(18,14,14,0.5)']} radius={20} style={{ padding: 16, gap: 12 }}>
@@ -599,20 +631,26 @@ export function CreatePlan() {
                     </Pressable>
                   ) : null}
                 </View>
-                <View>
-                  {label('WORKOUT NAME *')}
-                  <TextInput
-                    value={bp.body_part}
-                    onChangeText={(t) => patchBp(bpi, { body_part: t })}
-                    placeholder="e.g. Chest, Back, Legs"
-                    placeholderTextColor={C.muted3}
-                    style={inputStyle}
-                  />
-                </View>
+                {modality === 'Yoga' ? null : (
+                  <View>
+                    {label('WORKOUT NAME *')}
+                    <TextInput
+                      value={bp.body_part}
+                      onChangeText={(t) => patchBp(bpi, { body_part: t })}
+                      placeholder="e.g. Chest, Back, Legs"
+                      placeholderTextColor={C.muted3}
+                      style={inputStyle}
+                    />
+                  </View>
+                )}
 
                 {bp.exercises.map((ex, exi) => (
-                  <View key={exi} style={{ gap: 9, padding: 12, borderRadius: 14, backgroundColor: 'rgba(0,0,0,0.22)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)' }}>
+                  <Animated.View key={exi} onLayout={drag.rowLayout(`bp${bpi}`, exi)} style={[{ gap: 9, padding: 12, borderRadius: 14, backgroundColor: 'rgba(0,0,0,0.22)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)' }, drag.rowStyle(`bp${bpi}`, exi)]}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
+                      {/* Drag-to-reorder grip: hold and move within the section */}
+                      <View {...drag.handle(`bp${bpi}`, exi)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 4 }} style={{ width: 34, height: 30, borderRadius: 9, alignItems: 'center', justifyContent: 'center', backgroundColor: hexA(C.orange, drag.dragging?.list === `bp${bpi}` && drag.dragging.index === exi ? 0.2 : 0.07), borderWidth: 1, borderColor: hexA(C.orange, drag.dragging?.list === `bp${bpi}` && drag.dragging.index === exi ? 0.55 : 0.22) }}>
+                        <Icon path="M4 9h16M4 15h16" size={15} color={drag.dragging?.list === `bp${bpi}` && drag.dragging.index === exi ? C.orange : C.ink3} strokeWidth={2.2} />
+                      </View>
                       <View style={{ width: 24, height: 24, borderRadius: 8, backgroundColor: hexA(C.orange, 0.13), alignItems: 'center', justifyContent: 'center' }}>
                         <Text style={{ fontFamily: F.mono, fontSize: 11, color: C.orange }}>{exi + 1}</Text>
                       </View>
@@ -655,7 +693,7 @@ export function CreatePlan() {
                             <Pressable onPress={() => setOpenSet(adv ? null : k)} style={{ width: 30, height: 40, alignItems: 'center', justifyContent: 'center' }} hitSlop={4}>
                               <Icon name={adv ? 'chevUp' : 'chevDown'} size={15} color={hasAdv ? C.orange : C.muted} strokeWidth={2.2} />
                             </Pressable>
-                            <Pressable onPress={() => removeSet(bpi, exi, si)} disabled={ex.sets.length === 1} style={{ width: 24, alignItems: 'center', opacity: ex.sets.length === 1 ? 0.3 : 1 }} hitSlop={6}>
+                            <Pressable onPress={() => removeSet(bpi, exi, si)} disabled={ex.sets.length === 1} style={{ width: 24, paddingVertical: 8, alignItems: 'center', opacity: ex.sets.length === 1 ? 0.3 : 1 }} hitSlop={10}>
                               <Icon name="close" size={13} color={C.muted2} strokeWidth={2.2} />
                             </Pressable>
                           </View>
@@ -697,7 +735,7 @@ export function CreatePlan() {
                       <Icon name="plus" size={13} color={C.muted} strokeWidth={2.2} />
                       <Text style={{ fontFamily: F.bodySemi, fontSize: 11.5, color: C.muted }}>Add set</Text>
                     </Pressable>
-                  </View>
+                  </Animated.View>
                 ))}
 
                 {bp.body_part.trim() ? (
@@ -710,7 +748,9 @@ export function CreatePlan() {
                 )}
               </Card>
             ))}
-            <DashedBtn text="Add Workout Section" onPress={() => setBodyParts((xs) => [...xs, { body_part: '', exercises: [] }])} />
+            {modality === 'Yoga' ? null : (
+              <DashedBtn text="Add Workout Section" onPress={() => setBodyParts((xs) => [...xs, { body_part: '', exercises: [] }])} />
+            )}
           </>
         )}
 
@@ -762,8 +802,9 @@ export function CreatePlan() {
 
       {/* Exercise picker — multi-select, mirrors the web ExerciseSelection page */}
       <Modal visible={pickerFor !== null} transparent animationType="slide" onRequestClose={() => setPickerFor(null)}>
-        <Pressable onPress={() => setPickerFor(null)} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' }}>
-          <Pressable onPress={() => {}} style={{ height: '90%', backgroundColor: '#0E0A09', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 14 }}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' }}>
+          <Pressable onPress={() => setPickerFor(null)} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} />
+          <View style={{ height: '90%', paddingBottom: kbH, backgroundColor: '#0E0A09', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 14 }}>
             <View style={{ width: 40, height: 4, borderRadius: 99, backgroundColor: 'rgba(255,255,255,0.2)', alignSelf: 'center', marginBottom: 14 }} />
             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
               <View style={{ flex: 1 }}>
@@ -850,7 +891,7 @@ export function CreatePlan() {
                 );
               };
               return (
-                <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: (kbH > 0 ? kbH : 0) + 12, gap: 8 }}>
+                <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 12, gap: 8 }}>
                   {customList.length ? (
                     <>
                       <Mono style={{ fontSize: 9.5, letterSpacing: 1.4, color: C.gold, marginTop: 2 }}>CUSTOM</Mono>
@@ -882,8 +923,8 @@ export function CreatePlan() {
                 />
               </View>
             </View>
-          </Pressable>
-        </Pressable>
+          </View>
+        </View>
       </Modal>
 
       {/* Unsaved-changes guard */}

@@ -20,6 +20,11 @@ const isAdminRole = (r: string | null | undefined) => r === 'admin' || r === 'su
 export const OPS_HEAD_ID = '386dc683-d537-492b-b589-769f57e6c824';
 export const THREAD_STANDING_MEMBER_IDS = [OPS_HEAD_ID, '2c6a0525-18d8-40aa-a5bb-df814a114452'];
 
+/* Deep-link slot: set a client id here before go('client-threads') and the
+   screen opens that client's thread as soon as its list has loaded (used by
+   the trainer dashboard's QHP refresh card after it posts a proposal). */
+export const pendingThreadClientRef = { current: null as string | null };
+
 /* ---------- Thread list: my accessible clients + previews + unread ---------- */
 export type ClientThreadListRow = {
   clientId: string;
@@ -40,16 +45,35 @@ export function useClientThreadList(meId: string | null | undefined, dbRole: str
     // while the app was backgrounded.
     refetchInterval: 60_000,
     queryFn: async (): Promise<ClientThreadListRow[]> => {
-      // 1. My client universe: assigned clients, or all non-inactive clients
-      //    for admins AND standing members (Ops Head + designated admin).
+      const isAdmin = isAdminRole(dbRole) || THREAD_STANDING_MEMBER_IDS.includes(meId as string);
+
+      // 1. Existing threads (RLS already filters to accessible ones) + my read marks.
+      const [thrR, readR] = await Promise.all([
+        supabase.from('client_threads').select('id, client_id, last_message_at'),
+        supabase.from('client_thread_reads').select('thread_id, last_read_at').eq('user_id', meId),
+      ]);
+      if (thrR.error) throw new Error(thrR.error.message);
+      const threadByClient = new Map<string, { id: string; last_message_at: string | null }>();
+      (thrR.data ?? []).forEach((t: any) => { if (t.client_id) threadByClient.set(t.client_id, t); });
+      const readByThread = new Map<string, string>();
+      (readR.data ?? []).forEach((r: any) => readByThread.set(r.thread_id, r.last_read_at));
+
+      // 2. My client universe.
+      //  • Admins & standing members (Ops Head + designated admin): ONLY clients that
+      //    already have a thread — the real conversations — instead of every client (the
+      //    list used to enumerate ~1000 mostly-empty rows on the admin/ops dashboards).
+      //  • Everyone else: their assigned, non-inactive clients, so they can still open a
+      //    new thread with any of them.
       let clients: { id: string; name: string }[] = [];
-      if (isAdminRole(dbRole) || THREAD_STANDING_MEMBER_IDS.includes(meId as string)) {
-        const { data, error } = await supabase
-          .from('clients').select('id, first_name, last_name, status')
-          .not('status', 'in', '(inactive,discontinued)')
-          .limit(1000);
-        if (error) throw new Error(error.message);
-        clients = (data ?? []).map((c: any) => ({ id: c.id, name: fullName(c) || 'Client' }));
+      if (isAdmin) {
+        const threadClientIds = [...threadByClient.keys()];
+        for (let i = 0; i < threadClientIds.length; i += 200) {
+          const { data, error } = await supabase
+            .from('clients').select('id, first_name, last_name')
+            .in('id', threadClientIds.slice(i, i + 200));
+          if (error) throw new Error(error.message);
+          (data ?? []).forEach((c: any) => clients.push({ id: c.id, name: fullName(c) || 'Client' }));
+        }
       } else {
         const { data, error } = await supabase
           .from('trainer_clients')
@@ -60,17 +84,6 @@ export function useClientThreadList(meId: string | null | undefined, dbRole: str
           .filter((r: any) => r.clients && !['inactive', 'discontinued'].includes((r.clients.status ?? '').toLowerCase()))
           .map((r: any) => ({ id: r.client_id, name: fullName(r.clients) || 'Client' }));
       }
-
-      // 2. Existing threads (RLS already filters to accessible ones) + my read marks.
-      const [thrR, readR] = await Promise.all([
-        supabase.from('client_threads').select('id, client_id, last_message_at'),
-        supabase.from('client_thread_reads').select('thread_id, last_read_at').eq('user_id', meId),
-      ]);
-      if (thrR.error) throw new Error(thrR.error.message);
-      const threadByClient = new Map<string, { id: string; last_message_at: string | null }>();
-      (thrR.data ?? []).forEach((t: any) => threadByClient.set(t.client_id, t));
-      const readByThread = new Map<string, string>();
-      (readR.data ?? []).forEach((r: any) => readByThread.set(r.thread_id, r.last_read_at));
 
       // 3. Recent messages in one query → previews + unread counts client-side.
       const threadIds = (thrR.data ?? []).map((t: any) => t.id);

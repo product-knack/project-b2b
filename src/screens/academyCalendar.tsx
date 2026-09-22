@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, Pressable, Modal, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, Pressable, Modal, ActivityIndicator, Alert, ScrollView } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { C, F, hexA, ORANGE_GRAD } from '../theme';
 import { Icon } from '../icons';
@@ -26,8 +26,14 @@ const calColorFor = (id: string) => { let h = 0; for (let i = 0; i < id.length; 
    Default end = start + 60min; bare hours 1-7 with no am/pm assume PM. */
 export function parseTimeRange(text: string | null | undefined): { start: number; end: number } | null {
   if (!text) return null;
-  const m = /(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:-|–|to)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i.exec(text)
-    ?? /(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i.exec(text);
+  // Colon-less compact times ("130 - 400", "1030-1200") normalize to 1:30,
+  // 4:00, 10:30 first. Without this the regex matched digits MID-NUMBER
+  // ("130 - 400" -> "30 - 40" -> start hour 30 = minute 1800): the teacher
+  // card displayed a phantom "6:00 AM" (1800 % 24h) and Log Attendance could
+  // never unlock because no clock time reaches 1800 minutes.
+  const norm = text.replace(/\b(\d{1,2})(\d{2})(?=\s*(?:am|pm)\b|\b)/gi, '$1:$2');
+  const m = /(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:-|–|to)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i.exec(norm)
+    ?? /(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i.exec(norm);
   if (!m) return null;
   const toMin = (hRaw: string, minRaw: string | undefined, mer: string | undefined) => {
     let h = parseInt(hRaw, 10);
@@ -41,6 +47,10 @@ export function parseTimeRange(text: string | null | undefined): { start: number
   const endMer = (m[6] ?? undefined) as string | undefined;
   const start = toMin(m[1], m[2], (m[3] as string | undefined) ?? endMer);
   const end = m[4] != null ? toMin(m[4], m[5], endMer ?? (m[3] as string | undefined)) : start + 60;
+  // Sanity clamp: anything that still parses outside a real day fails OPEN
+  // (null) — the teacher card treats an unknown time as markable today,
+  // never permanently locked.
+  if (start < 0 || start >= 1440) return null;
   return { start, end: end > start ? end : start + 60 };
 }
 const fmtMin = (n: number) => {
@@ -301,24 +311,26 @@ export function AcademyCalendarTab() {
                 <Body style={{ flex: 1, fontSize: 11, color: '#F0A9A0' }}>A teacher on this class is double-booked in an overlapping slot this day.</Body>
               </View>
             ) : null}
+            <ScrollView showsVerticalScrollIndicator={false}>
             <Mono style={{ fontSize: 9, letterSpacing: 1, color: C.mono2, marginBottom: 7 }}>TEACHERS · TAP TO SELECT, CROWN = PRIMARY</Mono>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginBottom: 8 }}>
               {(teachersQ.data ?? []).map((t) => {
                 const on = selTeachers.includes(t.id);
                 const prim = selPrimary === t.id;
                 return (
-                  <Pressable key={t.id} onPress={() => toggleSelTeacher(t.id)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 7, paddingHorizontal: 11, borderRadius: 999, backgroundColor: on ? hexA(prim ? ACC : C.gold, 0.14) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: on ? hexA(prim ? ACC : C.gold, 0.5) : 'rgba(255,255,255,0.1)' }}>
+                  <View key={t.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 7, paddingHorizontal: 11, borderRadius: 999, backgroundColor: on ? hexA(prim ? ACC : C.gold, 0.14) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: on ? hexA(prim ? ACC : C.gold, 0.5) : 'rgba(255,255,255,0.1)' }}>
                     {on ? (
-                      <Pressable onPress={() => setSelPrimary(t.id)} hitSlop={8}>
+                      <Pressable onPress={() => setSelPrimary(t.id)} hitSlop={10}>
                         <Icon name="crown" size={11} color={prim ? ACC : 'rgba(255,255,255,0.35)'} strokeWidth={2.2} />
                       </Pressable>
                     ) : null}
-                    <Text style={{ fontFamily: on ? F.bodyBold : F.bodySemi, fontSize: 11.5, color: on ? (prim ? ACC : C.gold) : C.muted }}>{t.name}</Text>
-                  </Pressable>
+                    <Pressable onPress={() => toggleSelTeacher(t.id)} hitSlop={8}><Text style={{ fontFamily: on ? F.bodyBold : F.bodySemi, fontSize: 11.5, color: on ? (prim ? ACC : C.gold) : C.muted }}>{t.name}</Text></Pressable>
+                  </View>
                 );
               })}
             </View>
             <Body style={{ fontSize: 9.5, color: C.muted3, marginBottom: 10 }}>This changes the teachers for the ENTIRE batch, not just this class.</Body>
+            </ScrollView>
             <Pressable onPress={saveTeachers} disabled={setTeachersM.isPending || !selTeachers.length || !selPrimary} style={{ borderRadius: 13, overflow: 'hidden', opacity: setTeachersM.isPending || !selTeachers.length || !selPrimary ? 0.5 : 1 }}>
               <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ alignItems: 'center', paddingVertical: 13 }}>
                 <Text style={{ fontFamily: F.bodyBold, fontSize: 13.5, color: '#fff' }}>{setTeachersM.isPending ? 'Saving…' : 'Update batch teachers'}</Text>

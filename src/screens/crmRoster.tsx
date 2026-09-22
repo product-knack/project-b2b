@@ -263,14 +263,14 @@ export function CrmRoster() {
           <Icon name="user" size={13} color={trainerId ? C.blue : C.muted3} strokeWidth={2.1} />
           <Body numberOfLines={1} style={{ flex: 1, fontSize: 12, fontFamily: trainerId ? F.bodySemi : F.body, color: trainerId ? C.blue : C.muted }}>{trainerName ?? 'All trainers'}</Body>
           {trainerId ? (
-            <Pressable onPress={() => setTrainerId(null)} hitSlop={8}><Icon name="close" size={12} color={C.blue} strokeWidth={2.5} /></Pressable>
+            <Pressable onPress={() => setTrainerId(null)} hitSlop={10} style={{ width: 28, height: 28, alignItems: 'center', justifyContent: 'center' }}><Icon name="close" size={12} color={C.blue} strokeWidth={2.5} /></Pressable>
           ) : <Icon name="chevDown" size={12} color={C.muted3} strokeWidth={2.2} />}
         </Pressable>
         <Pressable onPress={() => setPickClient(true)} style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 7, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 12, backgroundColor: clientId ? hexA(C.gold, 0.12) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: clientId ? hexA(C.gold, 0.45) : 'rgba(255,255,255,0.09)' }}>
           <Icon name="users" size={13} color={clientId ? C.gold : C.muted3} strokeWidth={2.1} />
           <Body numberOfLines={1} style={{ flex: 1, fontSize: 12, fontFamily: clientId ? F.bodySemi : F.body, color: clientId ? C.gold : C.muted }}>{clientName ?? 'All clients'}</Body>
           {clientId ? (
-            <Pressable onPress={() => setClientId(null)} hitSlop={8}><Icon name="close" size={12} color={C.gold} strokeWidth={2.5} /></Pressable>
+            <Pressable onPress={() => setClientId(null)} hitSlop={10} style={{ width: 28, height: 28, alignItems: 'center', justifyContent: 'center' }}><Icon name="close" size={12} color={C.gold} strokeWidth={2.5} /></Pressable>
           ) : <Icon name="chevDown" size={12} color={C.muted3} strokeWidth={2.2} />}
         </Pressable>
       </View>
@@ -293,7 +293,7 @@ export function CrmRoster() {
           {([['calendar', 'calendar'], ['agenda', 'list']] as const).map(([id, icon]) => {
             const active = view === id;
             return (
-              <Pressable key={id} onPress={() => setView(id)} style={{ width: 32, height: 28, borderRadius: 8, alignItems: 'center', justifyContent: 'center', overflow: 'hidden', backgroundColor: active ? 'transparent' : 'rgba(255,255,255,0.02)' }}>
+              <Pressable key={id} onPress={() => setView(id)} hitSlop={8} style={{ width: 32, height: 32, borderRadius: 8, alignItems: 'center', justifyContent: 'center', overflow: 'hidden', backgroundColor: active ? 'transparent' : 'rgba(255,255,255,0.02)' }}>
                 {active ? <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} /> : null}
                 <Icon name={icon as any} size={14} color={active ? '#fff' : C.muted2} strokeWidth={2.2} />
               </Pressable>
@@ -427,12 +427,16 @@ export function SessionActionSheet({ session, crmId, onClose }: { session: Roste
   const reschedM = useRescheduleRosterSession();
   const cancelM = useCancelRosterSession();
   const wipeM = useDeleteFutureSessions();
-  const [mode, setMode] = React.useState<'menu' | 'reschedule' | 'cancel'>('menu');
+  // Provider pool for "Change trainer" (web parity). Fetched here (cached, 5 min
+  // staleTime) so all three screens that mount this sheet get it without prop drilling.
+  const peopleQ = useRosterPeople(crmId);
+  const [mode, setMode] = React.useState<'menu' | 'reschedule' | 'trainer' | 'cancel'>('menu');
   const [dayOffset, setDayOffset] = React.useState(1);
   const [time, setTime] = React.useState('10:00');
+  const [trainerSearch, setTrainerSearch] = React.useState('');
   const [remark, setRemark] = React.useState('');
   const [canceledBy, setCanceledBy] = React.useState<'Client' | 'Trainer'>('Client');
-  React.useEffect(() => { if (session) { setMode('menu'); setRemark(''); setCanceledBy('Client'); } }, [session?.id]);
+  React.useEffect(() => { if (session) { setMode('menu'); setRemark(''); setCanceledBy('Client'); setTrainerSearch(''); } }, [session?.id]);
 
   if (!session) return <SheetShell visible={false} onClose={onClose} accent={C.orange} icon="calendar" title="" >{null}</SheetShell>;
   const col = modalityColor(session.modality);
@@ -454,6 +458,21 @@ export function SessionActionSheet({ session, crmId, onClose }: { session: Roste
           { text: 'Force anyway', style: 'destructive', onPress: () => doReschedule(true) },
         ]);
       } else Alert.alert("Couldn't reschedule", e?.message ?? 'Try again.');
+    }
+  };
+  // Change trainer only — the session keeps its original datetime; clash checks
+  // run against the NEW provider (force path reuses the same TRAINER_OVERLAP flow).
+  const doChangeTrainer = async (p: { id: string; name: string }, force = false) => {
+    try {
+      await reschedM.mutateAsync({ id: session.id, clientId: session.clientId, trainerId: session.trainerId, newDateTime: session.when, newTrainerId: p.id, force });
+      onClose();
+    } catch (e: any) {
+      if (e?.message === 'TRAINER_OVERLAP') {
+        Alert.alert(`${p.name} is booked`, 'They already have a session within an hour of this slot.', [
+          { text: 'Pick someone else', style: 'cancel' },
+          { text: 'Force anyway', style: 'destructive', onPress: () => doChangeTrainer(p, true) },
+        ]);
+      } else Alert.alert("Couldn't change trainer", e?.message ?? 'Try again.');
     }
   };
   const doCancel = async () => {
@@ -490,6 +509,18 @@ export function SessionActionSheet({ session, crmId, onClose }: { session: Roste
                 <Body style={{ flex: 1, fontSize: 13.5, fontFamily: F.bodySemi, color: '#fff' }}>Reschedule this session</Body>
                 <Icon name="chevRight" size={14} color={C.gold} strokeWidth={2.2} />
               </Pressable>
+              {/* Change trainer — hidden once the session is logged (the workout
+                  belongs to the trainer who ran it). */}
+              {!session.completed ? (
+                <Pressable onPress={() => setMode('trainer')} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 13, borderRadius: 13, backgroundColor: hexA(C.purple, 0.08), borderWidth: 1, borderColor: hexA(C.purple, 0.32) }}>
+                  <Icon name="users" size={16} color={C.purple} strokeWidth={2.1} />
+                  <View style={{ flex: 1 }}>
+                    <Body style={{ fontSize: 13.5, fontFamily: F.bodySemi, color: '#fff' }}>Change trainer</Body>
+                    <Body style={{ fontSize: 10.5, color: C.muted3, marginTop: 1 }}>Currently with {session.trainerName}</Body>
+                  </View>
+                  <Icon name="chevRight" size={14} color={C.purple} strokeWidth={2.2} />
+                </Pressable>
+              ) : null}
               <Pressable onPress={() => setMode('cancel')} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 13, borderRadius: 13, backgroundColor: hexA(C.red, 0.07), borderWidth: 1, borderColor: hexA(C.red, 0.3) }}>
                 <Icon name="close" size={16} color={C.red} strokeWidth={2.3} />
                 <Body style={{ flex: 1, fontSize: 13.5, fontFamily: F.bodySemi, color: '#fff' }}>Cancel this session</Body>
@@ -526,6 +557,53 @@ export function SessionActionSheet({ session, crmId, onClose }: { session: Roste
               <Text style={{ fontFamily: F.bodyBold, fontSize: 13.5, color: '#fff' }}>{reschedM.isPending ? 'Moving…' : 'Move Session'}</Text>
             </LinearGradient>
           </Pressable>
+        </>
+      ) : mode === 'trainer' ? (
+        <>
+          {/* Change trainer — inline list (never a second Modal: stacked RN Modals
+              wedge iOS when the top one dismisses). Physio sessions pick from the
+              doctors pool, everything else from trainers (Create Roster parity). */}
+          <Mono style={{ fontSize: 8.5, letterSpacing: 0.7, color: C.muted3 }}>
+            NEW {session.modality === 'Physiotherapy' ? 'DOCTOR' : 'TRAINER'} — SESSION STAYS {dayLabel(dayKey(session.when)).toUpperCase()} · {timeOf(session.when)}
+          </Mono>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 9, paddingHorizontal: 12, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' }}>
+            <Icon name="search" size={13} color={C.muted3} strokeWidth={2} />
+            <TextInput
+              value={trainerSearch}
+              onChangeText={setTrainerSearch}
+              placeholder={`Search ${session.modality === 'Physiotherapy' ? 'doctors' : 'trainers'}…`}
+              placeholderTextColor={C.muted3}
+              autoCorrect={false}
+              style={{ flex: 1, fontFamily: F.body, fontSize: 13, color: '#fff', padding: 0 }}
+            />
+          </View>
+          {(() => {
+            const pool = session.modality === 'Physiotherapy' ? (peopleQ.data?.doctors ?? []) : (peopleQ.data?.trainers ?? []);
+            const q = trainerSearch.trim().toLowerCase();
+            const shown = pool.filter((p) => !q || p.name.toLowerCase().includes(q)).slice(0, 30);
+            if (peopleQ.isLoading) return <Body style={{ fontSize: 12, color: C.muted3, textAlign: 'center', paddingVertical: 10 }}>Loading…</Body>;
+            if (!shown.length) return <Body style={{ fontSize: 12, color: C.muted3, textAlign: 'center', paddingVertical: 10 }}>No match.</Body>;
+            return shown.map((p) => {
+              const isCurrent = p.id === session.trainerId;
+              return (
+                <Pressable
+                  key={p.id}
+                  disabled={isCurrent || reschedM.isPending}
+                  onPress={() => Alert.alert('Change trainer?', `${session.clientName}'s ${session.modality ?? 'session'} on ${dayLabel(dayKey(session.when))} at ${timeOf(session.when)} moves to ${p.name}.`, [
+                    { text: 'Cancel', style: 'cancel' },
+                    { text: 'Change', onPress: () => doChangeTrainer(p) },
+                  ])}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 13, backgroundColor: isCurrent ? hexA(C.purple, 0.1) : 'rgba(0,0,0,0.22)', borderWidth: 1, borderColor: isCurrent ? hexA(C.purple, 0.4) : 'rgba(255,255,255,0.07)', opacity: reschedM.isPending && !isCurrent ? 0.5 : 1 }}
+                >
+                  <View style={{ width: 30, height: 30, borderRadius: 10, backgroundColor: hexA(C.purple, 0.12), alignItems: 'center', justifyContent: 'center' }}>
+                    <Icon name="user" size={14} color={C.purple} strokeWidth={2.1} />
+                  </View>
+                  <Body style={{ flex: 1, fontSize: 13.5, fontFamily: isCurrent ? F.bodyBold : F.bodySemi, color: isCurrent ? C.purple : '#fff' }} numberOfLines={1}>{p.name}</Body>
+                  {isCurrent ? <Badge text="Current" color={C.purple} /> : <Icon name="chevRight" size={14} color={C.muted3} strokeWidth={2.2} />}
+                </Pressable>
+              );
+            });
+          })()}
         </>
       ) : (
         <>

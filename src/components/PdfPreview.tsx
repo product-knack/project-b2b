@@ -36,6 +36,9 @@ export function PdfPreview({ url, height = 420 }: { url: string; height?: number
             key={attempt}
             source={{ uri }}
             style={{ flex: 1, backgroundColor: '#141110' }}
+            // Android: hand vertical drags back to the parent ScrollView at the
+            // viewer's edges instead of swallowing every drag over the PDF.
+            nestedScrollEnabled
             originWhitelist={['*']}
             javaScriptEnabled
             domStorageEnabled

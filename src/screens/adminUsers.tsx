@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, Pressable, TextInput, ActivityIndicator, Modal, ScrollView } from 'react-native';
+import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import { C, F, hexA } from '../theme';
 import { Icon } from '../icons';
 import { Serif, Body, Mono, Card, Avatar } from '../components/primitives';
@@ -64,7 +65,7 @@ function PersonPicker({ label, placeholder, options, value, onChange }: {
           {selected ? `${selected.name}${selected.role === 'doctor' ? ' · Doctor' : ''}` : placeholder}
         </Text>
         {selected ? (
-          <Pressable onPress={() => { onChange(null); setOpen(false); }} hitSlop={8}><Icon name="close" size={11} color={C.muted3} strokeWidth={2.4} /></Pressable>
+          <Pressable onPress={() => { onChange(null); setOpen(false); }} hitSlop={10} style={{ width: 28, height: 28, alignItems: 'center', justifyContent: 'center' }}><Icon name="close" size={11} color={C.muted3} strokeWidth={2.4} /></Pressable>
         ) : null}
         <Icon name={open ? 'chevUp' : 'chevDown'} size={12} color={C.muted2} strokeWidth={2.3} />
       </Pressable>
@@ -74,7 +75,7 @@ function PersonPicker({ label, placeholder, options, value, onChange }: {
             <Icon name="search" size={12} color={C.muted3} strokeWidth={2} />
             <TextInput value={search} onChangeText={setSearch} placeholder="Search…" placeholderTextColor={C.muted3} autoCorrect={false} style={{ flex: 1, fontFamily: F.body, fontSize: 12, color: '#fff', padding: 0 }} />
           </View>
-          <ScrollView style={{ maxHeight: 220 }} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
+          <ScrollView style={{ maxHeight: 300 }} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
             {list.length === 0 ? <Body style={{ fontSize: 11, color: C.muted3, textAlign: 'center', paddingVertical: 14 }}>No matches.</Body> : list.map((o, i) => (
               <Pressable key={o.id} onPress={() => { onChange(o.id); setOpen(false); }} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, paddingHorizontal: 12, borderTopWidth: i === 0 ? 0 : 1, borderTopColor: 'rgba(255,255,255,0.05)', backgroundColor: value === o.id ? hexA(C.blue, 0.09) : 'transparent' }}>
                 <Text numberOfLines={1} style={{ flex: 1, fontFamily: value === o.id ? F.bodyBold : F.bodySemi, fontSize: 12, color: value === o.id ? C.blue : '#fff' }}>{o.name}</Text>
@@ -90,6 +91,7 @@ function PersonPicker({ label, placeholder, options, value, onChange }: {
 }
 
 function EditUserSheet({ user, onClose }: { user: ManagedUser; onClose: () => void }) {
+  const kb = useKeyboardHeight(); // Android edge-to-edge: lift the sheet above the keyboard
   const update = useUpdateUser();
   const [email, setEmail] = React.useState(user.email ?? '');
   const [password, setPassword] = React.useState('');
@@ -98,7 +100,7 @@ function EditUserSheet({ user, onClose }: { user: ManagedUser; onClose: () => vo
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.62)', justifyContent: 'flex-end' }}>
-        <View style={{ backgroundColor: '#0E0A09', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 14, paddingBottom: 24, gap: 10 }}>
+        <View style={{ maxHeight: '90%', backgroundColor: '#0E0A09', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 14, paddingBottom: kb > 0 ? kb + 14 : 24, gap: 10 }}>
           <View style={{ width: 40, height: 4, borderRadius: 99, backgroundColor: 'rgba(255,255,255,0.2)', alignSelf: 'center' }} />
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
             <View style={{ flex: 1 }}>
@@ -192,14 +194,14 @@ export function AdminUsers() {
                     <Body numberOfLines={1} style={{ fontSize: 10, color: C.muted3, marginTop: 1 }}>{u.email ?? '—'}</Body>
                   </View>
                   <Mono style={{ fontSize: 7.5, letterSpacing: 0.4, color: C.muted3 }}>{fmtDay(u.created_at).toUpperCase()}</Mono>
-                  <Pressable onPress={() => setEditUser(u)} hitSlop={5} style={{ width: 28, height: 28, borderRadius: 9, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }}>
+                  <Pressable onPress={() => setEditUser(u)} hitSlop={10} style={{ width: 28, height: 28, borderRadius: 9, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }}>
                     <Icon name="clipboard" size={12} color={C.muted} strokeWidth={2} />
                   </Pressable>
                   <Pressable disabled={del.isPending} onPress={() => {
                     setErr(null);
                     if (delArm === u.id) del.mutate({ userId: u.id, role }, { onSuccess: () => setDelArm(null), onError: (e: any) => { setDelArm(null); fail(e); } });
                     else setDelArm(u.id);
-                  }} hitSlop={5} style={{ width: 28, height: 28, borderRadius: 9, backgroundColor: hexA(C.red, delArm === u.id ? 0.28 : 0.08), borderWidth: 1, borderColor: hexA(C.red, 0.4), alignItems: 'center', justifyContent: 'center' }}>
+                  }} hitSlop={10} style={{ width: 28, height: 28, borderRadius: 9, backgroundColor: hexA(C.red, delArm === u.id ? 0.28 : 0.08), borderWidth: 1, borderColor: hexA(C.red, 0.4), alignItems: 'center', justifyContent: 'center' }}>
                     <Icon name="close" size={11} color={C.red} strokeWidth={2.5} />
                   </Pressable>
                 </View>
@@ -295,7 +297,7 @@ export function AdminUsers() {
                 </View>
                 <Mono style={{ fontSize: 7.5, letterSpacing: 0.4, color: C.muted3, marginTop: 2 }}>ASSIGNED {fmtDay(a.assigned_at).toUpperCase()}</Mono>
               </View>
-              <Pressable disabled={unassign.isPending} onPress={() => { setErr(null); unassign.mutate(a.id, { onError: fail }); }} hitSlop={5} style={{ width: 28, height: 28, borderRadius: 9, backgroundColor: hexA(C.red, 0.08), borderWidth: 1, borderColor: hexA(C.red, 0.4), alignItems: 'center', justifyContent: 'center' }}>
+              <Pressable disabled={unassign.isPending} onPress={() => { setErr(null); unassign.mutate(a.id, { onError: fail }); }} hitSlop={10} style={{ width: 28, height: 28, borderRadius: 9, backgroundColor: hexA(C.red, 0.08), borderWidth: 1, borderColor: hexA(C.red, 0.4), alignItems: 'center', justifyContent: 'center' }}>
                 <Icon name="close" size={11} color={C.red} strokeWidth={2.5} />
               </Pressable>
             </Card>

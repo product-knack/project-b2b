@@ -102,7 +102,7 @@ export function useRosterPeople(crmId: string | null) {
 /* ---------- Bulk create ("Create Roster") — the web's exact rules.
    schedules: one entry per weekday, each with its own time and optional
    trainer/modality override (mirrors the web's daySchedules). ---------- */
-export type RosterConflict = { kind: 'trainer' | 'trainer_forced' | 'client' | 'leave'; when: string; detail: string };
+export type RosterConflict = { kind: 'trainer' | 'trainer_forced' | 'client' | 'leave' | 'past'; when: string; detail: string };
 export type DaySchedule = { day: number; time: string; trainerId?: string | null; modality?: string | null };
 export type BulkInput = {
   clientId: string; trainerId: string; modality: string; weeks: number;
@@ -135,21 +135,32 @@ export function useBulkCreateRoster() {
         end: new Date(`${l.end_date}T${l.end_time || '23:59:59'}`),
       }));
 
+      const conflicts: RosterConflict[] = [];
+      const fmt = (d: Date) => d.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'short', day: '2-digit', month: 'short' }) + ' · ' + d.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: 'numeric', minute: '2-digit', hour12: true });
+
       // Candidate slots: every matching weekday from start through end, at that day's time.
+      // NO SKIP IN THIS FLOW MAY BE SILENT: every dropped slot records a conflict the CRM
+      // can read — the old bare `continue` on past slots produced unexplained
+      // "0 sessions created" results for same-day rosters made in the afternoon.
+      // A slot whose time has passed but is still inside the trainer's 2h log window
+      // (trainer.tsx POST_WINDOW_MS) IS created — the "CRM formalizes the 5:00 PM
+      // session at 5:20 PM" case; the trainer can still log it normally.
+      const LOG_POST_WINDOW_MS = 2 * 60 * 60 * 1000;
       const candidates: { at: Date; sched: DaySchedule }[] = [];
       for (let d = new Date(start); d <= end; d = new Date(d.getTime() + 864e5)) {
         const sched = byDow.get(d.getDay());
-        if (!sched) continue;
+        if (!sched) continue; // day not selected — not a slot, nothing to report
         const [hh, mm] = sched.time.split(':').map(Number);
         const at = new Date(d); at.setHours(hh, mm, 0, 0);
-        if (at < new Date()) continue; // skip already-past slots
+        if (at.getTime() < Date.now() - LOG_POST_WINDOW_MS) {
+          conflicts.push({ kind: 'past', when: at.toISOString(), detail: `${fmt(at)} has already passed — pick a later start date` });
+          continue;
+        }
         candidates.push({ at, sched });
       }
 
-      const conflicts: RosterConflict[] = [];
       const rows: { trainer_id: string; client_id: string; scheduled_datetime: string; modality: string; status: string }[] = [];
       const seen = new Set<string>();
-      const fmt = (d: Date) => d.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', weekday: 'short', day: '2-digit', month: 'short' }) + ' · ' + d.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: 'numeric', minute: '2-digit', hour12: true });
 
       for (const { at, sched } of candidates) {
         const slotTrainer = sched.trainerId || input.trainerId;
@@ -178,7 +189,9 @@ export function useBulkCreateRoster() {
         if (cClash?.length) { conflicts.push({ kind: 'client', when: at.toISOString(), detail: `${fmt(at)} — client already has a session` }); continue; }
 
         const key = `${input.clientId}|${at.toISOString()}`;
-        if (seen.has(key)) continue;
+        // Defensive: byDow holds one schedule per weekday so duplicates shouldn't occur,
+        // but if they ever do, the drop must be visible like every other skip.
+        if (seen.has(key)) { conflicts.push({ kind: 'client', when: at.toISOString(), detail: `${fmt(at)} — duplicate slot skipped` }); continue; }
         seen.add(key);
         rows.push({ trainer_id: slotTrainer, client_id: input.clientId, scheduled_datetime: at.toISOString(), modality: slotModality, status: 'scheduled' });
       }
@@ -227,12 +240,17 @@ export function useInferRoster(clientId: string | null) {
         .limit(200);
       if (error) throw new Error(error.message);
       // Group by weekday+time (IST); pick the most common trainer/modality per slot.
+      // IST parts via Intl — NEVER new Date(toLocaleString(...)): Hermes can't parse
+      // that string and returns Invalid Date, which made day=NaN / time='NaN:NaN'.
+      // The bulk-create then matched no weekday → "0 sessions created" on Replicate.
+      const istFmt = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+      const DOW: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
       const slots = new Map<string, { day: number; time: string; picks: Map<string, { trainerId: string | null; trainerName: string; modality: string | null; n: number }> }>();
       ((data ?? []) as any[]).forEach((r) => {
-        const d = new Date(r.scheduled_datetime);
-        const ist = new Date(d.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
-        const day = ist.getDay();
-        const time = `${String(ist.getHours()).padStart(2, '0')}:${String(ist.getMinutes()).padStart(2, '0')}`;
+        const parts = istFmt.formatToParts(new Date(r.scheduled_datetime));
+        const part = (t: string) => parts.find((p) => p.type === t)?.value ?? '';
+        const day = DOW[part('weekday')] ?? 0;
+        const time = `${part('hour').padStart(2, '0')}:${part('minute').padStart(2, '0')}`;
         const key = `${day}|${time}`;
         if (!slots.has(key)) slots.set(key, { day, time, picks: new Map() });
         const pk = `${r.trainer_id ?? ''}|${r.modality ?? ''}`;
@@ -252,14 +270,18 @@ export function useInferRoster(clientId: string | null) {
   });
 }
 
-/* ---------- Reschedule (web RescheduleSessionDialog contract) ---------- */
+/* ---------- Reschedule / change trainer (web RescheduleSessionDialog contract) ----------
+   newTrainerId moves the session to another provider (web parity); clash checks run
+   against the TARGET trainer at the TARGET time. RLS verified live: a CRM can update
+   session_schedule.trainer_id. */
 export function useRescheduleRosterSession() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { id: string; clientId: string; trainerId: string | null; newDateTime: string; force?: boolean }) => {
+    mutationFn: async (input: { id: string; clientId: string; trainerId: string | null; newDateTime: string; newTrainerId?: string | null; force?: boolean }) => {
       const at = new Date(input.newDateTime);
       const winStart = new Date(at.getTime() - 60 * 60000).toISOString();
       const winEnd = new Date(at.getTime() + 60 * 60000).toISOString();
+      const targetTrainer = input.newTrainerId ?? input.trainerId;
       // Client double-booking → hard block.
       const { data: cClash } = await supabase
         .from('session_schedule').select('id')
@@ -267,15 +289,16 @@ export function useRescheduleRosterSession() {
         .gte('scheduled_datetime', winStart).lt('scheduled_datetime', winEnd).limit(1);
       if (cClash?.length) throw new Error('The client already has a session within an hour of that slot.');
       // Trainer overlap → soft (needs force).
-      if (input.trainerId && !input.force) {
+      if (targetTrainer && !input.force) {
         const { data: tClash } = await supabase
           .from('session_schedule').select('id')
-          .eq('trainer_id', input.trainerId).neq('status', 'cancelled').neq('id', input.id)
+          .eq('trainer_id', targetTrainer).neq('status', 'cancelled').neq('id', input.id)
           .gte('scheduled_datetime', winStart).lt('scheduled_datetime', winEnd).limit(1);
         if (tClash?.length) throw new Error('TRAINER_OVERLAP');
       }
       const { error } = await supabase.from('session_schedule').update({
         scheduled_datetime: at.toISOString(),
+        ...(input.newTrainerId ? { trainer_id: input.newTrainerId } : {}),
         reschedule_request: null,
         reschedule_requested_at: null,
         updated_at: new Date().toISOString(),

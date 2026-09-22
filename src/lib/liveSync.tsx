@@ -3,6 +3,7 @@ import { AppState } from 'react-native';
 import { focusManager, useQueryClient } from '@tanstack/react-query';
 import { supabase } from './supabase';
 import { useAuth } from '../auth';
+import { invalidateDebounced } from './invalidateDebounced';
 
 /* ============ Live sync — makes every dashboard render fresh data on its own.
    Three layers (each covers the others' gaps):
@@ -26,8 +27,11 @@ export function initFocusRefetch() {
 const TABLE_KEYS: Record<string, string[]> = {
   clients: ['crm-client-list', 'crm-client-detail', 'crm-journey-clients', 'crm-metrics', 'crm-inactive-clients', 'coach-clients-overview', 'coach-overview-client'],
   trainer_clients: ['crm-client-list', 'crm-client-detail', 'crm-client-assignments', 'sales-targets', 'crm-journey-clients'],
-  training_sessions: ['crm-client-sessions', 'crm-package-cycle', 'crm-inactive-clients', 'crm-sessions-breakdown', 'crm-metrics', 'client-sessions'],
-  session_schedule: ['crm-client-roster', 'crm-client-sessions'],
+  // Roster/session keys for trainers, doctors and managers are included so their
+  // Sessions pages, Today's Roster and crew cards update live (the global 60 s poll
+  // that used to paper over this is gone).
+  training_sessions: ['crm-client-sessions', 'crm-package-cycle', 'crm-inactive-clients', 'crm-sessions-breakdown', 'crm-metrics', 'client-sessions', 'trainer-roster', 'trainer-month-sessions-v2', 'doctor-roster', 'doctor-today-roster', 'mgr-plan-outcome-v5', 'crm-month-roster'],
+  session_schedule: ['crm-client-roster', 'crm-client-sessions', 'trainer-roster', 'trainer-month-sessions-v2', 'doctor-roster', 'doctor-today-roster', 'mgr-plan-sched', 'crm-month-roster'],
   crm_communications: ['crm-comms-book', 'crm-client-comms', 'crm-stale-comms', 'crm-pending-comms'],
   sales_tracker: ['sales-targets'],
   service_bookings: ['crm-service-bookings'],
@@ -57,22 +61,15 @@ export function LiveSync() {
 
   React.useEffect(() => {
     if (!session) return;
-    // Debounce per-table so a burst of rows (e.g. bulk insert) invalidates once.
-    const timers = new Map<string, ReturnType<typeof setTimeout>>();
-    const kick = (table: string) => {
-      if (timers.has(table)) return;
-      timers.set(table, setTimeout(() => {
-        timers.delete(table);
-        (TABLE_KEYS[table] ?? []).forEach((prefix) => qc.invalidateQueries({ queryKey: [prefix] }));
-      }, 800));
-    };
+    // Debounced per query key (shared with every other realtime handler in the
+    // app) so a burst of rows — or overlapping subscriptions — invalidates once.
+    const kick = (table: string) => (TABLE_KEYS[table] ?? []).forEach((prefix) => invalidateDebounced(qc, [prefix]));
     let channel = supabase.channel('live-sync');
     Object.keys(TABLE_KEYS).forEach((table) => {
       channel = channel.on('postgres_changes', { event: '*', schema: 'public', table }, () => kick(table));
     });
     channel.subscribe();
     return () => {
-      timers.forEach((t) => clearTimeout(t));
       supabase.removeChannel(channel);
     };
   }, [session, qc]);

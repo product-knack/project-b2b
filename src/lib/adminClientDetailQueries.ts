@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from './supabase';
+import { invokeWithTimeout } from './withTimeout';
 
 /* ============ Admin — Client detail (web /admin/clients/:id port) ============ */
 
@@ -296,7 +297,7 @@ export function useCreateAdditionalPackage() {
         if (reqErr) throw new Error(reqErr.message);
         let paymentUrl: string | null = null;
         if (input.method === 'razorpay') {
-          const { data: res, error: fnErr } = await supabase.functions.invoke('create-additional-package-razorpay-link', { body: { request_id: (reqRow as any).id } });
+          const { data: res, error: fnErr } = await invokeWithTimeout('create-additional-package-razorpay-link', { body: { request_id: (reqRow as any).id } });
           const errMsg = fnErr?.message || (res as any)?.error;
           if (errMsg) {
             await supabase.from('renewal_payment_requests').update({ payment_status: 'failed' }).eq('id', (reqRow as any).id);

@@ -317,9 +317,21 @@ export function useCrmAlerts(crmId: string | null) {
       if (schedRows.length) {
         const trainerIds = [...new Set(schedRows.map((r) => r.trainer_id).filter(Boolean))];
         const { data: logs } = await supabase.from('training_sessions').select('trainer_id, scheduled_at').in('trainer_id', trainerIds).gte('scheduled_at', cut7);
+        // Index logs by trainer with pre-parsed times: the old O(schedules × logs)
+        // scan re-parsed every ISO date in the inner loop (~200k parses/run) and
+        // froze the CRM dashboard on every refetch.
+        const logsByTrainer = new Map<string, number[]>();
+        for (const l of (logs ?? []) as any[]) {
+          const t = Date.parse(l.scheduled_at);
+          if (!isFinite(t)) continue;
+          const arr = logsByTrainer.get(l.trainer_id);
+          if (arr) arr.push(t); else logsByTrainer.set(l.trainer_id, [t]);
+        }
+        const WINDOW = 3 * 3600e3;
         missingLogs = schedRows.filter((r) => {
-          const t = new Date(r.scheduled_datetime).getTime();
-          return !(logs ?? []).some((l: any) => l.trainer_id === r.trainer_id && Math.abs(new Date(l.scheduled_at).getTime() - t) <= 3 * 3600e3);
+          const t = Date.parse(r.scheduled_datetime);
+          const arr = logsByTrainer.get(r.trainer_id);
+          return !(arr && arr.some((x) => Math.abs(x - t) <= WINDOW));
         }).length;
       }
 

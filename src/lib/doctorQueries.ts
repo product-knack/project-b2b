@@ -1,6 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from './supabase';
+import { invokeWithTimeout, uploadWithTimeout } from './withTimeout';
 import { useAuth } from '../auth';
+import { THERAPY_MODALITIES, therapyModalityLabel, ROSTER_FRESH_START_MS } from './therapistQueries';
 
 /* ============ DOCTOR WORKSPACE DATA LAYER ============
    Verbatim port of the web /doctor/* hooks (usePhysiotherapistMetrics,
@@ -22,6 +24,7 @@ export const DOCTOR_SESSION_TYPES = [
   'cryotherapy', 'pneumatic_compression_therapy', 'cognitive_entrainment_device',
   'pemf_mat_therapy', 'mayo_facial_release', 'tapping', 'stretching',
   'strengthening_exercises', 'manual_releases', 'neural_check', 'other', 'recovery',
+  'therapy',
 ] as const;
 export const DOCTOR_ROSTER_CREATE_MODALITIES = ['rehabilitation', 'recovery'] as const;
 /* RehabSessionsSection uses this NARROWER list (web parity). */
@@ -50,19 +53,19 @@ export const personName = (p: any) => `${p?.first_name ?? ''} ${p?.last_name ?? 
    Always attach the live access token; getSession() refreshes an expired one first.
    Extra hardening: on cold start AsyncStorage may not have hydrated yet (null session),
    so wait once; and if the fn still says Unauthorized, force-refresh and retry once. */
-async function invokeFn(name: string, body: any) {
+export async function invokeFn(name: string, body: any) {
   let { data } = await supabase.auth.getSession();
   if (!data.session) {
     await new Promise((r) => setTimeout(r, 450));
     ({ data } = await supabase.auth.getSession());
   }
   let token = data.session?.access_token;
-  let res = await supabase.functions.invoke(name, { body, ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}) });
+  let res = await invokeWithTimeout(name, { body, ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}) });
   const saysUnauthorized = !res.error && (res.data as any)?.ok === false && /unauthori[sz]ed/i.test(String((res.data as any)?.error ?? ''));
   if (saysUnauthorized) {
     const { data: refreshed } = await supabase.auth.refreshSession();
     token = refreshed.session?.access_token;
-    if (token) res = await supabase.functions.invoke(name, { body, headers: { Authorization: `Bearer ${token}` } });
+    if (token) res = await invokeWithTimeout(name, { body, headers: { Authorization: `Bearer ${token}` } });
   }
   return res;
 }
@@ -89,22 +92,54 @@ export const istMonthBoundsUTC = (d: Date) => {
 };
 
 /* ---------- Identity: role flags for the signed-in doctor ---------- */
-export type DoctorIdentity = { isPhysio: boolean; isNutritionist: boolean; isHeadDoctor: boolean; specialization: string | null };
-export function useDoctorIdentity(): { data: DoctorIdentity; isLoading: boolean } {
-  const { session } = useAuth();
+// therapyModalities: which therapy sub-modalities THIS doctor may log — a
+// STRICT whitelist match of role_specialization against the two therapy tags.
+// Any other tag in that free-form column (physio_hod, hod, …) is inert here
+// and must never unlock therapy logging (web spec v2 §1.2).
+export type DoctorIdentity = {
+  isPhysio: boolean; isNutritionist: boolean; isHeadDoctor: boolean;
+  /** Consultant doctor (web isConsultantDoctor): role doctor AND "consultant" in the tag, in role_specialization[] or in the free-text specializations. */
+  isConsultant: boolean;
+  specialization: string | null;
+  /** profiles.specializations free text (the consultant profile card shows it). */
+  specializations: string | null;
+  firstName: string; lastName: string; fullName: string; email: string | null;
+  therapyModalities: { value: string; label: string }[];
+};
+/** The consultant test, without the role check (web ConsultantDashboard.isConsultantDoctor). */
+export const consultantTagMatch = (tag: string | null, spec: string[], free: string | null) =>
+  (tag ?? '').toLowerCase() === 'consultant' || spec.some((t) => (t ?? '').toLowerCase() === 'consultant') || (free ?? '').toLowerCase().includes('consultant');
+type IdentityRow = Omit<DoctorIdentity, 'isConsultant'> & { consultantTag: boolean };
+/** `enabled` lets non-doctor callers (the drawer) skip the profile read. Key v3: the select grew on 22 Sep 2026. */
+export function useDoctorIdentity(enabled = true): { data: DoctorIdentity; isLoading: boolean; isPending: boolean; isPaused: boolean; isError: boolean; refetch: () => void } {
+  const { session, dbRole } = useAuth();
   const uid = session?.user?.id ?? null;
   const q = useQuery({
-    queryKey: ['doctor-identity', uid],
-    enabled: !!uid,
+    queryKey: ['doctor-identity-v3', uid],
+    enabled: !!uid && enabled,
     staleTime: 600_000,
-    queryFn: async (): Promise<DoctorIdentity> => {
-      const { data, error } = await supabase.from('profiles').select('doctor_specialization_tag').eq('id', uid).maybeSingle();
+    queryFn: async (): Promise<IdentityRow> => {
+      const { data, error } = await supabase.from('profiles').select('doctor_specialization_tag, role_specialization, specializations, first_name, last_name, email').eq('id', uid).maybeSingle();
       if (error) throw new Error(error.message);
       const tag = (data as any)?.doctor_specialization_tag ?? null;
-      return { isPhysio: tag === 'physiotherapist', isNutritionist: tag === 'nutritionist', isHeadDoctor: uid === HEAD_DOCTOR_ID, specialization: tag };
+      const spec: string[] = Array.isArray((data as any)?.role_specialization) ? (data as any).role_specialization : [];
+      const free: string | null = (data as any)?.specializations ?? null;
+      const firstName = String((data as any)?.first_name ?? '').trim();
+      const lastName = String((data as any)?.last_name ?? '').trim();
+      return {
+        isPhysio: tag === 'physiotherapist', isNutritionist: tag === 'nutritionist',
+        isHeadDoctor: uid === HEAD_DOCTOR_ID, specialization: tag, specializations: free,
+        consultantTag: consultantTagMatch(tag, spec, free),
+        firstName, lastName, fullName: [firstName, lastName].filter(Boolean).join(' ').trim(), email: (data as any)?.email ?? null,
+        therapyModalities: THERAPY_MODALITIES.filter((m) => spec.includes(m.value)),
+      };
     },
   });
-  return { data: q.data ?? { isPhysio: false, isNutritionist: false, isHeadDoctor: uid === HEAD_DOCTOR_ID, specialization: null }, isLoading: q.isLoading };
+  const row = q.data;
+  const data: DoctorIdentity = row
+    ? (({ consultantTag, ...rest }) => ({ ...rest, isConsultant: dbRole === 'doctor' && consultantTag }))(row)
+    : { isPhysio: false, isNutritionist: false, isHeadDoctor: uid === HEAD_DOCTOR_ID, isConsultant: false, specialization: null, specializations: null, firstName: '', lastName: '', fullName: '', email: null, therapyModalities: [] };
+  return { data, isLoading: q.isLoading, isPending: q.isPending, isPaused: q.fetchStatus === 'paused', isError: q.isError, refetch: () => { q.refetch(); } };
 }
 
 /* ---------- Dashboard: personal metrics (web usePhysiotherapistMetrics) ---------- */
@@ -180,7 +215,8 @@ export function useDoctorsRunRate(enabled = true) {
       const daysInMonth = new Date(y, m + 1, 0).getDate();
       const daysElapsed = Math.max(1, day);
       const month = istMonthBoundsUTC(now);
-      const { data: doctors, error: dErr } = await supabase.from('profiles').select('id, first_name, last_name').eq('role', 'doctor');
+      // Therapists are HOD-managed like doctors — they count on this card too.
+      const { data: doctors, error: dErr } = await supabase.from('profiles').select('id, first_name, last_name').in('role', ['doctor', 'therapist']);
       if (dErr) throw new Error(dErr.message);
       const docs = (doctors ?? []) as any[];
       if (!docs.length) return { daysElapsed, daysInMonth, rows: [] };
@@ -377,8 +413,11 @@ export type PhysioSubmitInput = {
   doctorId: string;
   clientId: string;
   clientName: string;
-  category: 'rehab' | 'recovery' | '';
+  category: 'rehab' | 'recovery' | 'therapy' | '';
   cancelled: boolean;
+  // therapy (web spec v2 §2.2): sub-modality enum value + optional free notes
+  therapyType: string;
+  therapyNotes: string;
   // rehab with-plan
   tab: 'with-plan' | 'log-session';
   protocolId: string;
@@ -429,6 +468,12 @@ export function buildStructuredNotes(i: PhysioSubmitInput): string {
     if (w.immediate_response) parts.push(`\nImmediate Response: ${w.immediate_response}`);
     if (w.home_care) parts.push(`Home Care / Advice: ${w.home_care}`);
     if (w.plan_next_session) parts.push(`Plan for Next Session: ${w.plan_next_session}`);
+    return parts.join('\n');
+  }
+  if (i.category === 'therapy') {
+    // Web spec v2 §2.2 structured format; Notes line omitted when empty.
+    const parts = ['Category: Therapy', `Type: ${therapyModalityLabel(i.therapyType)}`];
+    if (i.therapyNotes.trim()) parts.push(`\nNotes: ${i.therapyNotes.trim()}`);
     return parts.join('\n');
   }
   if (i.category === 'recovery') {
@@ -488,18 +533,31 @@ export async function submitPhysioSession(i: PhysioSubmitInput): Promise<{ sessi
     return { sessionId: null };
   }
 
-  // Rehab / Recovery session
-  const sessionType = i.category === 'rehab' ? 'rehabilitation' : i.category === 'recovery' ? 'recovery' : 'physiotherapy';
+  // Rehab / Recovery / Therapy session
+  const sessionType = i.category === 'rehab' ? 'rehabilitation' : i.category === 'recovery' ? 'recovery' : i.category === 'therapy' ? 'therapy' : 'physiotherapy';
   const now = new Date().toISOString();
   const { data: sessionData, error } = await supabase.from('training_sessions').insert([{
     client_id: i.clientId, trainer_id: i.doctorId, scheduled_at: now, duration_minutes: 60,
     status: i.cancelled ? 'cancelled' : 'completed', session_type: sessionType,
-    session_name: `${i.category === 'rehab' ? 'Rehab' : 'Recovery'} Session`,
+    session_name: i.category === 'therapy' ? therapyModalityLabel(i.therapyType) : `${i.category === 'rehab' ? 'Rehab' : 'Recovery'} Session`,
     notes: buildStructuredNotes(i), attendance_marked: !i.cancelled, cancelled: i.cancelled, location: '',
   }] as any).select('id').single();
   if (error) throw new Error(error.message);
   const sessionId = (sessionData as any).id as string;
-  await supabase.from('training_sessions').update({ workout_session_id: sessionId } as any).eq('id', sessionId);
+  // Self-link (all physio/therapy sessions). A failed link is non-fatal to the
+  // user but must reach ops (web spec v2 §3.2/§3.5) — mobile consoles are
+  // invisible, so it lands in ops_alerts; reporting itself never throws.
+  try {
+    const { error: linkErr } = await supabase.from('training_sessions').update({ workout_session_id: sessionId } as any).eq('id', sessionId);
+    if (linkErr) throw new Error(linkErr.message);
+  } catch (e: any) {
+    void supabase.from('ops_alerts').insert({
+      source: 'schedule_link', severity: 'error',
+      title: 'Therapy session could not be linked to its roster slot',
+      message: String(e?.message ?? e),
+      context: { stage: 'self_link', workout_session_id: null, schedule_session_id: null, client_id: i.clientId, trainer_id: i.doctorId, at: new Date().toISOString() },
+    }).then(() => {}, () => {});
+  }
 
   // Exercise rows (non-fatal on failure — web parity)
   try {
@@ -840,8 +898,9 @@ export function useAssignableDoctors(viewerId: string | null) {
     enabled: !!viewerId,
     staleTime: 300_000,
     queryFn: async () => {
+      // Therapists are HOD-managed like doctors and assignable the same way.
       const { data, error } = await supabase.from('profiles').select('id, first_name, last_name, email, role')
-        .eq('role', 'doctor').order('first_name');
+        .in('role', ['doctor', 'therapist']).order('first_name');
       if (error) throw new Error(error.message);
       const rows = (data ?? []) as any[];
       if (viewerId === HEAD_DOCTOR_ID) return rows;
@@ -857,7 +916,7 @@ export function useAssignDoctors() {
       const { data: existing, error: fetchError } = await supabase
         .from('trainer_clients').select('id, trainer_id, actively_training').eq('client_id', input.clientId);
       if (fetchError) throw new Error(fetchError.message);
-      const { data: allDoctorProfiles, error: dErr } = await supabase.from('profiles').select('id').eq('role', 'doctor');
+      const { data: allDoctorProfiles, error: dErr } = await supabase.from('profiles').select('id').in('role', ['doctor', 'therapist']);
       if (dErr) throw new Error(dErr.message);
       const allDoctorIds = new Set(((allDoctorProfiles ?? []) as any[]).map((d) => d.id));
       const existingRows = (existing ?? []) as any[];
@@ -900,6 +959,7 @@ export function useDoctorOwnRoster(monthDate: Date) {
     queryKey: ['doctor-roster', uid, monthStart.toISOString()],
     enabled: !!uid,
     staleTime: 60_000,
+    refetchInterval: 60_000, // doctor Sessions page keeps live updates without the global poll
     queryFn: async () => {
       const { data: sessions, error } = await supabase
         .from('session_schedule')
@@ -943,18 +1003,24 @@ export function useDoctorTodayRoster() {
       const dayEnd = new Date(); dayEnd.setHours(23, 59, 59, 999);
       const { data, error } = await supabase
         .from('session_schedule')
-        .select('id, scheduled_datetime, modality, session_type, status, client_id, clients:client_id(first_name, last_name, brb_location)')
+        .select('id, scheduled_datetime, modality, session_type, status, workout_session_id, client_id, clients:client_id(first_name, last_name, brb_location)')
         .eq('trainer_id', uid)
         .gte('scheduled_datetime', dayStart.toISOString())
         .lte('scheduled_datetime', dayEnd.toISOString())
         .order('scheduled_datetime', { ascending: true });
       if (error) throw new Error(error.message);
-      return ((data ?? []) as any[]).map((s) => ({
+      return ((data ?? []) as any[])
+        // Fresh start: unlogged rows dated before 1 Sept 2026 IST stay hidden
+        // (August backlog); logged rows always show.
+        .filter((s) => s.workout_session_id || new Date(s.scheduled_datetime).getTime() >= ROSTER_FRESH_START_MS)
+        .map((s) => ({
         id: s.id,
         scheduled_datetime: s.scheduled_datetime,
         modality: s.modality ?? null,
         session_type: s.session_type ?? null,
-        status: s.status ?? null,
+        // The roster status column can't say 'completed' (CHECK constraint) —
+        // logged IS the workout_session_id link, same rule as everywhere else.
+        status: s.workout_session_id ? 'completed' : (s.status ?? null),
         client_id: s.client_id ?? null,
         client_name: s.clients ? personName(s.clients) : 'Unknown Client',
         has_home_location: s.clients?.brb_location != null,
@@ -1389,7 +1455,7 @@ export function useClientDoctorAssignments(clientId: string | null, enabled: boo
         .from('trainer_clients')
         .select('trainer_id, actively_training, profiles!inner(id, role)')
         .eq('client_id', clientId)
-        .eq('profiles.role', 'doctor');
+        .in('profiles.role', ['doctor', 'therapist']);
       if (error) throw new Error(error.message);
       return ((data ?? []) as any[]).filter((r) => r.actively_training).map((r) => r.trainer_id as string);
     },
@@ -1436,7 +1502,7 @@ export type MedicalEntryInput = {
 async function uploadToBucket(bucket: string, path: string, file: PickedDoc): Promise<string> {
   const res = await fetch(file.uri);
   const buf = await res.arrayBuffer();
-  const { error } = await supabase.storage.from(bucket).upload(path, buf, { contentType: file.mime, upsert: false });
+  const { error } = await uploadWithTimeout(bucket, path, buf, { contentType: file.mime, upsert: false });
   if (error) throw new Error(error.message);
   return supabase.storage.from(bucket).getPublicUrl(path).data.publicUrl;
 }

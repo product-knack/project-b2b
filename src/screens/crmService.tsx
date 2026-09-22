@@ -134,7 +134,7 @@ export function CrmService() {
                   </View>
                 ) : b.status === 'confirmed' ? (
                   <View style={{ flexDirection: 'row', gap: 7 }}>
-                    <Pressable onPress={() => updateM.mutate({ id: b.id, status: 'completed' }, { onError: (e: any) => Alert.alert("Couldn't update", e?.message) })} style={{ flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 10, backgroundColor: hexA(C.blue, 0.1), borderWidth: 1, borderColor: hexA(C.blue, 0.35) }}>
+                    <Pressable disabled={updateM.isPending} onPress={() => updateM.mutate({ id: b.id, status: 'completed' }, { onError: (e: any) => Alert.alert("Couldn't update", e?.message) })} style={{ flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 10, backgroundColor: hexA(C.blue, 0.1), borderWidth: 1, borderColor: hexA(C.blue, 0.35) }}>
                       <Text style={{ fontFamily: F.bodyBold, fontSize: 11, color: C.blue }}>Mark Completed</Text>
                     </Pressable>
                     <Pressable onPress={() => setReschedule(b)} style={{ flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 10, backgroundColor: hexA(C.gold, 0.1), borderWidth: 1, borderColor: hexA(C.gold, 0.35) }}>

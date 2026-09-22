@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from './supabase';
+import { invokeWithTimeout } from './withTimeout';
 
 /* ============ Admin — User Management (web /admin/users port) ============
    Creation/updates go through the service-role edge functions (admin-create-user /
@@ -37,7 +38,7 @@ export function useCreateUser() {
       if (input.password.length < 6) throw new Error('Password must be at least 6 characters.');
       if (!input.firstName.trim() || !input.lastName.trim()) throw new Error('First and last name are required.');
       if (input.role === 'doctor' && !input.specialization) throw new Error('Pick a doctor specialization.');
-      const { data, error } = await supabase.functions.invoke('admin-create-user', {
+      const { data, error } = await invokeWithTimeout('admin-create-user', {
         body: {
           email: input.email.trim().toLowerCase(), password: input.password,
           first_name: input.firstName.trim(), last_name: input.lastName.trim(),
@@ -59,7 +60,7 @@ export function useUpdateUser() {
   return useMutation({
     mutationFn: async (input: { userId: string; email?: string; password?: string }) => {
       if (!input.email && !input.password) throw new Error('No changes to save.');
-      const { data, error } = await supabase.functions.invoke('admin-update-user', {
+      const { data, error } = await invokeWithTimeout('admin-update-user', {
         body: { userId: input.userId, ...(input.email ? { email: input.email.trim().toLowerCase() } : {}), ...(input.password ? { password: input.password } : {}) },
       });
       const errMsg = error?.message || (data as any)?.error;

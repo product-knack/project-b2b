@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, Pressable, TextInput, ActivityIndicator, Modal, ScrollView } from 'react-native';
+import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import { C, F, hexA } from '../theme';
 import { Icon } from '../icons';
 import { Serif, Body, Mono, Card, Avatar } from '../components/primitives';
@@ -15,6 +16,7 @@ const fmtAt = (iso: string) => new Date(iso).toLocaleString('en-IN', { timeZone:
 const nameOf = (t: IncidentTrainer) => `${t.first_name ?? ''} ${t.last_name ?? ''}`.replace(/\s+/g, ' ').trim() || '—';
 
 function IncidentSheet({ trainer, profileId, onClose }: { trainer: IncidentTrainer; profileId: string | null; onClose: () => void }) {
+  const kb = useKeyboardHeight(); // Android edge-to-edge: lift the sheet above the keyboard
   const q = useTrainerIncidents(trainer.id);
   const add = useAddIncident();
   const [msg, setMsg] = React.useState('');
@@ -23,7 +25,7 @@ function IncidentSheet({ trainer, profileId, onClose }: { trainer: IncidentTrain
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.62)', justifyContent: 'flex-end' }}>
-        <View style={{ maxHeight: '90%', backgroundColor: '#0E0A09', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 14, paddingBottom: 22 }}>
+        <View style={{ maxHeight: '90%', backgroundColor: '#0E0A09', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 14, paddingBottom: kb > 0 ? kb + 14 : 22 }}>
           <View style={{ width: 40, height: 4, borderRadius: 99, backgroundColor: 'rgba(255,255,255,0.2)', alignSelf: 'center', marginBottom: 12 }} />
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9, marginBottom: 10 }}>
             <View style={{ flex: 1 }}>

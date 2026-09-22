@@ -27,6 +27,7 @@ import { useWorkoutSessionExercises, useClientCrm } from '../lib/doctorQueries';
 import * as Location from 'expo-location';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
+import { withTimeout, GPS_MS } from '../lib/withTimeout';
 import { useSaveClientHomeLocation } from '../lib/clientQueries';
 import { useWorkoutSessions } from '../lib/adminClientDetailQueries';
 import { useClientHealthReports } from '../lib/qhpQueries';
@@ -97,7 +98,7 @@ function Lbl({ children, req }: { children: React.ReactNode; req?: boolean }) {
 
 function PrimaryBtn({ label, onPress, disabled, busy, color = C.orange }: { label: string; onPress: () => void; disabled?: boolean; busy?: boolean; color?: string }) {
   return (
-    <Pressable onPress={onPress} disabled={disabled || busy} style={{ opacity: disabled ? 0.45 : 1, borderRadius: 13, overflow: 'hidden' }}>
+    <Pressable onPress={onPress} disabled={disabled || busy} style={({ pressed }) => ({ opacity: disabled ? 0.45 : pressed ? 0.75 : 1, borderRadius: 13, overflow: 'hidden' })}>
       <LinearGradient colors={[hexA(color, 0.9), hexA(color, 0.65)]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ paddingVertical: 13, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 }}>
         {busy ? <ActivityIndicator size="small" color="#1A1210" /> : null}
         <Text style={{ fontFamily: F.bodyBold, fontSize: 13.5, color: '#1A1210' }}>{label}</Text>
@@ -200,7 +201,7 @@ function ProtocolCard({ p }: { p: any }) {
         </View>
       </View>
       {p.rejection_notes ? <Body style={{ fontSize: 11.5, color: C.red }}>Rejection: {p.rejection_notes}</Body> : null}
-      <Pressable onPress={() => setOpen((v) => !v)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+      <Pressable onPress={() => setOpen((v) => !v)} hitSlop={10} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6 }}>
         <Icon name={open ? 'chevUp' : 'chevDown'} size={13} color={C.blue} />
         <Text style={{ fontFamily: F.bodySemi, fontSize: 11.5, color: C.blue }}>{open ? 'Hide Exercises' : 'View Exercises'}</Text>
       </Pressable>
@@ -401,13 +402,13 @@ function CreateProtocolSheet({ visible, onClose, clientId, clientName, physioId 
             </View>
           );
         })}
+        <RehabPicker
+          visible={!!pickerFor}
+          onClose={() => setPickerFor(null)}
+          onPick={(names) => { if (pickerFor) mutEx(pickerFor, (l) => [...l, ...names.map((n) => ({ exercise_name: n, sets: [emptySet()] }))]); }}
+          onCustom={() => { if (pickerFor) mutEx(pickerFor, (l) => [...l, { exercise_name: '', sets: [emptySet()] }]); }}
+        />
       </Sheet>
-      <RehabPicker
-        visible={!!pickerFor}
-        onClose={() => setPickerFor(null)}
-        onPick={(names) => { if (pickerFor) mutEx(pickerFor, (l) => [...l, ...names.map((n) => ({ exercise_name: n, sets: [emptySet()] }))]); }}
-        onCustom={() => { if (pickerFor) mutEx(pickerFor, (l) => [...l, { exercise_name: '', sets: [emptySet()] }]); }}
-      />
     </>
   );
 }
@@ -448,7 +449,7 @@ function RehabSessionCard({ s, onShowText }: { s: any; onShowText: (title: strin
       </View>
       {grouped.size ? (
         <>
-          <Pressable onPress={() => setOpen((v) => !v)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <Pressable onPress={() => setOpen((v) => !v)} hitSlop={10} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6 }}>
             <Icon name={open ? 'chevUp' : 'chevDown'} size={13} color={C.blue} />
             <Text style={{ fontFamily: F.bodySemi, fontSize: 11.5, color: C.blue }}>{open ? 'Hide' : 'View'} Details ({grouped.size})</Text>
           </Pressable>
@@ -885,16 +886,16 @@ function AssignDoctorsSheet({ visible, onClose, clientId, viewerId }: { visible:
   }, [visible, assignedQ.data]);
   const doctors = (doctorsQ.data ?? []) as any[];
   return (
-    <Sheet visible={visible} onClose={onClose} title="Assign Doctors" footer={
+    <Sheet visible={visible} onClose={onClose} title="Assign Doctors & Therapists" footer={
       <PrimaryBtn label="Save Assignments" busy={assignM.isPending} disabled={assignM.isPending} onPress={async () => {
         try {
           await assignM.mutateAsync({ clientId, selectedDoctors: [...sel] });
           onClose();
-          Alert.alert('Doctor assignments updated');
+          Alert.alert('Assignments updated');
         } catch (e: any) { Alert.alert('Failed to update assignments', e?.message ?? 'Unknown error'); }
       }} />
     }>
-      <Body style={{ fontSize: 11.5, color: C.muted2 }}>Deselecting a doctor keeps the record but marks it inactive.</Body>
+      <Body style={{ fontSize: 11.5, color: C.muted2 }}>Deselecting a member keeps the record but marks it inactive.</Body>
       {doctorsQ.isLoading || assignedQ.isLoading ? <ActivityIndicator color={C.orange} style={{ paddingVertical: 14 }} /> : doctors.map((d) => {
         const on = sel.has(d.id);
         return (
@@ -908,6 +909,7 @@ function AssignDoctorsSheet({ visible, onClose, clientId, viewerId }: { visible:
               {d.email ? <Mono style={{ fontSize: 10, color: C.muted3 }}>{d.email}</Mono> : null}
             </View>
             {d.id === HEAD_DOCTOR_ID ? <Badge text="HOD" color={C.gold} /> : null}
+            {d.role === 'therapist' ? <Badge text="THERAPIST" color={C.purple} /> : null}
           </Pressable>
         );
       })}
@@ -945,7 +947,7 @@ function HealthReportsBlock({ clientId, onPreview }: { clientId: string; onPrevi
 
 /* ============ MAIN SCREEN ============ */
 export function DoctorClientDetail() {
-  const { selectedClientId: clientId, selectedClientName, back, openWorkout } = useStore();
+  const { selectedClientId: clientId, selectedClientName, back, openWorkout, clientInitialTab, set: setStore } = useStore();
   const { session } = useAuth();
   const uid = session?.user?.id ?? '';
   const ident = useDoctorIdentity();
@@ -955,7 +957,11 @@ export function DoctorClientDetail() {
 
   const [months, setMonths] = React.useState('1');
   const countsQ = useDoctorClientSessionCounts(clientId ? [clientId] : [], months, !!clientId);
-  const [tab, setTab] = React.useState<'sessions' | 'medical' | 'reports' | 'notes'>('sessions');
+  // The consultant's "View Reports" opens straight on the Medical tab (history +
+  // lab reports); the hint is consumed on mount so a later open starts on Sessions.
+  type DetailTab = 'sessions' | 'medical' | 'reports' | 'notes';
+  const [tab, setTab] = React.useState<DetailTab>(() => (clientInitialTab === 'medical' || clientInitialTab === 'reports' || clientInitialTab === 'notes' ? clientInitialTab : 'sessions'));
+  React.useEffect(() => { if (clientInitialTab) setStore({ clientInitialTab: null }); }, []);
   React.useEffect(() => { trackClientTab('doctor-client-detail', tab, { id: clientId, name: selectedClientName }); }, [tab]);
   const [assignOpen, setAssignOpen] = React.useState(false);
   const [logOpen, setLogOpen] = React.useState(false);
@@ -1014,7 +1020,7 @@ export function DoctorClientDetail() {
         Alert.alert('Permission needed', "Allow location access to capture the client's home location.");
         return;
       }
-      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      const pos = await withTimeout(Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }), GPS_MS, 'GPS fix');
       await saveLocM.mutateAsync({ clientId, lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy ?? null });
       qcLoc.invalidateQueries({ queryKey: ['client-brb', clientId] });
       Alert.alert('Location saved', `${name}'s home location has been captured.`);
@@ -1247,7 +1253,7 @@ export function DoctorClientDetail() {
                 {e.doctor_id === uid ? (
                   <Pressable hitSlop={8} onPress={() => Alert.alert('Delete entry?', `"${e.title}" will be permanently removed.`, [
                     { text: 'Cancel', style: 'cancel' },
-                    { text: 'Delete', style: 'destructive', onPress: () => delMedM.mutate({ id: e.id, clientId }) },
+                    { text: 'Delete', style: 'destructive', onPress: () => delMedM.mutate({ id: e.id, clientId }, { onError: (e: any) => Alert.alert("Couldn't delete", e?.message ?? "Try again.") }) },
                   ])}>
                     <Icon name="close" size={15} color={C.red} />
                   </Pressable>
@@ -1301,7 +1307,7 @@ export function DoctorClientDetail() {
                   ) : <View />}
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
                     <Mono style={{ fontSize: 9.5, color: C.muted3 }}>Shared with client</Mono>
-                    <Switch value={!!fi.shared_with_client} onValueChange={(v) => shareM.mutate({ id: fi.id, clientId, shared: v })}
+                    <Switch value={!!fi.shared_with_client} disabled={shareM.isPending} onValueChange={(v) => shareM.mutate({ id: fi.id, clientId, shared: v }, { onError: (e: any) => Alert.alert("Couldn't update sharing", e?.message ?? "Try again.") })}
                       trackColor={{ false: 'rgba(255,255,255,0.15)', true: hexA(C.green, 0.5) }} thumbColor={fi.shared_with_client ? C.green : '#888'} />
                   </View>
                 </View>
@@ -1345,12 +1351,12 @@ export function DoctorClientDetail() {
                   <Body style={{ fontSize: 12.5, color: C.muted, lineHeight: 18 }}>{r.content}</Body>
                   {r.author_id === uid ? (
                     <View style={{ flexDirection: 'row', gap: 10 }}>
-                      <Pressable onPress={() => setEditRemark({ id: r.id, content: r.content })}>
+                      <Pressable hitSlop={10} style={{ paddingVertical: 6, paddingHorizontal: 8 }} onPress={() => setEditRemark({ id: r.id, content: r.content })}>
                         <Text style={{ fontFamily: F.bodySemi, fontSize: 11, color: C.blue }}>Edit</Text>
                       </Pressable>
-                      <Pressable onPress={() => Alert.alert('Delete remark?', 'This cannot be undone.', [
+                      <Pressable hitSlop={10} style={{ paddingVertical: 6, paddingHorizontal: 8 }} onPress={() => Alert.alert('Delete remark?', 'This cannot be undone.', [
                         { text: 'Cancel', style: 'cancel' },
-                        { text: 'Delete', style: 'destructive', onPress: () => delRemarkM.mutate({ id: r.id, clientId }) },
+                        { text: 'Delete', style: 'destructive', onPress: () => delRemarkM.mutate({ id: r.id, clientId }, { onError: (e: any) => Alert.alert("Couldn't delete", e?.message ?? "Try again.") }) },
                       ])}>
                         <Text style={{ fontFamily: F.bodySemi, fontSize: 11, color: C.red }}>Delete</Text>
                       </Pressable>
@@ -1360,11 +1366,11 @@ export function DoctorClientDetail() {
               ))}
               {remarkPages > 1 ? (
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 14 }}>
-                  <Pressable disabled={remarkPage === 0} onPress={() => setRemarkPage((p) => Math.max(0, p - 1))} style={{ opacity: remarkPage === 0 ? 0.35 : 1 }}>
+                  <Pressable hitSlop={12} disabled={remarkPage === 0} onPress={() => setRemarkPage((p) => Math.max(0, p - 1))} style={{ opacity: remarkPage === 0 ? 0.35 : 1, padding: 6 }}>
                     <Icon name="chevLeft" size={17} color={C.muted} />
                   </Pressable>
                   <Mono style={{ fontSize: 11, color: C.muted2 }}>{remarkPage + 1} / {remarkPages}</Mono>
-                  <Pressable disabled={remarkPage >= remarkPages - 1} onPress={() => setRemarkPage((p) => Math.min(remarkPages - 1, p + 1))} style={{ opacity: remarkPage >= remarkPages - 1 ? 0.35 : 1 }}>
+                  <Pressable hitSlop={12} disabled={remarkPage >= remarkPages - 1} onPress={() => setRemarkPage((p) => Math.min(remarkPages - 1, p + 1))} style={{ opacity: remarkPage >= remarkPages - 1 ? 0.35 : 1, padding: 6 }}>
                     <Icon name="chevRight" size={17} color={C.muted} />
                   </Pressable>
                 </View>

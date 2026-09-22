@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, Pressable, TextInput, ActivityIndicator, Modal } from 'react-native';
+import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { C, F, hexA } from '../theme';
 import { Icon } from '../icons';
@@ -116,11 +117,12 @@ function useReactivateChurned() {
 }
 
 function NotesSheet({ title, sub, cta, color, busy, onConfirm, onClose }: { title: string; sub: string; cta: string; color: string; busy: boolean; onConfirm: (notes: string) => void; onClose: () => void }) {
+  const kb = useKeyboardHeight(); // Android edge-to-edge: lift the sheet above the keyboard
   const [notes, setNotes] = React.useState('');
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.62)', justifyContent: 'flex-end' }}>
-        <View style={{ backgroundColor: '#0E0A09', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 14, paddingBottom: 24, gap: 10 }}>
+        <View style={{ maxHeight: '90%', backgroundColor: '#0E0A09', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 14, paddingBottom: kb > 0 ? kb + 14 : 24, gap: 10 }}>
           <View style={{ width: 40, height: 4, borderRadius: 99, backgroundColor: 'rgba(255,255,255,0.2)', alignSelf: 'center' }} />
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
             <View style={{ flex: 1 }}>

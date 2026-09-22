@@ -1,5 +1,6 @@
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { supabase } from './supabase';
+import { invokeWithTimeout } from './withTimeout';
 
 /* ============ Coach → Clients Overview → client detail sections ============
    Ports the web CoachClientOverviewDetail sections with EXACT backend contracts:
@@ -69,7 +70,7 @@ export function useCompareQhps() {
       if (input.items.length < 2) throw new Error('Select at least two QHPs');
       const labels: Record<string, string> = {};
       input.items.forEach((q) => { labels[q.id] = q.label; });
-      const { data, error } = await supabase.functions.invoke('compare-qhps', { body: { qhp_ids: input.items.map((q) => q.id), qhp_labels: labels } });
+      const { data, error } = await invokeWithTimeout('compare-qhps', { body: { qhp_ids: input.items.map((q) => q.id), qhp_labels: labels } });
       if (error) throw new Error(await fnMessage(error, 'Failed to generate comparison'));
       if ((data as any)?.error) throw new Error((data as any).error);
       const md = ((data as any).comparison_markdown ?? '') as string;
@@ -109,7 +110,7 @@ export function useAnalyseVolume() {
   return useMutation({
     mutationFn: async (input: { clientId: string; months: string[] }): Promise<VolumeResult> => {
       if (input.months.length < 2 || new Set(input.months).size !== input.months.length) throw new Error('Pick at least 2 unique months');
-      const { data, error } = await supabase.functions.invoke('analyse-workout-volume', { body: { clientId: input.clientId, months: input.months } });
+      const { data, error } = await invokeWithTimeout('analyse-workout-volume', { body: { clientId: input.clientId, months: input.months } });
       if (error) throw new Error(await fnMessage(error, 'Failed to analyse'));
       const d = data as any;
       const months: MonthAgg[] = d?.months?.length ? d.months : [d?.monthA, d?.monthB].filter(Boolean);
@@ -262,7 +263,7 @@ export type AiPlanContext = { workout_days_14d?: number; abnormal_marker_count?:
 export function useGenerateAiPlan() {
   return useMutation({
     mutationFn: async (input: { clientId: string }): Promise<{ plan: AiPlan; context: AiPlanContext | null }> => {
-      const { data, error } = await supabase.functions.invoke('coach-ai-workout-plan', { body: { client_id: input.clientId } });
+      const { data, error } = await invokeWithTimeout('coach-ai-workout-plan', { body: { client_id: input.clientId } });
       if (error) throw new Error(await fnMessage(error, 'Could not generate plan'));
       if ((data as any)?.error) throw new Error((data as any).error);
       return { plan: (data as any).plan as AiPlan, context: ((data as any).context_summary ?? null) as AiPlanContext | null };

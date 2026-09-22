@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, Pressable, ScrollView, RefreshControl, Animated, Easing, Platform, Keyboard, TextInput, Dimensions } from 'react-native';
+import { View, Text, Pressable, ScrollView, RefreshControl, Animated, Easing, Platform, Keyboard, TextInput, Dimensions, ActivityIndicator } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 import { getIsOnline } from '../lib/offline';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -12,17 +12,50 @@ import { Serif, Body, Mono, Avatar, AvatarPhoto, Card, Pill } from '../component
    so scrolling tabs/chips never triggers navigation. */
 import { backSwipeLock } from '../gestureLock';
 export function HScroll({ children, gap = 8 }: { children: React.ReactNode; gap?: number }) {
+  // Unmounted mid-touch (realtime re-key, deep link) → onTouchEnd never fires;
+  // release the lock so swipe-back can't stay dead for the session.
+  React.useEffect(() => () => { backSwipeLock.locked = false; }, []);
   return (
     <ScrollView
       horizontal
       showsHorizontalScrollIndicator={false}
       contentContainerStyle={{ gap }}
+      // Chips next to a focused input must react on the FIRST tap, not just close the keyboard.
+      keyboardShouldPersistTaps="handled"
       onTouchStart={() => { backSwipeLock.locked = true; }}
       onTouchEnd={() => { backSwipeLock.locked = false; }}
       onTouchCancel={() => { backSwipeLock.locked = false; }}
     >
       {children}
     </ScrollView>
+  );
+}
+
+/* Capability / identity gate placeholder. An access query that is still loading
+   (or paused offline, or errored) must NOT read as "denied": screens render this
+   until the answer is known, and offer a retry on error. */
+export function AccessPending({ paused, error, onRetry }: { paused?: boolean; error?: boolean; onRetry?: () => void }) {
+  return (
+    <Page gap={14} pt={6}>
+      <View style={{ alignItems: 'center', gap: 12, paddingVertical: 60 }}>
+        {error ? (
+          <>
+            <Serif style={{ fontSize: 18 }}>Couldn't verify access</Serif>
+            <Body style={{ fontSize: 12.5, color: C.muted2, textAlign: 'center', paddingHorizontal: 30 }}>Check your connection and try again.</Body>
+            {onRetry ? (
+              <Pressable onPress={onRetry} hitSlop={10} accessibilityRole="button" accessibilityLabel="Retry access check" style={{ paddingVertical: 9, paddingHorizontal: 18, borderRadius: 999, backgroundColor: hexA(C.orange, 0.12), borderWidth: 1, borderColor: hexA(C.orange, 0.4) }}>
+                <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: C.orange }}>Retry</Text>
+              </Pressable>
+            ) : null}
+          </>
+        ) : (
+          <>
+            <ActivityIndicator color={C.orange} />
+            <Body style={{ fontSize: 12.5, color: C.muted2 }}>{paused ? 'Waiting for connection…' : 'Checking access…'}</Body>
+          </>
+        )}
+      </View>
+    </Page>
   );
 }
 
@@ -36,6 +69,7 @@ export function TimeDial({ time, onChange, accent = C.gold }: { time: string; on
     onTouchEnd: () => { backSwipeLock.locked = false; },
     onTouchCancel: () => { backSwipeLock.locked = false; },
   };
+  React.useEffect(() => () => { backSwipeLock.locked = false; }, []);
   const nudge = (d: number) => {
     const total = (hh * 60 + mm + d + 1440) % 1440;
     onChange(`${pad(Math.floor(total / 60))}:${pad(total % 60)}`);
@@ -144,7 +178,7 @@ function RefreshPill({ visible }: { visible: boolean }) {
 // off instead of jumping to the top. Keyed by the caller's `scrollKey`.
 const scrollMemory = new Map<string, number>();
 
-export const Page = React.forwardRef<ScrollView, { children: React.ReactNode; gap?: number; pt?: number; pb?: number; kbAware?: boolean; scrollKey?: string }>(function Page({ children, gap = 22, pt = 8, pb = 92, kbAware = false, scrollKey }, ref) {
+export const Page = React.forwardRef<ScrollView, { children: React.ReactNode; gap?: number; pt?: number; pb?: number; kbAware?: boolean; scrollKey?: string; scrollEnabled?: boolean; scrollOffsetRef?: React.MutableRefObject<number> }>(function Page({ children, gap = 22, pt = 8, pb = 92, kbAware = false, scrollKey, scrollEnabled = true, scrollOffsetRef }, ref) {
   const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = React.useState(false);
   const scrollRef = React.useRef<ScrollView>(null);
@@ -188,8 +222,10 @@ export const Page = React.forwardRef<ScrollView, { children: React.ReactNode; ga
       setTimeout(() => setRefreshing(false), 400);
       return;
     }
-    // Refetch all active queries (live-data screens update; static screens are a no-op).
-    await queryClient.invalidateQueries();
+    // Refetch what is ON SCREEN only. invalidateQueries() with no filter also marked
+    // every inactive query in the 7-day cache stale, so the next visit to any screen
+    // refetched cold — a pull on one page cost dozens of requests app-wide.
+    await queryClient.refetchQueries({ type: 'active' });
     setTimeout(() => setRefreshing(false), 500);
   }, [queryClient]);
   // Restore the saved offset as soon as the content is tall enough to reach it.
@@ -204,16 +240,19 @@ export const Page = React.forwardRef<ScrollView, { children: React.ReactNode; ga
   }, [scrollKey]);
   const onScroll = React.useCallback((e: any) => {
     offsetRef.current = e.nativeEvent.contentOffset.y; // live offset for the kb auto-scroll
+    if (scrollOffsetRef) scrollOffsetRef.current = e.nativeEvent.contentOffset.y; // drag-reorder tracking
     if (scrollKey) scrollMemory.set(scrollKey, e.nativeEvent.contentOffset.y);
-  }, [scrollKey]);
+  }, [scrollKey, scrollOffsetRef]);
   return (
     <View style={{ flex: 1 }}>
       <ScrollView
         ref={scrollRef}
         showsVerticalScrollIndicator={false}
+        scrollEnabled={scrollEnabled}
         onScroll={onScroll}
         onContentSizeChange={scrollKey ? onContentSizeChange : undefined}
-        scrollEventThrottle={64}
+        // 16ms so drag-reorder's offset tracking stays glued to autoscroll
+        scrollEventThrottle={16}
         // iOS: native inset adjustment scrolls the focused input above the keyboard.
         automaticallyAdjustKeyboardInsets
         // First tap on buttons must work while the keyboard is open, everywhere.
@@ -280,7 +319,7 @@ export function TitleBlock({ title, sub }: { title: string; sub?: string }) {
 /* Back link row. */
 export function BackLink({ label, onPress }: { label: string; onPress?: () => void }) {
   return (
-    <Pressable onPress={onPress} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={`Back: ${label}`} hitSlop={8} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
       <Icon name="arrowLeft" size={16} color={C.ink2} strokeWidth={2.2} />
       <Body style={{ fontSize: 14, fontFamily: F.bodySemi }}>{label}</Body>
     </Pressable>
@@ -388,11 +427,15 @@ export function CollapsibleSessionCard({
 }
 
 /* Dual outline action buttons (used in session cards, roster). */
-export function ActionBtn({ label, icon, accent, onPress }: { label: string; icon: any; accent?: boolean; onPress?: () => void }) {
+export function ActionBtn({ label, icon, accent, onPress, disabled }: { label: string; icon: any; accent?: boolean; onPress?: () => void; disabled?: boolean }) {
   return (
     <Pressable
       onPress={onPress}
-      style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 13, borderRadius: 13, borderWidth: 1, borderColor: accent ? hexA(C.orange, 0.35) : 'rgba(255,255,255,0.08)', backgroundColor: accent ? hexA(C.orange, 0.05) : 'rgba(0,0,0,0.35)' }}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled: !!disabled }}
+      style={{ opacity: disabled ? 0.45 : 1, flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 13, borderRadius: 13, borderWidth: 1, borderColor: accent ? hexA(C.orange, 0.35) : 'rgba(255,255,255,0.08)', backgroundColor: accent ? hexA(C.orange, 0.05) : 'rgba(0,0,0,0.35)' }}
     >
       <Icon name={icon} size={15} color={accent ? C.orange : C.ink} strokeWidth={2} />
       <Text style={{ fontFamily: F.bodySemi, fontSize: 13, color: accent ? C.orange : C.ink }}>{label}</Text>

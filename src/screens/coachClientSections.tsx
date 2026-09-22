@@ -131,8 +131,9 @@ const VOL_MIN = 2, VOL_MAX = 6;
 function MonthPicker({ months, used, onSelect, onClose }: { months: string[]; used: Set<string>; onSelect: (m: string) => void; onClose: () => void }) {
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable onPress={onClose} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' }}>
-        <Pressable onPress={() => {}} style={{ maxHeight: '70%', backgroundColor: '#0E0A09', borderTopLeftRadius: 24, borderTopRightRadius: 24, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 16, paddingTop: 12, paddingBottom: 24 }}>
+      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' }}>
+        <Pressable onPress={onClose} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} />
+        <View style={{ maxHeight: '70%', backgroundColor: '#0E0A09', borderTopLeftRadius: 24, borderTopRightRadius: 24, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 16, paddingTop: 12, paddingBottom: 24 }}>
           <View style={{ width: 40, height: 4, borderRadius: 99, backgroundColor: 'rgba(255,255,255,0.2)', alignSelf: 'center', marginBottom: 12 }} />
           <Serif style={{ fontSize: 18, marginBottom: 10 }}>Pick month</Serif>
           <ScrollView showsVerticalScrollIndicator={false}>
@@ -146,8 +147,8 @@ function MonthPicker({ months, used, onSelect, onClose }: { months: string[]; us
               );
             })}
           </ScrollView>
-        </Pressable>
-      </Pressable>
+        </View>
+      </View>
     </Modal>
   );
 }

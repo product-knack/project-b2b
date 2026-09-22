@@ -19,9 +19,13 @@ import {
 } from './screens/trainer';
 import { CreatePlan } from './screens/createPlan';
 import { Payouts } from './screens/payouts';
+import { Referrals } from './screens/referrals';
+import { Incentives } from './screens/incentives';
 import { WorkoutAnalyst } from './screens/workoutAnalyst';
 import { Messenger, ChatNotifications } from './screens/messenger';
 import { ClientThreads } from './screens/clientThreads';
+import { ManagerChat } from './screens/managerChat';
+import { CrmAi } from './screens/crmAi';
 import {
   CrmDashboard, CrmRoadmap, CrmComms,
   CrmApprovals, CrmAssessment, CrmHealth,
@@ -56,8 +60,13 @@ import { AdminDashboard } from './screens/admin';
 import { AdminRevenueForecast } from './screens/adminRevenueForecast';
 import { CrmRevenueForecast } from './screens/crmRevenueForecast';
 import { DoctorDashboard, DoctorSessions, DoctorClients, DoctorAllClients, DoctorRoster, DoctorProtocolApprovals } from './screens/doctor';
+import { TherapistDashboard, TherapistClients, TherapistClientDetail } from './screens/therapist';
 import { DoctorClientDetail } from './screens/doctorClientDetail';
 import { DoctorRehabRecommendation } from './screens/doctorRehabRecommendation';
+import { DoctorReimbursements, DoctorReimbursementReview } from './screens/doctorReimbursements';
+import { ConsultantDashboard } from './screens/consultantDashboard';
+import { ConsultantCalls } from './screens/consultantCalls';
+import { ConsultationJoin } from './screens/consultationJoin';
 import { AdminRenewals } from './screens/adminRenewals';
 import { AdminRequests } from './screens/adminRequests';
 import { AdminIncidents } from './screens/adminIncidents';
@@ -78,8 +87,16 @@ import { AcademyStudent } from './screens/academyStudent';
 import { AcademyDailyGoals, AcademyWeeklySummary } from './screens/academyAnalysers';
 import { AcademySeniorAnalyst } from './screens/academySeniorAnalyst';
 import { MarketingDashboard, MarketingClients, MarketingClientDetail, MarketingLeads, MarketingLeadAnalytics } from './screens/marketing';
+import { TechDesk, TechDeskTicket } from './screens/techDesk';
+import { TechDeskInbox, TechDeskInboxTicket } from './screens/techDeskInbox';
+import { TechDeskAlertBanner } from './components/TechDeskAlerts';
+import { rememberTechRoute } from './lib/techDesk';
 
 const SCREENS: Record<string, React.ComponentType> = {
+  'tech-desk': TechDesk,
+  'tech-desk-ticket': TechDeskTicket,
+  'tech-desk-inbox': TechDeskInbox,
+  'tech-desk-inbox-ticket': TechDeskInboxTicket,
   dashboard: Dashboard,
   clients: Clients,
   client: ClientDetail,
@@ -88,12 +105,16 @@ const SCREENS: Record<string, React.ComponentType> = {
   'create-plan': CreatePlan,
   'workout-analyst': WorkoutAnalyst,
   payouts: Payouts,
+  referrals: Referrals,
+  incentives: Incentives,
   qhp: Qhp,
   'qhp-manager': QhpManager,
   'qhp-stats': QhpStats,
   managers: Managers,
   messenger: Messenger,
   'client-threads': ClientThreads,
+  'manager-chat': ManagerChat,
+  'crm-ai': CrmAi,
   profile: Profile,
   'mgr-dash': MgrDash,
   'trainer-leaderboard': TrainerLeaderboard,
@@ -147,6 +168,13 @@ const SCREENS: Record<string, React.ComponentType> = {
   'ops-qhp-hold': OpsQhpHold,
   'ops-escalations': OpsEscalations,
   'admin-dashboard': AdminDashboard,
+  'therapist-dashboard': TherapistDashboard,
+  'therapist-clients': TherapistClients,
+  'therapist-client-detail': TherapistClientDetail,
+  // Same generic month-sessions screen trainers use — it scopes to the
+  // signed-in user's session_schedule/training_sessions rows, so a therapist
+  // sees their own scheduled/completed/missed sessions.
+  'therapist-sessions': Sessions,
   'doctor-dashboard': DoctorDashboard,
   'doctor-sessions': DoctorSessions,
   'doctor-clients': DoctorClients,
@@ -155,6 +183,13 @@ const SCREENS: Record<string, React.ComponentType> = {
   'doctor-roster': DoctorRoster,
   'doctor-protocol-approvals': DoctorProtocolApprovals,
   'doctor-rehab-recommendation': DoctorRehabRecommendation,
+  'doctor-reimbursements': DoctorReimbursements,
+  'doctor-reimbursement-review': DoctorReimbursementReview,
+  // Consultant doctor: 'doctor-dashboard' forks to this dashboard for a consultant
+  // (DoctorDashboard in screens/doctor.tsx); the alias exists for direct navigation.
+  'doctor-consultant-dashboard': ConsultantDashboard,
+  'doctor-consultant-calls': ConsultantCalls,
+  'doctor-consultation-join': ConsultationJoin,
   'admin-renewals': AdminRenewals,
   'admin-revenue-forecast': AdminRevenueForecast,
   'crm-revenue-forecast': CrmRevenueForecast,
@@ -191,13 +226,22 @@ const SCREENS: Record<string, React.ComponentType> = {
    device. Screen Viewed events still fire, so usage insight is unaffected.
    Everything NOT listed here is replayed normally at 100% sampling. */
 const SENSITIVE_ROUTES = new Set([
+  // Tech Desk — ticket attachments are screenshots of the app and can carry client data
+  'tech-desk', 'tech-desk-ticket', 'tech-desk-inbox', 'tech-desk-inbox-ticket',
   // Trainer — client detail (age scores, QHP, reports, medical), workout form
   // (sleep/nutrition/steps check-in), QHP surfaces
   'client', 'workout', 'qhp', 'qhp-manager', 'qhp-stats', 'qhp-assessment-detail', 'qhp-review',
   // CRM — client detail (medical history, diagnoses, reports), health/QHP/blood pages
-  'crm-client', 'crm-qhp', 'crm-blood', 'crm-health', 'crm-assessment',
+  // + Odds AI (chat answers quote QHP/blood/medical data)
+  'crm-client', 'crm-qhp', 'crm-blood', 'crm-health', 'crm-assessment', 'crm-ai',
   // Doctor — everything clinical (protocols, physio sessions, counselling, findings)
   'doctor-client-detail', 'doctor-sessions', 'doctor-protocol-approvals', 'doctor-rehab-recommendation',
+  // Reimbursements — payment screenshots (bank / UPI details)
+  'doctor-reimbursements', 'doctor-reimbursement-review',
+  // Consultant — bookings, prescriptions, AI notes, meeting summaries, the video call
+  'doctor-consultant-dashboard', 'doctor-consultant-calls', 'doctor-consultation-join',
+  // Therapist — therapy session notes are clinical content
+  'therapist-client-detail',
   // Coach — QHP assessments + progression/age metrics
   'coach-assessments', 'coach-client-overview', 'coach-progression',
   // Ops / Admin / Marketing surfaces that expose health data
@@ -206,11 +250,15 @@ const SENSITIVE_ROUTES = new Set([
   'academy-dashboard', 'academy-management', 'academy-qhp-analyser', 'academy-daily-goals', 'academy-weekly-summary', 'academy-senior-analyst',
   'academy-teacher', 'academy-student',
   // Chats — client health details are routinely discussed in messages
-  'messenger', 'client-threads',
+  'messenger', 'client-threads', 'manager-chat',
 ]);
 
-function RouteScreen({ route }: { route: string }) {
-  const { role } = useStore();
+/* Memoised on (route, role): ScreenHost re-renders on every transition frame
+   end, swipe offset reset and store change, and each of those used to re-create
+   the <Screen /> element and re-render the whole page tree. Now only a real
+   route/role change reaches the screen. `role` is passed in (not read from the
+   store here) so this component subscribes to nothing. */
+const RouteScreen = React.memo(function RouteScreen({ route, role }: { route: string; role: string }) {
   const Screen = SCREENS[route] ?? SCREENS[homeRouteFor(role)] ?? Dashboard;
   const body = (
     <ScreenErrorBoundary resetKey={route}>
@@ -218,7 +266,7 @@ function RouteScreen({ route }: { route: string }) {
     </ScreenErrorBoundary>
   );
   return SENSITIVE_ROUTES.has(route) ? <ReplayShield>{body}</ReplayShield> : body;
-}
+});
 
 const SCREEN_W = Dimensions.get('window').width;
 import { backSwipeLock, backOverride } from './gestureLock';
@@ -230,7 +278,7 @@ import { backSwipeLock, backOverride } from './gestureLock';
 type TState = { layers: { key: number; route: string }[]; anim: 'push' | 'back' | null; prevRoute: string; tid: number };
 
 function ScreenHost({ route }: { route: string }) {
-  const { canGoBack, back, navDir } = useStore();
+  const { canGoBack, back, navDir, role } = useStore();
   const enter = useRef(new Animated.Value(1)).current; // drives the moving (top) layer
   const drag = useRef(new Animated.Value(0)).current;
   const idRef = useRef(0);
@@ -263,9 +311,14 @@ function ScreenHost({ route }: { route: string }) {
     return () => cancelAnimationFrame(raf);
   }, [t.tid]);
 
-  // Reset any swipe offset before the committed target paints.
+  // Reset any swipe offset before the committed target paints. The horizontal-
+  // scroller lock is released here too: a chip row / slider unmounted mid-touch
+  // (realtime re-key, deep link) never fires its onTouchEnd, and a stuck lock
+  // would kill swipe-back for the rest of the session.
   useLayoutEffect(() => {
     drag.setValue(0);
+    backSwipeLock.locked = false;
+    rememberTechRoute(route); // Tech Desk tickets record the screen they were raised from
   }, [route]);
 
   const canBackRef = useRef(canGoBack);
@@ -274,7 +327,7 @@ function ScreenHost({ route }: { route: string }) {
   // Screens where the edge swipe-back is DISABLED — long data-entry forms where an
   // accidental horizontal drag must never navigate away mid-entry. The on-screen
   // back button (and the hardware back button) remain the way out.
-  const NO_SWIPE_BACK = React.useMemo(() => new Set(['workout']), []);
+  const NO_SWIPE_BACK = React.useMemo(() => new Set(['workout', 'create-plan', 'doctor-consultation-join']), []);
   const noSwipeRef = useRef(false);
   noSwipeRef.current = NO_SWIPE_BACK.has(route);
 
@@ -305,6 +358,11 @@ function ScreenHost({ route }: { route: string }) {
               drag.setValue(0);
             } else {
               back();
+              // If back() changed the route, the layout effect above already reset
+              // the offset before paint; if it did NOT (same-route history entry,
+              // empty stack on the dashboard) this is the only thing that brings
+              // the page back on-canvas instead of leaving it translated off-screen.
+              requestAnimationFrame(() => drag.setValue(0));
             }
           });
         } else {
@@ -328,7 +386,7 @@ function ScreenHost({ route }: { route: string }) {
         const isTop = i === t.layers.length - 1;
         return (
           <Animated.View key={l.key} style={[StyleSheet.absoluteFill, isTop ? topStyle : null]}>
-            <RouteScreen route={l.route} />
+            <RouteScreen route={l.route} role={role} />
           </Animated.View>
         );
       })}
@@ -337,7 +395,7 @@ function ScreenHost({ route }: { route: string }) {
 }
 
 export function Router() {
-  const { route, go, set, back, canGoBack, drawerOpen, closeDrawer, aiOpen, closeAi, role, threadViewOpen } = useStore();
+  const { route, go, set, back, canGoBack, drawerOpen, closeDrawer, aiOpen, closeAi, role, threadViewOpen, resetSession } = useStore();
 
   // ---- Screen-capture lockdown (route-aware) ----
   // TEMPORARILY DISABLED (user request 2026-08-05) so the screenshot AUDIT can
@@ -382,6 +440,9 @@ export function Router() {
   // clients-list flash in between. launchChecked gates the session redirect for
   // the few ms the check takes.
   const pendingChatRef = useRef<string | null>(null);
+  // Same holding slot for a Tech Desk push tap: the ticket must open as the FIRST
+  // screen after sign-in resolves, not after a dashboard flash.
+  const pendingTicketRef = useRef<string | null>(null);
   const [launchChecked, setLaunchChecked] = useState(false);
   useEffect(() => {
     (async () => {
@@ -391,7 +452,15 @@ export function Router() {
         const content: any = resp?.notification?.request?.content ?? {};
         const trigger: any = resp?.notification?.request?.trigger ?? {};
         const d: any = { ...((trigger?.remoteMessage?.data as any) || {}), ...((content.data as any) || {}) };
-        if (d?.conversation_id) pendingChatRef.current = String(d.conversation_id);
+        if (d?.conversation_id) {
+          pendingChatRef.current = String(d.conversation_id);
+          // Consumed here: clear it so PushTokenManager's cold-start replay (and any
+          // later remount) never re-opens this thread — e.g. for the NEXT user.
+          if (typeof Notifications.clearLastNotificationResponseAsync === 'function') await Notifications.clearLastNotificationResponseAsync().catch(() => {});
+        } else if (d?.type === 'tech_ticket' && d?.ticket_id) {
+          pendingTicketRef.current = String(d.ticket_id);
+          if (typeof Notifications.clearLastNotificationResponseAsync === 'function') await Notifications.clearLastNotificationResponseAsync().catch(() => {});
+        }
       } catch { /* no notification module / no launch response */ }
       setLaunchChecked(true);
     })();
@@ -409,6 +478,9 @@ export function Router() {
       const s = backState.current;
       if (s.aiOpen) { closeAi(); return true; }
       if (s.drawerOpen) { closeDrawer(); return true; }
+      // A screen-level override (open chat thread, unsaved-plan guard, Workout's
+      // edit-cancel cleanup) wins over popping the route — same as the swipe gesture.
+      if (backOverride.handler) { backOverride.handler(); return true; }
       const home = homeRouteFor(s.role);
       if (s.route === home || s.route === 'signin') return false; // default: background the app
       back(); // pops history, or falls back to the dashboard when the stack is empty
@@ -431,6 +503,14 @@ export function Router() {
         go('messenger', true);
         return;
       }
+      if (pendingTicketRef.current) {
+        // Launched from a Tech Desk push → straight to the ticket, on my side of it.
+        const staff = accountRole === 'tech' || accountRole === 'admin';
+        set({ selectedTicketId: pendingTicketRef.current });
+        pendingTicketRef.current = null;
+        go(staff ? 'tech-desk-inbox-ticket' : 'tech-desk-ticket', true);
+        return;
+      }
       go(homeRouteFor(accountRole), true);
     }
   }, [loading, session, accountRole, launchChecked]);
@@ -440,7 +520,7 @@ export function Router() {
   // showing a "zombie" dashboard — no session → every query disabled (blank
   // pages) and the greeting fell back to a placeholder name.
   useEffect(() => {
-    if (!loading && !session && route !== 'signin') go('signin', true);
+    if (!loading && !session && route !== 'signin') { resetSession(); go('signin', true); }
   }, [loading, session, route]);
 
   if (route === 'signin') {
@@ -460,12 +540,16 @@ export function Router() {
         <OfflineWarmup />
         <PushTokenManager />
         <Header />
+        <TechDeskAlertBanner />
         <View style={{ flex: 1 }}>
           <ScreenHost route={route} />
         </View>
         {/* Floating launcher — overlays the content so the background stays continuous
             (no opaque bottom strip). Hidden on forms with their own submit bar. */}
-        {route !== 'workout' && route !== 'create-plan' && route !== 'messenger' && !threadViewOpen ? (
+        {route !== 'workout' && route !== 'create-plan' && route !== 'messenger' && route !== 'manager-chat'
+          && route !== 'tech-desk-ticket' && route !== 'tech-desk-inbox-ticket' && !threadViewOpen
+          // The consultant pages carry their own bottom pill; the call screen must stay clear.
+          && route !== 'doctor-consultant-calls' && route !== 'doctor-consultant-dashboard' && route !== 'doctor-consultation-join' ? (
           <View pointerEvents="box-none" style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }}>
             <OddsAiBar />
           </View>

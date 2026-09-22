@@ -10,11 +10,13 @@ export const homeRouteFor = (role: string | null | undefined): string =>
   : role === 'ops' ? 'ops-dashboard'
   : role === 'admin' ? 'admin-dashboard'
   : role === 'doctor' ? 'doctor-dashboard'
+  : role === 'therapist' ? 'therapist-dashboard'
   : role === 'marketing' ? 'marketing-dashboard'
   : role === 'academy' ? 'academy-dashboard'
+  : role === 'tech' ? 'tech-desk-inbox'
   : 'dashboard';
 
-export type Role = 'trainer' | 'crm' | 'coach' | 'ops' | 'admin' | 'doctor' | 'marketing' | 'academy';
+export type Role = 'trainer' | 'crm' | 'coach' | 'ops' | 'admin' | 'doctor' | 'therapist' | 'marketing' | 'academy' | 'tech';
 export type SheetKind = 'ack' | 'leave' | 'schedule' | null;
 export type CrmDialog =
   | { kind: 'approve'; id: string }
@@ -76,9 +78,12 @@ type Store = {
   crmSection: string | null; // which CRM workspace section the crm-section route shows
   threadViewOpen: boolean; // a client-thread chat is fullscreen → hide the floating home bar
   workoutTemplatesOpen: boolean; // sidebar "Workout Templates" → dashboard opens the sheet
+  /** Tech Desk: which ticket the detail screens show. */
+  selectedTicketId: string | null;
 
   go: (r: string, reset?: boolean) => void;
   back: () => void;
+  resetSession: () => void; // sign-out / account switch: forget every per-user selection
   openAi: () => void;
   closeAi: () => void;
   set: (patch: Partial<Store>) => void;
@@ -93,8 +98,18 @@ type Store = {
   reject: (id: string) => void;
 };
 
+/* The actions never change identity, so they live in their own context:
+   a component that only needs to navigate / open a sheet can subscribe to
+   `useStoreActions()` and stay untouched by every state change (drawer toggles,
+   tab switches, route pushes) that re-renders every `useStore()` consumer. */
+type StoreActions = Pick<Store,
+  'go' | 'back' | 'set' | 'openClient' | 'openWorkout' | 'openAi' | 'closeAi' | 'setOpenChat' | 'openDrawer' | 'closeDrawer'
+  | 'openSheet' | 'closeSheet' | 'setDialog' | 'toggleRoadmap' | 'toggleOnboard' | 'resetSession' | 'approve' | 'reject'>;
+
 const Ctx = createContext<Store>(null as any);
+const ActionsCtx = createContext<StoreActions>(null as any);
 export const useStore = () => useContext(Ctx);
+export const useStoreActions = () => useContext(ActionsCtx);
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [s, setS] = useState({
@@ -135,6 +150,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     crmSection: null as string | null,
     threadViewOpen: false,
     workoutTemplatesOpen: false,
+    selectedTicketId: null as string | null,
   });
 
   const set = useCallback((patch: any) => setS((prev) => ({ ...prev, ...patch })), []);
@@ -170,22 +186,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
-  const value = useMemo<Store>(
+  // Built once: every action closes over the stable setS/set, never over `s`.
+  const actions = useMemo<StoreActions>(
     () => ({
-      ...s,
-      // Neutral fallbacks only — real names come from the profile query. (These
-      // were prototype placeholders; 'Divya' leaked into the UI whenever the
-      // profile hadn't loaded, looking like the wrong account.)
-      firstName: '',
-      crmFirstName: '',
-      canGoBack: s.history.length > 0,
       go,
       back,
       set,
+      // Same-route dedupe (like go()): two taps in one frame must not push
+      // 'client' onto 'client' — swiping back onto an unchanged route left the
+      // page translated off-canvas.
       openClient: (id: string, name: string, tab?: string) =>
-        setS((prev) => ({ ...prev, selectedClientId: id, selectedClientName: name, clientInitialTab: tab ?? null, route: 'client', navDir: 'push', history: [...prev.history, prev.route], drawerOpen: false, sheet: null })),
+        setS((prev) => ({ ...prev, selectedClientId: id, selectedClientName: name, clientInitialTab: tab ?? null, route: 'client', navDir: 'push', history: prev.route === 'client' ? prev.history : [...prev.history, prev.route], drawerOpen: false, sheet: null })),
       openWorkout: (clientId: string, name: string, modality: string, scheduleId: string | null) =>
-        setS((prev) => ({ ...prev, selectedClientId: clientId, selectedClientName: name, modality: modality || prev.modality, workoutScheduleId: scheduleId, editingOutboxId: null, route: 'workout', navDir: 'push', history: [...prev.history, prev.route], drawerOpen: false, sheet: null })),
+        setS((prev) => ({ ...prev, selectedClientId: clientId, selectedClientName: name, modality: modality || prev.modality, workoutScheduleId: scheduleId, editingOutboxId: null, route: 'workout', navDir: 'push', history: prev.route === 'workout' ? prev.history : [...prev.history, prev.route], drawerOpen: false, sheet: null })),
       openAi: () => set({ aiOpen: true }),
       closeAi: () => set({ aiOpen: false }),
       setOpenChat: (openChatId: string | null) => set({ openChatId }),
@@ -201,11 +214,35 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           return { ...prev, roadmap: r };
         }),
       toggleOnboard: (id: string) => setS((prev) => ({ ...prev, onboardOpen: { ...prev.onboardOpen, [id]: !prev.onboardOpen[id] } })),
+      // Per-user state that must not leak to the next account on this device.
+      resetSession: () => setS((prev) => ({
+        ...prev, history: [], drawerOpen: false, aiOpen: false, sheet: null, crmDialog: null,
+        selectedClientId: null, selectedClientName: null, clientInitialTab: null, workoutScheduleId: null,
+        editingOutboxId: null, editingPlan: null, openChatId: null, crmSection: null, threadViewOpen: false, workoutTemplatesOpen: false, selectedTicketId: null,
+      })),
       approve: (id: string) => setS((prev) => ({ ...prev, crmApproved: { ...prev.crmApproved, [id]: 'forwarded' }, crmDialog: null })),
       reject: (id: string) => setS((prev) => ({ ...prev, crmApproved: { ...prev.crmApproved, [id]: 'parked' }, crmDialog: null })),
     }),
-    [s, go, back, set]
+    [go, back, set]
   );
 
-  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+  const value = useMemo<Store>(
+    () => ({
+      ...s,
+      // Neutral fallbacks only — real names come from the profile query. (These
+      // were prototype placeholders; 'Divya' leaked into the UI whenever the
+      // profile hadn't loaded, looking like the wrong account.)
+      firstName: '',
+      crmFirstName: '',
+      canGoBack: s.history.length > 0,
+      ...actions,
+    }),
+    [s, actions]
+  );
+
+  return (
+    <ActionsCtx.Provider value={actions}>
+      <Ctx.Provider value={value}>{children}</Ctx.Provider>
+    </ActionsCtx.Provider>
+  );
 }

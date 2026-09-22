@@ -4,7 +4,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { C, F, hexA, ORANGE_GRAD } from '../theme';
 import { Icon } from '../icons';
 import { Serif, Body, Mono } from '../components/primitives';
-import { Page, Badge, AnimChip, HScroll } from './common';
+import { Page, Badge, AnimChip, HScroll, AccessPending } from './common';
 import { useAuth } from '../auth';
 import { useEscalations, ESC_META, ESC_TYPES, TIER_META, EscalationType, EscalationRow } from '../lib/escalationQueries';
 import { SheetShell } from './reportDetail';
@@ -48,7 +48,9 @@ export function CrmEsc() {
   // CRM Manager only (web: role_specialization includes crm_manager) — regular
   // CRMs never see the sidebar entry, and direct navigation is blocked here too.
   const caps = useMyCapabilities();
-  if (!caps.isLoading && !caps.data.isCrmManager) {
+  // Unknown (loading / paused offline / errored) is not "denied".
+  if (caps.isPending || caps.isError) return <AccessPending paused={caps.isPaused} error={caps.isError} onRetry={caps.refetch} />;
+  if (!caps.data.isCrmManager) {
     return (
       <Page gap={14} pt={6}>
         <View style={{ alignItems: 'center', gap: 12, paddingVertical: 60 }}>

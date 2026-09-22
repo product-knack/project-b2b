@@ -14,9 +14,11 @@ import { SessionActionSheet } from './crmRoster';
 import { RosterSession } from '../lib/rosterQueries';
 import {
   useCrmClientDetail, usePackageCycle, useCrmClientSessions, useTrainingFrequency, useClientWorkoutLog,
-  useClientComms, useLogCommunication, useMarkCommDone, useSetClientStatus,
+  useClientComms, useLogCommunication, useMarkCommDone, useSetClientStatus, useToggleIrregularClient, readIrregularMark,
   COMM_CATEGORIES, COMM_STATUSES, COMM_MEDIUMS, FREQ_PERIODS, FreqPeriod, SessionCategory,
+  uploadCrmVoiceNote, transcribeCrmVoiceNote, removeCrmVoiceNote, useSignedVoiceUrl, VOICE_MAX_MS,
 } from '../lib/crmClientQueries';
+import { useVoiceRecorder, VoiceTapButton, VoicePlayer, RecordedVoice } from '../components/VoiceNote';
 import {
   useClientWhoop, useClientHeartMath, useClientNutritionMonth,
   useClientMedicalHistory, useClientDiagnoses, useBookConsultation, useClientAssessments,
@@ -80,7 +82,7 @@ function ChipRow({ items, sel, onSel, color = C.orange }: { items: readonly stri
 }
 function GradientBtn({ label, onPress, disabled, busy }: { label: string; onPress: () => void; disabled?: boolean; busy?: boolean }) {
   return (
-    <Pressable onPress={onPress} disabled={disabled || busy} style={{ opacity: disabled || busy ? 0.5 : 1 }}>
+    <Pressable onPress={onPress} disabled={disabled || busy} style={({ pressed }) => ({ opacity: disabled || busy ? 0.5 : pressed ? 0.75 : 1 })}>
       <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ alignItems: 'center', paddingVertical: 12, borderRadius: 12 }}>
         <Text style={{ fontFamily: F.bodyBold, fontSize: 13.5, color: '#fff' }}>{busy ? 'Working…' : label}</Text>
       </LinearGradient>
@@ -201,18 +203,30 @@ export function CrmClientDetail() {
   const isActive = (client?.status ?? 'active') === 'active';
   const pkg = pkgQ.data;
   const activePause = pauseQ.data;
+  // Irregular client flag (clients.irregular_client jsonb, RPC-only writes).
+  const irregularM = useToggleIrregularClient();
+  const irregular = readIrregularMark(client?.irregular_client);
+  const toggleIrregular = () => {
+    if (!client || irregularM.isPending) return;
+    const marking = !irregular?.marked;
+    Alert.alert(marking ? 'Mark as irregular client?' : 'Remove irregular mark?',
+      marking ? `${name} will be flagged as an irregular client. The time and your name are recorded.` : `${name} will no longer be flagged as irregular.`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: marking ? 'Mark irregular' : 'Remove mark', style: marking ? 'destructive' : 'default', onPress: () => irregularM.mutate({ clientId: client.id }, { onError: (e: any) => Alert.alert("Couldn't update", e?.message ?? 'Try again.') }) },
+    ]);
+  };
 
   const toggleStatus = () => {
     if (!client || !crmId) return;
     if (isActive) { setInactivating(true); return; }
     Alert.alert('Reactivate client?', `${name} will be marked active again.`, [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Mark Active', onPress: () => statusM.mutate({ clientId: client.id, crmId, toStatus: 'active', crmName: profileQ.data?.firstName }) },
+      { text: 'Mark Active', onPress: () => statusM.mutate({ clientId: client.id, crmId, toStatus: 'active', crmName: profileQ.data?.firstName }, { onError: (e: any) => Alert.alert("Couldn't update status", e?.message ?? "Try again.") }) },
     ]);
   };
   const confirmInactive = () => {
     if (!client || !crmId || !inactiveReason.trim()) return;
-    statusM.mutate({ clientId: client.id, crmId, toStatus: 'inactive', reason: inactiveReason.trim(), crmName: profileQ.data?.firstName });
+    statusM.mutate({ clientId: client.id, crmId, toStatus: 'inactive', reason: inactiveReason.trim(), crmName: profileQ.data?.firstName }, { onError: (e: any) => Alert.alert("Couldn't update status", e?.message ?? "Try again.") });
     setInactivating(false);
     setInactiveReason('');
   };
@@ -277,6 +291,19 @@ export function CrmClientDetail() {
               {activePause ? <Badge text="Paused" color={C.purple} /> : null}
               <ServicesButton subscriptionType={d!.subscription} />
             </View>
+            {/* Irregular client toggle: red when marked, shows since-date + who marked it. */}
+            <Pressable onPress={toggleIrregular} disabled={irregularM.isPending} accessibilityRole="switch" accessibilityState={{ checked: !!irregular?.marked }} hitSlop={10}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, paddingHorizontal: 11, borderRadius: 12, backgroundColor: irregular?.marked ? hexA(C.red, 0.12) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: irregular?.marked ? hexA(C.red, 0.45) : 'rgba(255,255,255,0.09)', opacity: irregularM.isPending ? 0.6 : 1 }}>
+              <View style={{ width: 38, height: 22, borderRadius: 11, padding: 3, backgroundColor: irregular?.marked ? hexA(C.red, 0.35) : 'rgba(255,255,255,0.1)', alignItems: irregular?.marked ? 'flex-end' : 'flex-start' }}>
+                <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: irregular?.marked ? C.red : C.muted2 }} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontFamily: F.bodySemi, fontSize: 12.5, color: irregular?.marked ? C.red : C.muted }}>{irregular?.marked ? 'Irregular client' : 'Mark as irregular client'}</Text>
+                {irregular?.marked && irregular.at ? (
+                  <Mono style={{ fontSize: 7.5, letterSpacing: 0.5, color: C.muted3, marginTop: 2 }}>SINCE {istD(irregular.at).toUpperCase()}{irregular.by_name ? ` · BY ${irregular.by_name.toUpperCase()}` : ''}</Mono>
+                ) : null}
+              </View>
+            </Pressable>
             {(client.phone || client.location) ? (
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                 {client.phone ? (
@@ -380,7 +407,7 @@ export function CrmClientDetail() {
                           <Pressable
                             key={s.key}
                             disabled={journeyToggleM.isPending || !crmId}
-                            onPress={() => journeyToggleM.mutate({ crmId: crmId!, clientId: client.id, stepKey: s.key, value: !done })}
+                            onPress={() => journeyToggleM.mutate({ crmId: crmId!, clientId: client.id, stepKey: s.key, value: !done }, { onError: (e: any) => Alert.alert("Couldn't update step", e?.message ?? "Try again.") })}
                             style={{ flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 8, paddingHorizontal: 10, borderRadius: 10, backgroundColor: done ? hexA(C.green, 0.05) : hexA(C.gold, 0.05), borderWidth: 1, borderColor: done ? hexA(C.green, 0.16) : hexA(C.gold, 0.22), opacity: journeyToggleM.isPending && !busy ? 0.6 : 1 }}
                           >
                             <View style={{ width: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: done ? hexA(C.green, 0.18) : 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: done ? hexA(C.green, 0.5) : hexA(C.gold, 0.4) }}>
@@ -466,7 +493,7 @@ export function CrmClientDetail() {
               <View style={{ gap: 7 }}>
                 <Mono style={{ fontSize: 8.5, letterSpacing: 0.7, color: C.muted3 }}>ASSIGNED TEAM</Mono>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                  {d!.trainers.map((t) => <Badge key={t.id} text={`${t.name} · Trainer`} color={C.orange} />)}
+                  {d!.trainers.map((t) => <Badge key={t.id} text={`${t.name} · ${t.role === 'doctor' ? 'Doctor' : t.role === 'therapist' ? 'Therapist' : 'Trainer'}`} color={t.role === 'trainer' ? C.orange : C.blue} />)}
                   {d!.crms.map((t) => <Badge key={t.id} text={`${t.name} · CRM`} color={C.gold} />)}
                 </View>
               </View>
@@ -764,6 +791,14 @@ function SessionsTab({ clientId }: { clientId: string }) {
 }
 
 /* ---------- Comms (log form + history) ---------- */
+/* ---------- Voice memo on a communication (web parity, 15 Sep 2026) ----------
+   Tap to record (up to 5 min), stop → the take uploads to crm-voice-notes, the
+   edge function transcribes it and the text lands in Remarks (still editable),
+   then Save writes voice_note_path + voice_note_duration_sec with the row. A
+   memo removed or abandoned before Save is deleted from the bucket again. */
+type MemoStage = 'uploading' | 'transcribing' | 'ready' | 'failed';
+type Memo = RecordedVoice & { path: string | null; stage: MemoStage; transcript: string | null; error: string | null };
+
 function CommsTab({ clientId, crmId, formOpen, setFormOpen }: { clientId: string; crmId: string | null; formOpen: boolean; setFormOpen: (v: boolean) => void }) {
   const commsQ = useClientComms(clientId);
   const logM = useLogCommunication();
@@ -773,13 +808,74 @@ function CommsTab({ clientId, crmId, formOpen, setFormOpen }: { clientId: string
   const [medium, setMedium] = React.useState<string | null>('phone');
   const [remarks, setRemarks] = React.useState('');
   const [followDays, setFollowDays] = React.useState<number | null>(null);
+  const [memo, setMemo] = React.useState<Memo | null>(null);
+  // Mirrors of the memo for async callbacks and the unmount sweep; seq ignores
+  // results from a take the CRM already threw away.
+  const memoRef = React.useRef<Memo | null>(null); memoRef.current = memo;
+  const seqRef = React.useRef(0);
+  React.useEffect(() => () => { const m = memoRef.current; if (m?.path) removeCrmVoiceNote(m.path); }, []);
+
+  const appendTranscript = (text: string) => setRemarks((r) => (r.trim() ? `${r.trimEnd()}\n${text}` : text));
+  const transcribe = async (seq: number, path: string, mime: string) => {
+    try {
+      const text = await transcribeCrmVoiceNote(path, mime);
+      if (seq !== seqRef.current) return;
+      if (text) appendTranscript(text);
+      setMemo((m) => m && { ...m, stage: 'ready', transcript: text, error: null });
+    } catch (e: any) {
+      if (seq !== seqRef.current) return;
+      setMemo((m) => m && { ...m, stage: 'ready', transcript: null, error: e?.message ?? 'Transcription failed' });
+    }
+  };
+  const onRecorded = async (f: RecordedVoice) => {
+    if (!crmId) return;
+    const seq = ++seqRef.current;
+    setMemo({ ...f, path: null, stage: 'uploading', transcript: null, error: null });
+    try {
+      const path = await uploadCrmVoiceNote(clientId, crmId, f);
+      if (seq !== seqRef.current) { removeCrmVoiceNote(path); return; } // discarded while uploading
+      setMemo((m) => m && { ...m, path, stage: 'transcribing' });
+      await transcribe(seq, path, f.mime);
+    } catch (e: any) {
+      if (seq !== seqRef.current) return;
+      setMemo((m) => m && { ...m, stage: 'failed', error: e?.message ?? 'Upload failed' });
+    }
+  };
+  const rec = useVoiceRecorder(onRecorded, { maxMs: VOICE_MAX_MS });
+  const retryMemo = () => {
+    const m = memoRef.current; if (!m) return;
+    if (m.path) { const seq = ++seqRef.current; setMemo({ ...m, stage: 'transcribing', error: null }); transcribe(seq, m.path, m.mime); }
+    else onRecorded(m);
+  };
+  const removeMemo = () => {
+    const m = memoRef.current; seqRef.current++;
+    if (m?.path) removeCrmVoiceNote(m.path);
+    setMemo(null);
+  };
+  const memoBusy = !!memo && (memo.stage === 'uploading' || memo.stage === 'transcribing');
+  const memoStuck = !!memo && memo.stage === 'failed'; // no object in the bucket yet: retry or remove first
+  const resetForm = () => { setFormOpen(false); setRemarks(''); setFollowDays(null); setStatus('Follow Up Done'); setMemo(null); };
+  const closeForm = () => {
+    if (rec.recording) rec.finish(false);
+    if (!memo) { resetForm(); return; }
+    Alert.alert('Discard this communication?', 'The recorded voice memo will be deleted.', [
+      { text: 'Keep editing', style: 'cancel' },
+      { text: 'Discard', style: 'destructive', onPress: () => { removeMemo(); resetForm(); } },
+    ]);
+  };
 
   const submit = async () => {
-    if (!crmId || !remarks.trim()) return;
+    if (!crmId || !remarks.trim() || memoBusy || memoStuck) return;
     const followUpDate = followDays != null ? new Date(Date.now() + followDays * 864e5).toISOString() : null;
+    const saved = memoRef.current;
     try {
-      await logM.mutateAsync({ crmId, clientId, category: cat, status, medium, remarks, followUpDate });
-      setFormOpen(false); setRemarks(''); setFollowDays(null); setStatus('Follow Up Done');
+      await logM.mutateAsync({
+        crmId, clientId, category: cat, status, medium, remarks, followUpDate,
+        voiceNotePath: saved?.path ?? null,
+        voiceNoteDurationSec: saved?.path ? Math.max(1, Math.round(saved.durationMs / 1000)) : null,
+      });
+      memoRef.current = null; // now owned by the row: the unmount sweep must not delete it
+      resetForm();
     } catch (e: any) { Alert.alert("Couldn't log", e?.message ?? 'Try again.'); }
   };
 
@@ -797,7 +893,7 @@ function CommsTab({ clientId, crmId, formOpen, setFormOpen }: { clientId: string
         <View style={{ padding: 12, borderRadius: 14, backgroundColor: hexA(C.orange, 0.06), borderWidth: 1, borderColor: hexA(C.orange, 0.28), gap: 10 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
             <Mono style={{ flex: 1, fontSize: 9.5, letterSpacing: 1, color: C.orange }}>NEW COMMUNICATION</Mono>
-            <Pressable onPress={() => setFormOpen(false)} hitSlop={8}><Icon name="close" size={14} color={C.muted} strokeWidth={2.3} /></Pressable>
+            <Pressable onPress={closeForm} hitSlop={10} style={{ width: 30, height: 30, alignItems: 'center', justifyContent: 'center' }}><Icon name="close" size={14} color={C.muted} strokeWidth={2.3} /></Pressable>
           </View>
           <Mono style={{ fontSize: 8.5, letterSpacing: 0.7, color: C.muted3 }}>CATEGORY</Mono>
           <ChipRow items={COMM_CATEGORIES} sel={cat} onSel={setCat} />
@@ -807,6 +903,48 @@ function CommsTab({ clientId, crmId, formOpen, setFormOpen }: { clientId: string
           <ChipRow items={COMM_MEDIUMS} sel={medium ?? ''} onSel={(v) => setMedium(v)} color={C.green} />
           <Mono style={{ fontSize: 8.5, letterSpacing: 0.7, color: C.muted3 }}>REMARKS *</Mono>
           <TextInput value={remarks} onChangeText={setRemarks} placeholder="What was discussed?" placeholderTextColor={C.muted3} multiline style={[INPUT, { minHeight: 60, textAlignVertical: 'top' }]} />
+          <Mono style={{ fontSize: 8.5, letterSpacing: 0.7, color: C.muted3 }}>VOICE MEMO</Mono>
+          {!memo ? (
+            <>
+              <VoiceTapButton recording={rec.recording} recMs={rec.recMs} maxMs={VOICE_MAX_MS} onStart={rec.start} onStop={() => rec.finish(true)} accent={C.purple} />
+              {!rec.recording ? <Body style={{ fontSize: 10.5, color: C.muted3 }}>Speak the note. It is transcribed into Remarks and saved with the entry so the team can listen later.</Body> : null}
+            </>
+          ) : (
+            <View style={{ padding: 10, borderRadius: 12, backgroundColor: hexA(C.purple, 0.07), borderWidth: 1, borderColor: hexA(C.purple, 0.3), gap: 6 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <View style={{ flex: 1 }}>
+                  <VoicePlayer url={memo.uri} accent={C.purple} label="MEMO" knownMs={memo.durationMs} />
+                </View>
+                <Pressable onPress={removeMemo} hitSlop={10} accessibilityRole="button" accessibilityLabel="Remove voice memo" style={{ width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: hexA(C.red, 0.1), borderWidth: 1, borderColor: hexA(C.red, 0.35) }}>
+                  <Icon name="trash" size={13} color={C.red} strokeWidth={2.2} />
+                </Pressable>
+              </View>
+              {memo.stage === 'uploading' || memo.stage === 'transcribing' ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+                  <ActivityIndicator size="small" color={C.purple} />
+                  <Mono style={{ fontSize: 9, letterSpacing: 0.6, color: C.purple }}>{memo.stage === 'uploading' ? 'UPLOADING…' : 'TRANSCRIBING…'}</Mono>
+                </View>
+              ) : memo.stage === 'failed' ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <Body style={{ flex: 1, fontSize: 11, color: C.red }}>Upload failed: {memo.error}</Body>
+                  <Pressable onPress={retryMemo} hitSlop={8} style={{ paddingVertical: 5, paddingHorizontal: 10, borderRadius: 999, backgroundColor: hexA(C.purple, 0.14), borderWidth: 1, borderColor: hexA(C.purple, 0.4) }}>
+                    <Text style={{ fontFamily: F.bodyBold, fontSize: 10.5, color: C.purple }}>Retry</Text>
+                  </Pressable>
+                </View>
+              ) : memo.error ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <Body style={{ flex: 1, fontSize: 11, color: C.gold }}>Memo saved, transcription failed: {memo.error}. Type the remark, or retry.</Body>
+                  <Pressable onPress={retryMemo} hitSlop={8} style={{ paddingVertical: 5, paddingHorizontal: 10, borderRadius: 999, backgroundColor: hexA(C.purple, 0.14), borderWidth: 1, borderColor: hexA(C.purple, 0.4) }}>
+                    <Text style={{ fontFamily: F.bodyBold, fontSize: 10.5, color: C.purple }}>Retry</Text>
+                  </Pressable>
+                </View>
+              ) : memo.transcript ? (
+                <Body style={{ fontSize: 10.5, color: C.green }}>Transcribed into Remarks. Edit the text if anything was misheard.</Body>
+              ) : (
+                <Body style={{ fontSize: 10.5, color: C.gold }}>No clear speech detected. The memo is still attached; type the remark.</Body>
+              )}
+            </View>
+          )}
           <Mono style={{ fontSize: 8.5, letterSpacing: 0.7, color: C.muted3 }}>FOLLOW-UP</Mono>
           <View style={{ flexDirection: 'row', gap: 6 }}>
             {([[null, 'None'], [1, '+1 day'], [3, '+3 days'], [7, '+7 days']] as [number | null, string][]).map(([v, lbl]) => {
@@ -818,7 +956,7 @@ function CommsTab({ clientId, crmId, formOpen, setFormOpen }: { clientId: string
               );
             })}
           </View>
-          <GradientBtn label="Save Communication" onPress={submit} disabled={!remarks.trim()} busy={logM.isPending} />
+          <GradientBtn label={memo?.path ? 'Save with Voice Memo' : 'Save Communication'} onPress={submit} disabled={!remarks.trim() || memoBusy || memoStuck || rec.recording} busy={logM.isPending} />
         </View>
       )}
       {commsQ.isLoading ? <Empty text="Loading…" />
@@ -834,10 +972,11 @@ function CommsTab({ clientId, crmId, formOpen, setFormOpen }: { clientId: string
                 {cm.overdue ? <Badge text="Overdue" color={C.red} /> : null}
               </View>
               {cm.remarks ? <Body style={{ fontSize: 12.5, color: C.ink3 }}>{cm.remarks}</Body> : null}
+              {cm.voicePath ? <CrmVoicePlayer path={cm.voicePath} sec={cm.voiceSec} /> : null}
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 {cm.followUp ? <Body style={{ flex: 1, fontSize: 10.5, color: C.muted3 }}>Follow-up {istD(cm.followUp)}{cm.medium ? ` · ${cm.medium}` : ''}</Body> : <View style={{ flex: 1 }} />}
                 {cm.status !== 'Follow Up Done' ? (
-                  <Pressable onPress={() => doneM.mutate({ id: cm.id, clientId })} style={{ paddingVertical: 5, paddingHorizontal: 10, borderRadius: 999, backgroundColor: hexA(C.green, 0.12), borderWidth: 1, borderColor: hexA(C.green, 0.35) }}>
+                  <Pressable disabled={doneM.isPending} onPress={() => doneM.mutate({ id: cm.id, clientId }, { onError: (e: any) => Alert.alert("Couldn't mark done", e?.message ?? "Try again.") })} style={{ opacity: doneM.isPending ? 0.5 : 1, paddingVertical: 5, paddingHorizontal: 10, borderRadius: 999, backgroundColor: hexA(C.green, 0.12), borderWidth: 1, borderColor: hexA(C.green, 0.35) }}>
                     <Text style={{ fontFamily: F.bodyBold, fontSize: 10.5, color: C.green }}>Mark Done</Text>
                   </Pressable>
                 ) : null}
@@ -847,6 +986,13 @@ function CommsTab({ clientId, crmId, formOpen, setFormOpen }: { clientId: string
         })}
     </TabCard>
   );
+}
+
+/** Saved memo on a logged communication: signs the private path for an hour, then plays it. */
+export function CrmVoicePlayer({ path, sec }: { path: string; sec: number | null }) {
+  const urlQ = useSignedVoiceUrl(path);
+  if (urlQ.isError) return <Body style={{ fontSize: 10.5, color: C.muted3 }}>Voice memo unavailable.</Body>;
+  return <VoicePlayer url={urlQ.data ?? null} accent={C.purple} label="VOICE MEMO" knownMs={sec ? sec * 1000 : null} />;
 }
 
 /* ---------- Health (Whoop + HeartMath + Nutrition month) ---------- */
@@ -1660,7 +1806,7 @@ function AssignSheet({ visible, onClose, clientId }: { visible: boolean; onClose
     );
   };
   return (
-    <SheetShell visible={visible} onClose={onClose} accent={C.orange} icon="userPlus" title="Assign Team" subtitle="TRAINERS & DOCTORS">
+    <SheetShell visible={visible} onClose={onClose} accent={C.orange} icon="userPlus" title="Assign Team" subtitle="TRAINERS, DOCTORS & THERAPISTS">
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 13, borderRadius: 13, backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' }}>
         <Icon name="search" size={15} color={C.muted3} strokeWidth={2} />
         <TextInput value={query} onChangeText={setQuery} placeholder="Search staff…" placeholderTextColor={C.muted3} autoCorrect={false} style={{ flex: 1, fontFamily: F.body, fontSize: 13.5, color: '#fff', padding: 0 }} />
@@ -1669,7 +1815,7 @@ function AssignSheet({ visible, onClose, clientId }: { visible: boolean; onClose
         const active = rows.get(s.id)?.actively_training === true;
         return (
           <Pressable key={s.id} onPress={() => toggle(s.id)} disabled={toggleM.isPending} style={{ flexDirection: 'row', alignItems: 'center', gap: 11, padding: 12, borderRadius: 13, backgroundColor: active ? hexA(C.orange, 0.09) : 'rgba(0,0,0,0.22)', borderWidth: 1, borderColor: active ? hexA(C.orange, 0.4) : 'rgba(255,255,255,0.07)' }}>
-            <MiniAvatar initial={initials(s.name)} colors={s.role === 'doctor' ? AVS[3] : AVS[0]} size={36} />
+            <MiniAvatar initial={initials(s.name)} colors={s.role === 'doctor' || s.role === 'therapist' ? AVS[3] : AVS[0]} size={36} />
             <View style={{ flex: 1 }}>
               <Body style={{ fontSize: 13.5, fontFamily: F.bodySemi, color: '#fff' }}>{s.name}</Body>
               <Mono style={{ fontSize: 8.5, color: C.muted3, marginTop: 1 }}>{s.role.toUpperCase()}</Mono>
@@ -1706,7 +1852,7 @@ function InsightSheet({ visible, onClose, clientId, clientName }: { visible: boo
       ) : insightM.isError ? (
         <>
           <Empty text={`Couldn't generate insight: ${(insightM.error as any)?.message ?? 'service unavailable'}`} />
-          <GradientBtn label="Retry" onPress={() => insightM.mutate(clientId)} />
+          <GradientBtn label="Retry" busy={insightM.isPending} onPress={() => { if (!insightM.isPending) insightM.mutate(clientId); }} />
         </>
       ) : data ? (
         <>

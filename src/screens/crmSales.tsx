@@ -55,7 +55,7 @@ function TargetCard({ t }: { t: SalesTarget }) {
         <Badge text={t.status === 'open' ? (t.overdue ? 'Overdue' : t.closingSoon ? 'Closing Soon' : 'Open') : t.status === 'won' ? 'Won' : 'Lost'} color={col} />
         <View style={{ flex: 1 }} />
         {t.opsNotes.length ? (
-          <Pressable onPress={() => setNotesOpen(!notesOpen)} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 4, paddingHorizontal: 9, borderRadius: 999, backgroundColor: hexA(C.purple, 0.1), borderWidth: 1, borderColor: hexA(C.purple, 0.35) }}>
+          <Pressable onPress={() => setNotesOpen(!notesOpen)} hitSlop={8} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 6, paddingHorizontal: 9, borderRadius: 999, backgroundColor: hexA(C.purple, 0.1), borderWidth: 1, borderColor: hexA(C.purple, 0.35) }}>
             <Icon name="bubble" size={10} color={C.purple} strokeWidth={2.2} />
             <Text style={{ fontFamily: F.bodyBold, fontSize: 10, color: C.purple }}>{t.opsNotes.length}</Text>
           </Pressable>
@@ -100,7 +100,7 @@ function TargetCard({ t }: { t: SalesTarget }) {
           </View>
         )
       ) : (
-        <Pressable onPress={reopen} style={{ alignSelf: 'flex-start', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 999, backgroundColor: hexA(C.blue, 0.1), borderWidth: 1, borderColor: hexA(C.blue, 0.35) }}>
+        <Pressable disabled={updateM.isPending} onPress={reopen} style={{ opacity: updateM.isPending ? 0.5 : 1, alignSelf: 'flex-start', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 999, backgroundColor: hexA(C.blue, 0.1), borderWidth: 1, borderColor: hexA(C.blue, 0.35) }}>
           <Text style={{ fontFamily: F.bodyBold, fontSize: 10.5, color: C.blue }}>Reopen</Text>
         </Pressable>
       )}

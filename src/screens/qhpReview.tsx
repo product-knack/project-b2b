@@ -1,10 +1,10 @@
 import React from 'react';
-import { View, Text, Pressable, TextInput, ActivityIndicator, Modal, ScrollView, Linking } from 'react-native';
+import { View, Text, Pressable, TextInput, ActivityIndicator, Modal, ScrollView, Linking, Keyboard, Platform } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { C, F, hexA, ORANGE_GRAD } from '../theme';
 import { Icon, IconName } from '../icons';
 import { Serif, Body, Mono, Card, Avatar } from '../components/primitives';
-import { Page, TitleBlock, Badge, HScroll } from './common';
+import { Page, TitleBlock, Badge, HScroll, AccessPending } from './common';
 import { useAuth } from '../auth';
 import { useMyCapabilities } from '../lib/capabilities';
 import { PdfPreview } from '../components/PdfPreview';
@@ -90,6 +90,16 @@ function ReviewSheet({ row, onClose }: { row: QhpReviewRow; onClose: () => void 
   const holdAsHod = canSignHod;
   const busy = signSenior.isPending || signHod.isPending || hold.isPending;
   const fail = (e: any) => setErr(e?.message ?? 'Action failed.');
+  // Keyboard-aware bottom padding: the hold-note input lives at the sheet's foot
+  // and the keyboard covered it (and its Send button) on small screens.
+  const [kb, setKb] = React.useState(0);
+  React.useEffect(() => {
+    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const sh = Keyboard.addListener(showEvt, (e: any) => setKb(e.endCoordinates?.height ?? 0));
+    const hd = Keyboard.addListener(hideEvt, () => setKb(0));
+    return () => { sh.remove(); hd.remove(); };
+  }, []);
 
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
@@ -108,7 +118,7 @@ function ReviewSheet({ row, onClose }: { row: QhpReviewRow; onClose: () => void 
             </Pressable>
           </View>
 
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingBottom: 8 }}>
+          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 12, paddingBottom: 8 + kb }}>
             {/* Meta grid */}
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
               {(([['CREATED BY (JUNIOR RESEARCHER)', row.creatorName], ['CREATED AT', fmtAt(row.createdAt)]]) as [string, string][]).map(([lab, val]) => (
@@ -273,7 +283,9 @@ export function QhpReviewCenter() {
   const missing = missingQ.data ?? [];
   const roleLabel = canSenior && !canHod ? 'Senior Researcher' : canHod && !canSenior ? 'HOD' : 'Reviewer';
 
-  if (!caps.isLoading && !allowed) {
+  // Unknown (loading / paused offline / errored) is not "denied".
+  if (caps.isPending || caps.isError) return <AccessPending paused={caps.isPaused} error={caps.isError} onRetry={caps.refetch} />;
+  if (!allowed) {
     return (
       <Page gap={14}>
         <TitleBlock title="QHP Report Review" sub="Two-stage review queue" />

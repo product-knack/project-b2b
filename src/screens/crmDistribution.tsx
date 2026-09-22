@@ -132,7 +132,7 @@ export function CrmDistribution() {
                   {DIST_CATEGORIES.map((cat) => {
                     const active = current === cat.id;
                     return (
-                      <AnimChip key={cat.id} grow active={active} disabled={active} onPress={() => assign(c.id, cat.id)} style={{ alignItems: 'center', paddingVertical: 8, borderRadius: 10, backgroundColor: active ? hexA(cat.color, 0.18) : 'rgba(255,255,255,0.035)', borderWidth: 1, borderColor: active ? hexA(cat.color, 0.55) : 'rgba(255,255,255,0.08)' }}>
+                      <AnimChip key={cat.id} grow active={active} disabled={active || upsertM.isPending} onPress={() => assign(c.id, cat.id)} style={{ alignItems: 'center', paddingVertical: 8, borderRadius: 10, backgroundColor: active ? hexA(cat.color, 0.18) : 'rgba(255,255,255,0.035)', borderWidth: 1, borderColor: active ? hexA(cat.color, 0.55) : 'rgba(255,255,255,0.08)' }}>
                         <Text numberOfLines={1} style={{ fontFamily: active ? F.bodyBold : F.bodySemi, fontSize: 9.5, color: active ? cat.color : C.muted }}>{cat.label}</Text>
                       </AnimChip>
                     );

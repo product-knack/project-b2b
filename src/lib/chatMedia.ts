@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { uploadWithTimeout } from './withTimeout';
 import { uuidv4 } from './clientQueries';
 
 /* ============ Chat media upload (mirrors the web chatMediaUpload contract) ============
@@ -34,7 +35,7 @@ export async function uploadChatMedia(asset: PickedAsset, conversationId: string
   const res = await fetch(asset.uri);
   const buf = await res.arrayBuffer();
 
-  const { error } = await supabase.storage.from('chat-media').upload(path, buf, { contentType: asset.mime, upsert: false });
+  const { error } = await uploadWithTimeout('chat-media', path, buf, { contentType: asset.mime, upsert: false });
   if (error) throw new Error(error.message);
 
   const { data, error: se } = await supabase.storage.from('chat-media').createSignedUrl(path, SIGNED_URL_TTL);

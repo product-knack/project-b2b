@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, Pressable, TextInput, ActivityIndicator, Modal, ScrollView } from 'react-native';
+import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import { LinearGradient } from 'expo-linear-gradient';
 import { C, F, hexA, ORANGE_GRAD } from '../theme';
 import { Icon } from '../icons';
@@ -15,6 +16,7 @@ const gradeColor = (g: string | null) => (g === 'A' ? C.green : g === 'B' ? C.bl
 const inpSt = { borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', paddingHorizontal: 11, paddingVertical: 10, color: '#fff', fontFamily: F.body, fontSize: 13 } as const;
 
 function CertFormSheet({ existing, onClose }: { existing: Certification | null; onClose: () => void }) {
+  const kb = useKeyboardHeight(); // Android edge-to-edge: lift the sheet above the keyboard
   const save = useSaveCertification();
   const trainersQ = useCertTrainers();
   const [trainerId, setTrainerId] = React.useState<string | null>(existing?.trainer_id ?? null);
@@ -41,7 +43,7 @@ function CertFormSheet({ existing, onClose }: { existing: Certification | null; 
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.62)', justifyContent: 'flex-end' }}>
-        <View style={{ maxHeight: '92%', backgroundColor: '#0E0A09', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 14, paddingBottom: 24 }}>
+        <View style={{ maxHeight: '92%', backgroundColor: '#0E0A09', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 14, paddingBottom: kb > 0 ? kb + 14 : 24 }}>
           <View style={{ width: 40, height: 4, borderRadius: 99, backgroundColor: 'rgba(255,255,255,0.2)', alignSelf: 'center', marginBottom: 12 }} />
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9, marginBottom: 10 }}>
             <Serif style={{ flex: 1, fontSize: 18 }}>{existing ? 'Edit Certification' : 'Add New Certification'}</Serif>
@@ -61,7 +63,7 @@ function CertFormSheet({ existing, onClose }: { existing: Certification | null; 
                   <Icon name="search" size={12} color={C.muted3} strokeWidth={2} />
                   <TextInput value={search} onChangeText={setSearch} placeholder="Search…" placeholderTextColor={C.muted3} style={{ flex: 1, fontFamily: F.body, fontSize: 12, color: '#fff', padding: 0 }} />
                 </View>
-                <ScrollView style={{ maxHeight: 190 }} nestedScrollEnabled keyboardShouldPersistTaps="handled">
+                <ScrollView style={{ maxHeight: 300 }} nestedScrollEnabled keyboardShouldPersistTaps="handled">
                   {list.map((t, i) => (
                     <Pressable key={t.id} onPress={() => { setTrainerId(t.id); setPickerOpen(false); }} style={{ paddingVertical: 10, paddingHorizontal: 12, borderTopWidth: i === 0 ? 0 : 1, borderTopColor: 'rgba(255,255,255,0.05)', backgroundColor: trainerId === t.id ? hexA(C.orange, 0.09) : 'transparent' }}>
                       <Text style={{ fontFamily: trainerId === t.id ? F.bodyBold : F.bodySemi, fontSize: 12, color: trainerId === t.id ? C.orange : '#fff' }}>{t.name}</Text>
@@ -153,14 +155,14 @@ export function AdminCertifications() {
               <Badge text={`VIVA ${c.viva ?? 0}/6`} color={C.purple} />
               <Badge text={`English ${c.english_spoken ?? 0}/10`} color={C.gold} />
               <View style={{ flex: 1 }} />
-              <Pressable onPress={() => setSheet({ open: true, cert: c })} hitSlop={5} style={{ width: 28, height: 28, borderRadius: 9, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }}>
+              <Pressable onPress={() => setSheet({ open: true, cert: c })} hitSlop={10} style={{ width: 28, height: 28, borderRadius: 9, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' }}>
                 <Icon name="clipboard" size={12} color={C.muted} strokeWidth={2} />
               </Pressable>
               <Pressable disabled={del.isPending} onPress={() => {
                 setErr(null);
                 if (delArm === c.id) del.mutate(c.id, { onSuccess: () => setDelArm(null), onError: (e: any) => { setDelArm(null); setErr(e?.message ?? 'Failed'); } });
                 else setDelArm(c.id);
-              }} hitSlop={5} style={{ width: 28, height: 28, borderRadius: 9, backgroundColor: hexA(C.red, delArm === c.id ? 0.28 : 0.08), borderWidth: 1, borderColor: hexA(C.red, 0.4), alignItems: 'center', justifyContent: 'center' }}>
+              }} hitSlop={10} style={{ width: 28, height: 28, borderRadius: 9, backgroundColor: hexA(C.red, delArm === c.id ? 0.28 : 0.08), borderWidth: 1, borderColor: hexA(C.red, 0.4), alignItems: 'center', justifyContent: 'center' }}>
                 <Icon name="close" size={11} color={C.red} strokeWidth={2.5} />
               </Pressable>
             </View>

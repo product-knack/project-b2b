@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
 import { supabase } from './supabase';
+import { registerTeardown } from './sessionTeardown';
 
 /* ============ odds_device_tokens — save pipeline (port of the web app) ============
    Mirrors safeDeviceTokenUpsert.ts + pendingDeviceToken.ts from the Capacitor app:
@@ -33,6 +34,7 @@ export function resetDeviceTokenCache() {
   savedKeys.clear();
   pendingToken = lastKnownToken; // keep the physical device token available
 }
+registerTeardown(resetDeviceTokenCache);
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 

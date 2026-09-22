@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from './supabase';
+import { uploadWithTimeout } from './withTimeout';
 import { useAuth } from '../auth';
 import { useRescheduleRequests, useRosterRequests } from './approvalQueries';
 import { useServiceBookings } from './serviceQueries';
@@ -65,7 +66,7 @@ export function useUploadAvatar() {
       // RN-safe upload: fetch the local uri → ArrayBuffer (blob() unreliable on Hermes).
       const res = await fetch(asset.uri);
       const buf = await res.arrayBuffer();
-      const { error } = await supabase.storage.from('avatars').upload(path, buf, { contentType: asset.mime, upsert: true });
+      const { error } = await uploadWithTimeout('avatars', path, buf, { contentType: asset.mime, upsert: true });
       if (error) throw new Error(error.message);
       const url = supabase.storage.from('avatars').getPublicUrl(path).data.publicUrl;
       const { error: uErr } = await supabase.from('profiles').update({ avatar_url: url } as any).eq('id', uid);

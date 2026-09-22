@@ -308,6 +308,8 @@ export const trainerNav: NavGroup[] = [
     { label: 'Workout Templates', icon: 'file', route: 'workout-templates' },
     { label: 'Sessions', icon: 'dumbbell', route: 'sessions' },
     { label: 'Payouts', icon: 'rupee', route: 'payouts' },
+    { label: 'Referrals', icon: 'userPlus', route: 'referrals' },
+    { label: 'Incentive', icon: 'gift', route: 'incentives' },
   ] },
   { label: 'QHP', items: [
     { label: 'QHP', icon: 'heart', route: 'qhp', badge: '8' },
@@ -324,10 +326,14 @@ export const trainerNav: NavGroup[] = [
     { label: 'Workout Analyst', icon: 'activity', route: 'workout-analyst' },
     { label: 'Trainer Roster', icon: 'map', route: 'managers' },
   ] },
+  { label: 'Support', items: [
+    { label: 'Tech Desk', icon: 'activity', route: 'tech-desk' },
+  ] },
 ];
 export const crmNav: NavGroup[] = [
   { label: 'Workspace', items: [
     { label: 'Dashboard', icon: 'grid', route: 'crm-dashboard' },
+    { label: 'Odds AI', icon: 'sparkle', route: 'crm-ai' },
     { label: 'My Clients', icon: 'users', route: 'crm-clients' },
     { label: 'Revenue Forecast', icon: 'rupee', route: 'crm-revenue-forecast' },
     { label: 'Messenger', icon: 'chat', route: 'messenger' },
@@ -344,6 +350,9 @@ export const crmNav: NavGroup[] = [
     { label: 'Escalations', icon: 'alert', route: 'crm-esc' },
     { label: 'Tasks', icon: 'clipboard', route: 'crm-tasks' },
     { label: 'Tools', icon: 'grid', route: 'crm-tools' },
+  ] },
+  { label: 'Support', items: [
+    { label: 'Tech Desk', icon: 'activity', route: 'tech-desk' },
   ] },
 ];
 
@@ -371,6 +380,9 @@ export const coachNav: NavGroup[] = [
     { label: 'Workout Analyst', icon: 'dumbbell', route: 'workout-analyst' },
     { label: 'Plans Analyst', icon: 'activity', route: 'plans-analyst' },
   ] },
+  { label: 'Support', items: [
+    { label: 'Tech Desk', icon: 'activity', route: 'tech-desk' },
+  ] },
 ];
 
 /* Ops = sales/operations desk. Web /ops/* pages; routes map to screens in ops.tsx,
@@ -381,6 +393,7 @@ export const opsNav: NavGroup[] = [
     { label: 'Leads', icon: 'users', route: 'ops-leads' },
     { label: 'Clients', icon: 'layers', route: 'ops-clients' },
     { label: 'Messenger', icon: 'chat', route: 'messenger' },
+    { label: 'Client Threads', icon: 'atSign', route: 'client-threads' },
   ] },
   { label: 'Sales', items: [
     { label: 'Sales Tracker', icon: 'rupee', route: 'ops-sales-tracker' },
@@ -392,6 +405,9 @@ export const opsNav: NavGroup[] = [
     { label: 'QHP Hold', icon: 'heart', route: 'ops-qhp-hold' },
     { label: 'QHP Stats', icon: 'chart', route: 'qhp-stats' },
     { label: 'Escalations', icon: 'alert', route: 'ops-escalations' },
+  ] },
+  { label: 'Support', items: [
+    { label: 'Tech Desk', icon: 'activity', route: 'tech-desk' },
   ] },
 ];
 
@@ -412,6 +428,9 @@ export const adminNav: NavGroup[] = [
     { label: 'Messenger', icon: 'chat', route: 'messenger' },
     { label: 'Client Threads', icon: 'atSign', route: 'client-threads' },
   ] },
+  { label: 'Support', items: [
+    { label: 'Tech Desk', icon: 'activity', route: 'tech-desk' },
+  ] },
 ];
 
 /* Doctor workspace (physios + nutritionists). HOD-only items (All Clients, Roster,
@@ -423,6 +442,9 @@ export const marketingNav: NavGroup[] = [
     { label: 'Leads', icon: 'userPlus', route: 'marketing-leads' },
     { label: 'Lead Analytics', icon: 'chart', route: 'marketing-lead-analytics' },
     { label: 'Messenger', icon: 'chat', route: 'messenger' },
+  ] },
+  { label: 'Support', items: [
+    { label: 'Tech Desk', icon: 'activity', route: 'tech-desk' },
   ] },
 ];
 
@@ -441,21 +463,65 @@ export const academyNav: NavGroup[] = [
     { label: 'Messenger', icon: 'chat', route: 'messenger' },
     { label: 'Client Threads', icon: 'atSign', route: 'client-threads' },
   ] },
+  { label: 'Support', items: [
+    { label: 'Tech Desk', icon: 'activity', route: 'tech-desk' },
+  ] },
 ];
 
 export const doctorNav: NavGroup[] = [
   { label: 'Workspace', items: [
     { label: 'Rehab Recommendation', icon: 'heart', route: 'doctor-rehab-recommendation' },
+    { label: 'Reimbursements', icon: 'checks', route: 'doctor-reimbursement-review' },
     { label: 'Dashboard', icon: 'grid', route: 'doctor-dashboard' },
     { label: 'Sessions', icon: 'activity', route: 'doctor-sessions' },
     { label: 'My Clients', icon: 'users', route: 'doctor-clients' },
     { label: 'Messenger', icon: 'chat', route: 'messenger' },
     { label: 'Client Threads', icon: 'atSign', route: 'client-threads' },
+    { label: 'Referrals', icon: 'userPlus', route: 'referrals' },
+    { label: 'Reimbursement', icon: 'rupee', route: 'doctor-reimbursements' },
   ] },
   { label: 'Head Doctor', items: [
     { label: 'All Clients', icon: 'layers', route: 'doctor-all-clients' },
     { label: 'Roster', icon: 'calendar', route: 'doctor-roster' },
     { label: 'Protocol Approvals', icon: 'checks', route: 'doctor-protocol-approvals' },
+  ] },
+  { label: 'Support', items: [
+    { label: 'Tech Desk', icon: 'activity', route: 'tech-desk' },
+  ] },
+];
+
+/* Consultant doctor (doctor_specialization_tag 'consultant'): the web strips
+   Messenger, My Clients and Sessions and puts the Consultant Dashboard first.
+   'doctor-dashboard' is the home route and forks to the consultant dashboard. */
+export const consultantNav: NavGroup[] = [
+  { label: 'Workspace', items: [
+    { label: 'Consultant Dashboard', icon: 'home', route: 'doctor-dashboard' },
+    { label: 'All Calls', icon: 'calendar', route: 'doctor-consultant-calls' },
+    { label: 'Reimbursement', icon: 'rupee', route: 'doctor-reimbursements' },
+    { label: 'Client Threads', icon: 'atSign', route: 'client-threads' },
+    { label: 'Referrals', icon: 'userPlus', route: 'referrals' },
+  ] },
+  { label: 'Support', items: [
+    { label: 'Tech Desk', icon: 'activity', route: 'tech-desk' },
+  ] },
+];
+
+export const therapistNav: NavGroup[] = [
+  { label: 'Workspace', items: [
+    { label: 'Dashboard', icon: 'grid', route: 'therapist-dashboard' },
+    { label: 'My Clients', icon: 'users', route: 'therapist-clients' },
+    { label: 'Sessions', icon: 'calendar', route: 'therapist-sessions' },
+    { label: 'Messenger', icon: 'chat', route: 'messenger' },
+    { label: 'Client Threads', icon: 'atSign', route: 'client-threads' },
+  ] },
+  { label: 'Support', items: [
+    { label: 'Tech Desk', icon: 'activity', route: 'tech-desk' },
+  ] },
+];
+
+export const techNav: NavGroup[] = [
+  { label: 'Workspace', items: [
+    { label: 'Tech Desk', icon: 'activity', route: 'tech-desk-inbox' },
   ] },
 ];
 

@@ -1,3 +1,4 @@
+import React from 'react';
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from './supabase';
 import { uuidv4 } from './clientQueries';
@@ -205,6 +206,10 @@ export function useCrmMessengerClients(crmId: string | null | undefined) {
   });
 }
 
+/* One prior version of an edited message (messages.edited_message jsonb array,
+   oldest first) — written only by the edit_chat_message definer RPC. */
+export type MessageEditVersion = { message: string; edited_at: string; edited_by?: string | null };
+
 export type ChatMessage = {
   id: string;
   conversation_id: string;
@@ -216,6 +221,7 @@ export type ChatMessage = {
   created_at: string;
   is_deleted: boolean;
   reply_to_id?: string | null; // WhatsApp-style reply reference
+  edited_message?: MessageEditVersion[] | null; // non-empty = message was edited
 };
 
 const PAGE = 30;
@@ -318,8 +324,44 @@ export function useSendMessage(conversationId: string, meId: string) {
           await enqueueOutbox('chat-message', body.slice(0, 40), { id, conversationId, senderId: meId, text: body, replyToId });
           return;
         }
+        // Server rejection (RLS / constraint): drop the optimistic bubble — it
+        // used to sit on "sending…" until the next refetch silently removed it.
+        // The screen's onError restores the draft and tells the user.
+        qc.setQueryData(['chat-thread', conversationId], (old: any) => {
+          if (!old) return old;
+          return { ...old, pages: old.pages.map((pg: any[]) => pg.filter((x) => x.id !== id)) };
+        });
         throw e;
       }
+    },
+  });
+}
+
+/* Edit an OWN text message (long-press a bubble → Edit Message). Goes through
+   the edit_chat_message definer RPC: sender-only, text-only, and every prior
+   version is appended to messages.edited_message before the body changes. The
+   cache is patched in place; other devices reconcile via the UPDATE realtime
+   event. Editing needs a connection (no offline outbox — the edit target could
+   change under a queued edit). */
+export function useEditChatMessage(conversationId: string, meId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ messageId, body }: { messageId: string; body: string }) => {
+      const text = body.trim();
+      if (!text) throw new Error('Message cannot be empty');
+      if (!getIsOnline()) throw new Error('You need a connection to edit a message.');
+      const { error } = await supabase.rpc('edit_chat_message', { p_message: messageId, p_body: text });
+      if (error) throw new Error(error.message);
+      qc.setQueryData(['chat-thread', conversationId], (old: any) => {
+        if (!old) return old;
+        const pages = old.pages.map((pg: ChatMessage[]) => pg.map((m) =>
+          m.id === messageId && m.message !== text
+            ? { ...m, message: text, edited_message: [...(m.edited_message ?? []), { message: m.message, edited_at: new Date().toISOString(), edited_by: meId }] }
+            : m));
+        return { ...old, pages };
+      });
+      qc.invalidateQueries({ queryKey: ['chat-thread', conversationId] });
+      qc.invalidateQueries({ queryKey: ['chat-overview', meId] });
     },
   });
 }
@@ -538,5 +580,73 @@ export function useMarkConversationRead() {
       if (error) throw new Error(error.message);
     },
     onSuccess: (_r, v) => qc.invalidateQueries({ queryKey: ['chat-overview', v.meId] }),
+  });
+}
+
+/* ============ Chat-agreed reschedules (AI-assisted) ============
+   The analyze-chat-reschedule edge fn writes SUGGESTIONS; the trainer's tap on
+   the chip (chat_accept_reschedule RPC) is the only path that moves the roster.
+   RLS scopes SELECT to the session's trainer, so everyone else sees nothing. */
+export type ChatRescheduleSuggestion = {
+  id: string; conversation_id: string; message_id: string; trainer_id: string; client_id: string;
+  schedule_id: string; old_datetime: string; proposed_datetime: string;
+  confidence: number | null; evidence: string | null; status: string; created_at: string;
+};
+export function useChatRescheduleSuggestion(conversationId: string | null, meId: string | null | undefined) {
+  const qc = useQueryClient();
+  const q = useQuery({
+    queryKey: ['chat-resched-suggestion', conversationId],
+    enabled: !!conversationId && !!meId,
+    staleTime: 15_000,
+    refetchInterval: 60_000,
+    queryFn: async (): Promise<ChatRescheduleSuggestion | null> => {
+      const { data, error } = await supabase
+        .from('chat_reschedule_suggestions')
+        .select('*')
+        .eq('conversation_id', conversationId)
+        .eq('status', 'pending')
+        .gt('proposed_datetime', new Date().toISOString())
+        .order('created_at', { ascending: false })
+        .limit(1);
+      if (error) throw new Error(error.message);
+      return (data?.[0] as ChatRescheduleSuggestion | undefined) ?? null;
+    },
+  });
+  React.useEffect(() => {
+    if (!conversationId) return;
+    const ch = supabase
+      .channel(`chat-resched-${conversationId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_reschedule_suggestions', filter: `conversation_id=eq.${conversationId}` }, () => {
+        qc.invalidateQueries({ queryKey: ['chat-resched-suggestion', conversationId] });
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [conversationId, qc]);
+  return q;
+}
+export function useAcceptChatReschedule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { suggestionId: string; conversationId: string }) => {
+      const { data, error } = await supabase.rpc('chat_accept_reschedule', { p_suggestion: input.suggestionId });
+      if (error) throw new Error(error.message);
+      return data;
+    },
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ['chat-resched-suggestion', v.conversationId] });
+      qc.invalidateQueries({ queryKey: ['trainer-roster'] });
+      qc.invalidateQueries({ queryKey: ['doctor-roster'] });
+      qc.invalidateQueries({ queryKey: ['mgr-plan-sched'] });
+    },
+  });
+}
+export function useDismissChatReschedule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { suggestionId: string; conversationId: string }) => {
+      const { error } = await supabase.from('chat_reschedule_suggestions').update({ status: 'dismissed' }).eq('id', input.suggestionId);
+      if (error) throw new Error(error.message);
+    },
+    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: ['chat-resched-suggestion', v.conversationId] }),
   });
 }

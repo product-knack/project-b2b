@@ -6,13 +6,15 @@ import { Body } from './primitives';
 import { useAuth } from '../auth';
 import { useStore } from '../store';
 import { counterpartOf } from '../lib/linkedAccounts';
+import { runSessionTeardown } from '../lib/sessionTeardown';
+import { withTimeout, NET_MS } from '../lib/withTimeout';
 
 /* Dashboard toggle between the two linked accounts (coach ⇄ Sagar Sharma).
    Renders ONLY when the signed-in user is one of the pair. Swaps the Supabase
    session in place (signInWithPassword replaces it — no sign-out flash). */
 export function AccountSwitch() {
   const { session, signIn } = useAuth();
-  const { go, set } = useStore();
+  const { go, set, resetSession } = useStore();
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
   const other = counterpartOf(session?.user?.id);
@@ -23,7 +25,11 @@ export function AccountSwitch() {
     setErr(null);
     setBusy(true);
     try {
-      const res = await signIn(other.email, other.password);
+      // Switching users: wipe the current user's caches/outbox/selections FIRST.
+      await runSessionTeardown();
+      resetSession();
+      const res = await withTimeout(signIn(other.email, other.password), NET_MS, 'Account switch')
+        .catch((e: any) => ({ error: e?.message ?? 'Could not switch accounts.', role: null as any }));
       if (res.error || !res.role) { setErr(res.error ?? 'Could not switch accounts.'); return; }
       set({ role: res.role }); // the drawer picks its nav from the store role — keep it in sync
       go(res.role === 'coach' ? 'coach-dashboard' : res.role === 'crm' ? 'crm-dashboard' : 'dashboard', true);

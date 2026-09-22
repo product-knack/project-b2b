@@ -76,10 +76,22 @@ export function useCrmMissingLogRows(crmId: string | null) {
           .lte('scheduled_at', new Date(now).toISOString()),
       ]);
       const logs = (logsR.data ?? []) as any[];
+      // Index by client+trainer with pre-parsed times (see crmQueries: the nested
+      // Date parsing was an O(n×m) JS-thread freeze on every refetch).
+      const logsByPair = new Map<string, number[]>();
+      for (const l of logs) {
+        const t = Date.parse(l.scheduled_at);
+        if (!isFinite(t)) continue;
+        const k = `${l.client_id}:${l.trainer_id}`;
+        const arr = logsByPair.get(k);
+        if (arr) arr.push(t); else logsByPair.set(k, [t]);
+      }
+      const WINDOW = 3 * 3600e3;
       return ((schedR.data ?? []) as any[])
         .filter((r) => {
-          const t = new Date(r.scheduled_datetime).getTime();
-          return !logs.some((l) => l.client_id === r.client_id && l.trainer_id === r.trainer_id && Math.abs(new Date(l.scheduled_at).getTime() - t) <= 3 * 3600e3);
+          const t = Date.parse(r.scheduled_datetime);
+          const arr = logsByPair.get(`${r.client_id}:${r.trainer_id}`);
+          return !(arr && arr.some((x) => Math.abs(x - t) <= WINDOW));
         })
         .map((r) => ({
           id: r.id,

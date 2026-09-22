@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from './supabase';
 import { useAuth } from '../auth';
+import { uploadWithTimeout } from './withTimeout';
 
 /* ============ QHP (assessments) — mirrors the web TrainerAssessments page ============
    Core table: coach_assessment (the assessor id lives in coach_id).
@@ -40,6 +41,10 @@ export type QhpRow = {
   mechanical_score: number | null;
   heartmath_missing: boolean; // Standardized Assessment present but heartMathReport empty/absent
   health_briefing: string | null;
+  /** Write-once assessor voice memo (web QHPVoiceMemoDialog parity, 15 Sep 2026); all three NULL until recorded. */
+  voice_memo_path: string | null;
+  voice_memo_duration_sec: number | null;
+  voice_memo_recorded_at: string | null;
 };
 
 /* Web heartMathUtils.isHeartMathMissing — checks Standardized Assessment.heartMathReport. */
@@ -97,16 +102,28 @@ export function useQhpAssessments(trainerId: string) {
         });
       }
 
-      // Baseline / Refresh N — index of the assessment within the client's history (date asc).
-      const byClient = new Map<string, any[]>();
-      rows.forEach((r) => {
-        if (!r.client_id) return;
-        if (!byClient.has(r.client_id)) byClient.set(r.client_id, []);
-        byClient.get(r.client_id)!.push(r);
-      });
+      // Baseline / Refresh N — index within the client's FULL QHP history across ALL
+      // assessors. The assessor-scoped `rows` are NOT the full history: a client's earlier
+      // QHPs are usually done by OTHER assessors, so indexing the scoped rows mislabels a
+      // later refresh as "Baseline" (client with 4 QHPs by 4 assessors showed every card as
+      // Baseline). Fetch the whole per-client history and index against that.
+      const fullHistByClient = new Map<string, any[]>();
+      for (let i = 0; i < leadIds.length; i += 200) {
+        const { data: histRows } = await supabase
+          .from('coach_assessment')
+          .select('id, client_id, assessment_date, assessment_time')
+          .in('client_id', leadIds.slice(i, i + 200));
+        (histRows ?? []).forEach((h: any) => {
+          if (!h.client_id) return;
+          if (!fullHistByClient.has(h.client_id)) fullHistByClient.set(h.client_id, []);
+          fullHistByClient.get(h.client_id)!.push(h);
+        });
+      }
       const labelOf = (r: any) => {
         if (!r.client_id) return 'New Prospect';
-        const hist = [...(byClient.get(r.client_id) ?? [])].sort((a, b) => (a.assessment_date ?? '').localeCompare(b.assessment_date ?? ''));
+        const hist = [...(fullHistByClient.get(r.client_id) ?? [])].sort((a, b) =>
+          (a.assessment_date ?? '').localeCompare(b.assessment_date ?? '') ||
+          (a.assessment_time ?? '').localeCompare(b.assessment_time ?? ''));
         const idx = hist.findIndex((h) => h.id === r.id);
         return idx <= 0 ? 'QHP Baseline' : `QHP Refresh ${idx}`;
       };
@@ -135,6 +152,9 @@ export function useQhpAssessments(trainerId: string) {
         mechanical_score: r.mechanical_score ?? null,
         heartmath_missing: isQhpCompleted(r) ? isHeartMathMissing(r) : false,
         health_briefing: r.health_briefing ?? null,
+        voice_memo_path: r.voice_memo_path ?? null,
+        voice_memo_duration_sec: r.voice_memo_duration_sec ?? null,
+        voice_memo_recorded_at: r.voice_memo_recorded_at ?? null,
       }));
 
       // Which assessments already have a generated report (qhp_details), chunked.
@@ -180,6 +200,71 @@ export function useQhpAssessments(trainerId: string) {
       );
 
       return { upcoming, completedList, withoutReport, dataMissing };
+    },
+  });
+}
+
+/* ---------- QHP voice memo (write-once, audio only) ----------
+   Bucket `qhp-voice-memos` is private with INSERT + SELECT for staff roles
+   (coach, trainer, doctor, admin, super_admin, ops) and NO update / delete
+   policy: an uploaded object is immutable. Columns on coach_assessment:
+   voice_memo_path / voice_memo_duration_sec / voice_memo_recorded_at, guarded
+   by the BEFORE UPDATE trigger enforce_qhp_voice_memo_once, which rejects any
+   change once voice_memo_path is set. The attach UPDATE therefore carries a
+   `voice_memo_path is null` filter so a second save reads as "0 rows" instead
+   of a database exception. No transcription: this is not the CRM memo. */
+export const QHP_MEMO_BUCKET = 'qhp-voice-memos';
+export const QHP_MEMO_MAX_MS = 5 * 60_000;    // 300 s, auto-stop
+const QHP_MEMO_MIN_BYTES = 4 * 1024;          // empty-take guard, same as the web
+const QHP_MEMO_MAX_BYTES = 25 * 1024 * 1024;
+
+export async function attachQhpVoiceMemo(input: { assessmentId: string; userId: string; uri: string; name: string; mime: string; durationMs: number }): Promise<string> {
+  const ext = (input.name.split('.').pop() || 'm4a').toLowerCase();
+  const path = `${input.assessmentId}/${input.userId}-${Date.now()}.${ext}`;
+  const body = await (await fetch(input.uri)).arrayBuffer();
+  if (body.byteLength < QHP_MEMO_MIN_BYTES) throw new Error('The recording is empty. Record again.');
+  if (body.byteLength > QHP_MEMO_MAX_BYTES) throw new Error('The recording is over 25 MB.');
+  const { error: upErr } = await uploadWithTimeout(QHP_MEMO_BUCKET, path, body, { contentType: input.mime, upsert: false });
+  if (upErr) throw new Error(upErr.message);
+  // Guarded attach: only a row still without a memo takes the update.
+  const { data, error } = await supabase
+    .from('coach_assessment')
+    .update({
+      voice_memo_path: path,
+      voice_memo_duration_sec: Math.max(1, Math.round(input.durationMs / 1000)),
+      voice_memo_recorded_at: new Date().toISOString(),
+    })
+    .eq('id', input.assessmentId)
+    .is('voice_memo_path', null)
+    .select('id');
+  if (error || !data?.length) {
+    // Roll back the object. Best effort: the bucket has no DELETE policy today,
+    // so this is a no-op until one is added; the orphan is harmless (unreferenced).
+    try { await supabase.storage.from(QHP_MEMO_BUCKET).remove([path]); } catch { /* immutable bucket */ }
+    if (error) throw new Error(error.message);
+    throw new Error('A voice memo is already saved for this QHP.');
+  }
+  return path;
+}
+
+export function useAttachQhpVoiceMemo() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: attachQhpVoiceMemo,
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['qhp-assessments'] }); },
+  });
+}
+
+/** Signed playback URL, 1 hour like the web; any staff role may play. */
+export function useSignedQhpMemoUrl(path: string | null) {
+  return useQuery({
+    queryKey: ['qhp-memo-url', path],
+    enabled: !!path,
+    staleTime: 50 * 60_000,
+    queryFn: async (): Promise<string | null> => {
+      const { data, error } = await supabase.storage.from(QHP_MEMO_BUCKET).createSignedUrl(path as string, 3600);
+      if (error) throw new Error(error.message);
+      return data?.signedUrl ?? null;
     },
   });
 }

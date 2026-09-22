@@ -115,7 +115,7 @@ export function CrmRevenueForecast() {
             const isOpen = openRow === row.id;
             const due = remarkDue({
               baseline: row.baseline, liveSessionsLeft: client?.sessionsLeft ?? null,
-              consumedSinceMark: consumedQ.data?.get(row.client_id) ?? 0,
+              consumedSinceMark: consumedQ.data?.get?.(row.client_id) ?? 0,
               remarks: row.remarks, achieved: false,
             });
             const isNew = row.created_at >= threeDaysAgo;

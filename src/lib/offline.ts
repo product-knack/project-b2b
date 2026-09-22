@@ -6,6 +6,10 @@ import { onlineManager } from '@tanstack/react-query';
 import { submitWorkoutLog, submitHealthData, submitWorkoutPlan, submitWorkoutPlanEdit, WorkoutLogInput, WorkoutPlanCreateInput, WorkoutPlanEditInput, HealthDataInput } from './clientQueries';
 import { submitChatMessage } from './chatQueries';
 import { submitLocationLog, LocationLogPayload } from './locationLog';
+import { registerTeardown } from './sessionTeardown';
+import { withTimeout, isTimeoutError } from './withTimeout';
+
+const SYNC_MS = 45_000; // per-item deadline for an outbox submit (multi-row inserts + link RPC)
 
 /* ============ Offline outbox + network state ============
    Durable queue (SQLite kv-store) for submissions made while offline. Items are
@@ -17,6 +21,7 @@ const OUTBOX_KEY = 'outbox:v1';
 
 export type OutboxItem = {
   id: string;
+  userId?: string;        // who queued it — items never drain (or show) under another account
   kind: 'workout-log' | 'create-plan' | 'edit-plan' | 'chat-message' | 'location-log' | 'screenshot-log';
   label: string;          // human line for the pending-sync UI
   createdAt: string;      // ORIGINAL device timestamp at submit time
@@ -32,6 +37,30 @@ export type WorkoutLogOutboxPayload = WorkoutLogInput & { health?: HealthDataInp
 let items: OutboxItem[] = [];
 let loaded = false;
 const listeners = new Set<() => void>();
+
+/* ---- user scoping ----
+   auth.tsx publishes the signed-in user id; every enqueue stamps it and every
+   drain/UI read skips other users' items (legacy unstamped items still drain).
+   The trainer_location RPC resolves trainer_id = auth.uid(), so an unscoped
+   queue would write user A's fixes under user B after an account switch. */
+let currentUid: string | null = null;
+const mine = (i: OutboxItem) => !i.userId || i.userId === currentUid;
+export function setOutboxUser(uid: string | null) {
+  const changed = uid !== currentUid;
+  currentUid = uid;
+  if (changed) {
+    listeners.forEach((l) => l());
+    if (uid) drainOutbox(); // this user's queued items may now sync
+  }
+}
+/* Sign-out: drop the queue entirely (registered with the session teardown). */
+export async function clearOutbox() {
+  await load();
+  items = [];
+  await persist();
+  listeners.forEach((l) => l());
+}
+registerTeardown(clearOutbox);
 const notify = () => listeners.forEach((l) => l());
 
 async function load() {
@@ -65,7 +94,7 @@ function rid() {
    confirmation survives an app restart within the window. */
 const NOTICE_KEY = 'synced-log-notices:v1';
 const NOTICE_TTL_MS = 3 * 3600 * 1000;
-export type SyncedNotice = { id: string; label: string; syncedAt: string };
+export type SyncedNotice = { id: string; label: string; syncedAt: string; tone?: 'synced' | 'link_pending' };
 let notices: SyncedNotice[] = [];
 let noticesLoaded = false;
 function pruneNotices() {
@@ -89,10 +118,10 @@ async function persistNotices() {
   await Storage.setItem(NOTICE_KEY, JSON.stringify(notices));
   notify();
 }
-async function addSyncedNotice(item: OutboxItem) {
+async function addSyncedNotice(item: OutboxItem, tone: 'synced' | 'link_pending' = 'synced') {
   if (item.kind !== 'workout-log') return;
   await loadNotices();
-  notices = [...notices.filter((n) => n.id !== item.id), { id: item.id, label: item.label, syncedAt: new Date().toISOString() }];
+  notices = [...notices.filter((n) => n.id !== item.id), { id: item.id, label: item.label, syncedAt: new Date().toISOString(), tone }];
   await persistNotices();
 }
 export async function dismissSyncedNotice(id: string) {
@@ -114,7 +143,7 @@ export function useSyncedNotices(): SyncedNotice[] {
 
 export async function enqueueOutbox(kind: OutboxItem['kind'], label: string, payload: any, opts?: { autoDrain?: boolean }): Promise<OutboxItem> {
   await load();
-  const item: OutboxItem = { id: rid(), kind, label, createdAt: new Date().toISOString(), status: 'pending', attempts: 0, payload };
+  const item: OutboxItem = { id: rid(), userId: currentUid ?? undefined, kind, label, createdAt: new Date().toISOString(), status: 'pending', attempts: 0, payload };
   items = [...items, item];
   // The SQLite write is AWAITED before this returns — the caller is guaranteed the
   // item is on disk before any network attempt happens (crash-safety foundation).
@@ -166,8 +195,9 @@ export function getIsOnline() {
 
 /* True for connectivity failures (retry later); false for real server rejections. */
 function isTransientError(e: any): boolean {
+  if (isTimeoutError(e)) return true; // a stalled request is retried, never marked failed
   const msg = String(e?.message ?? e ?? '');
-  return /network request failed|network error|failed to fetch|fetch failed|timeout|abort|socket|ENOTFOUND|ECONN/i.test(msg);
+  return /network request failed|network error|failed to fetch|fetch failed|timeout|timed out|abort|socket|ENOTFOUND|ECONN/i.test(msg);
 }
 
 /* ---- drainer ---- */
@@ -176,17 +206,21 @@ let draining = false;
 
 /* One item's actual submit + cache invalidation. Throws on failure; success means
    the server insert/RPC genuinely succeeded (submit fns throw on any DB error). */
-async function processItem(item: OutboxItem): Promise<void> {
+async function processItem(item: OutboxItem): Promise<{ linkPending?: boolean } | void> {
   if (item.kind === 'workout-log') {
     const p = item.payload as WorkoutLogOutboxPayload;
     // Health gate data entered offline syncs first (idempotent upserts),
     // then the log itself (idempotent via pre-generated session id).
     if (p.health) await submitHealthData(p.health);
-    await submitWorkoutLog(p);
+    const { link } = await submitWorkoutLog(p);
     qcRef?.invalidateQueries({ queryKey: ['trainer-roster'] });
     qcRef?.invalidateQueries({ queryKey: ['client-sessions'] });
-    qcRef?.invalidateQueries({ queryKey: ['trainer-month-sessions'] });
+    qcRef?.invalidateQueries({ queryKey: ['trainer-month-sessions-v2'] }); // key was bumped to v2 — the old prefix matched nothing
+    qcRef?.invalidateQueries({ queryKey: ['mgr-plan-outcome-v5'] }); // crew card LOGGED tick
     if (p.health) qcRef?.invalidateQueries({ queryKey: ['client-health-check', p.clientId] });
+    // The workout is saved regardless; a still-unresolved schedule link only changes
+    // which confirmation the dashboard shows (see addSyncedNotice tone).
+    return { linkPending: link?.status === 'unresolved' };
   } else if (item.kind === 'create-plan') {
     const p = item.payload as WorkoutPlanCreateInput;
     await submitWorkoutPlan(p);
@@ -218,7 +252,7 @@ async function processItem(item: OutboxItem): Promise<void> {
 export async function drainOutbox() {
   await load();
   if (draining || !online) return;
-  const pending = items.filter((i) => i.status === 'pending');
+  const pending = items.filter((i) => i.status === 'pending' && mine(i));
   if (!pending.length) return;
   draining = true;
   try {
@@ -227,10 +261,10 @@ export async function drainOutbox() {
       const current = items.find((i) => i.id === item.id);
       if (!current || current.status !== 'pending') continue;
       try {
-        await processItem(current);
+        const result = await withTimeout(processItem(current), SYNC_MS, 'Sync'); // a hung insert stays queued, never wedges the drain
         items = items.filter((i) => i.id !== item.id);
         await persist();
-        await addSyncedNotice(current);
+        await addSyncedNotice(current, result?.linkPending ? 'link_pending' : 'synced');
       } catch (e: any) {
         if (isTransientError(e)) {
           // Still offline / flaky — bump the attempt count and stop; NetInfo will
@@ -258,10 +292,13 @@ export async function drainOutbox() {
 export type SubmitItemResult = { status: 'synced' | 'queued' | 'failed'; error?: string };
 export async function submitItem(id: string): Promise<SubmitItemResult> {
   await load();
-  // Wait out any in-flight drain — it may be syncing this very item.
-  while (draining) await new Promise((r) => setTimeout(r, 120));
+  // Wait out any in-flight drain — it may be syncing this very item — but never
+  // forever: a hung background drain must not freeze the form's submit bar.
+  for (let i = 0; i < 100 && draining; i++) await new Promise((r) => setTimeout(r, 120)); // ≤ 12 s
+  if (draining) return { status: 'queued' }; // still on disk; the next drain picks it up
   const item = items.find((i) => i.id === id);
   if (!item) return { status: 'synced' }; // gone from the queue ⇒ a drain already synced it
+  if (!mine(item)) return { status: 'failed', error: 'This entry was queued by a different account.' };
   if (!online) return { status: 'queued' };
   draining = true;
   try {
@@ -269,10 +306,10 @@ export async function submitItem(id: string): Promise<SubmitItemResult> {
     await persist();
     try {
       const current = items.find((i) => i.id === id)!;
-      await processItem(current);
+      const result = await withTimeout(processItem(current), SYNC_MS, 'Sync'); // a hung insert stays queued, never wedges the drain
       items = items.filter((i) => i.id !== id);
       await persist();
-      await addSyncedNotice(current);
+      await addSyncedNotice(current, result?.linkPending ? 'link_pending' : 'synced');
       return { status: 'synced' };
     } catch (e: any) {
       if (isTransientError(e)) {
@@ -316,7 +353,7 @@ export function initOffline(queryClient: QueryClient) {
 // Location logs are captured silently and must NEVER appear in the pending-sync
 // list — the user should never see their location syncing. They still drain via
 // the internal `items` list above; this hook just hides them from the UI.
-const uiVisible = (list: OutboxItem[]) => list.filter((i) => i.kind !== 'location-log');
+const uiVisible = (list: OutboxItem[]) => list.filter((i) => i.kind !== 'location-log' && mine(i));
 export function useOutbox(): OutboxItem[] {
   const [snap, setSnap] = React.useState<OutboxItem[]>(uiVisible(items));
   React.useEffect(() => {

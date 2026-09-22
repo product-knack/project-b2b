@@ -1,10 +1,12 @@
 import { CrmRevenueForecastBanner } from './crmRevenueForecast';
 import React from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Alert, Animated, Easing, Modal, ActivityIndicator } from 'react-native';
+import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
+import { invalidateDebounced } from '../lib/invalidateDebounced';
 import { useRescheduleRequests, useApproveReschedule, useRejectReschedule, useRosterRequests, useReviewRosterRequest, ScheduleConflict, RescheduleReq, RosterReq } from '../lib/approvalQueries';
 import { SESSION_MODALITIES } from '../lib/trainerQueries';
 import { useChatOverview } from '../lib/chatQueries';
@@ -24,6 +26,8 @@ import { useCrmProfile, useCrmMetrics, useBirthdaysToday, useCrmEndedPauses, End
 import { useCrmIncentives } from '../lib/crmTabQueries';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCrmCommsBook, useMarkCommDone } from '../lib/crmClientQueries';
+import { CrmVoicePlayer } from './crmClientDetail';
+import { ensureAiCacheFresh } from '../lib/aiCache';
 import { CrmWorkspace, RetentionBreakdownSheet } from './crmTabs';
 import {
   crmStats, crmBanners, crmRenewals, roadmapDef, stageDefs, onboardCards, journeyCards,
@@ -307,6 +311,10 @@ export function CrmDashboard() {
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
   const m = metricsQ.data;
 
+  // Odds AI: keep the on-device client-data cache fresh (background, fire-and-forget;
+  // re-syncs only when older than 30 min).
+  React.useEffect(() => { if (crmId) ensureAiCacheFresh(crmId).catch(() => {}); }, [crmId]);
+
   return (
     <Page scrollKey="crm-dashboard">
       <GreetingHeader
@@ -328,6 +336,20 @@ export function CrmDashboard() {
       <PauseEndedBanner crmId={crmId} />
       {/* Client Threads — one team chat per client (trainers + CRMs + doctors) */}
       <ClientThreadsCard onPress={() => go('client-threads')} unread={threadUnread} />
+      {/* Odds AI — ask anything about your assigned clients (on-device data + Gemini) */}
+      <Pressable onPress={() => go('crm-ai')} style={{ borderRadius: 17, overflow: 'hidden', backgroundColor: 'rgba(24,17,14,0.55)', borderWidth: 1, borderColor: hexA(C.orange, 0.28) }}>
+        <LinearGradient colors={[hexA(C.orange, 0.5), 'rgba(255,255,255,0.02)']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ height: 3 }} />
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 }}>
+          <View style={{ width: 40, height: 40, borderRadius: 13, backgroundColor: hexA(C.orange, 0.14), borderWidth: 1, borderColor: hexA(C.orange, 0.35), alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="sparkle" size={19} color={C.orange} strokeWidth={2} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Body style={{ fontSize: 14.5, fontFamily: F.bodySemi, color: '#fff' }}>Odds AI</Body>
+            <Body style={{ fontSize: 11, color: C.muted2, marginTop: 1 }}>Ask anything about your clients: QHP, blood, sessions, packages</Body>
+          </View>
+          <Icon name="chevRight" size={16} color={hexA(C.orange, 0.8)} strokeWidth={2.3} />
+        </View>
+      </Pressable>
       {/* KPI stats — live (mirrors web useCRMMetrics). Total Clients opens My Clients;
           Retention opens its 30-day breakdown sheet. */}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
@@ -710,10 +732,10 @@ export function CrmComms() {
   const q = query.trim().toLowerCase();
 
   // Unified item shape for both modes (latest-per-client vs full log).
-  type Item = { key: string; commId: string; clientId: string; clientName: string; callDate: string; status: string | null; medium: string | null; category: string | null; remarks: string | null; followUp: string | null; overdue: boolean };
+  type Item = { key: string; commId: string; clientId: string; clientName: string; callDate: string; status: string | null; medium: string | null; category: string | null; remarks: string | null; followUp: string | null; overdue: boolean; voicePath: string | null };
   const source: Item[] = mode === 'client'
-    ? (book?.rows ?? []).map((r) => ({ key: r.clientId, commId: r.commId, clientId: r.clientId, clientName: r.clientName, callDate: r.callDate, status: r.status, medium: r.medium, category: r.category, remarks: r.remarks, followUp: r.followUp, overdue: r.overdue }))
-    : (book?.log ?? []).map((r) => ({ key: r.id, commId: r.id, clientId: r.clientId, clientName: r.clientName, callDate: r.callDate, status: r.status, medium: r.medium, category: r.category, remarks: r.remarks, followUp: r.followUp, overdue: r.overdue }));
+    ? (book?.rows ?? []).map((r) => ({ key: r.clientId, commId: r.commId, clientId: r.clientId, clientName: r.clientName, callDate: r.callDate, status: r.status, medium: r.medium, category: r.category, remarks: r.remarks, followUp: r.followUp, overdue: r.overdue, voicePath: r.voicePath }))
+    : (book?.log ?? []).map((r) => ({ key: r.id, commId: r.id, clientId: r.clientId, clientName: r.clientName, callDate: r.callDate, status: r.status, medium: r.medium, category: r.category, remarks: r.remarks, followUp: r.followUp, overdue: r.overdue, voicePath: r.voicePath }));
 
   const statusesPresent = COMM_STATUS_ORDER.filter((s) => (book?.log ?? []).some((r) => r.status === s));
 
@@ -861,9 +883,10 @@ export function CrmComms() {
                     </View>
                   ) : null}
                   {r.remarks ? <Body numberOfLines={2} style={{ fontSize: 11.5, color: C.muted3, paddingLeft: 17 }}>{r.remarks}</Body> : null}
+                  {r.voicePath ? <View style={{ paddingLeft: 17 }}><CrmVoicePlayer path={r.voicePath} sec={null} /></View> : null}
                   {r.status !== 'Follow Up Done' ? (
                     <View style={{ flexDirection: 'row', paddingLeft: 17 }}>
-                      <Pressable onPress={() => doneM.mutate({ id: r.commId, clientId: r.clientId })} disabled={doneM.isPending} hitSlop={6} style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 5, paddingHorizontal: 11, borderRadius: 999, backgroundColor: hexA(C.green, 0.12), borderWidth: 1, borderColor: hexA(C.green, 0.35) }}>
+                      <Pressable onPress={() => doneM.mutate({ id: r.commId, clientId: r.clientId }, { onError: (e: any) => Alert.alert("Couldn't mark done", e?.message ?? "Try again.") })} disabled={doneM.isPending} hitSlop={6} style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 5, paddingHorizontal: 11, borderRadius: 999, backgroundColor: hexA(C.green, 0.12), borderWidth: 1, borderColor: hexA(C.green, 0.35) }}>
                         <Icon name="checks" size={11} color={C.green} strokeWidth={2.6} />
                         <Text style={{ fontFamily: F.bodyBold, fontSize: 10.5, color: C.green }}>Mark Done</Text>
                       </Pressable>
@@ -976,6 +999,7 @@ function ApprovalCard({ color, children }: { color: string; children: React.Reac
 }
 
 export function CrmApprovals() {
+  const kb = useKeyboardHeight(); // Schedule Session sheet: lift above the Android keyboard
   const { session } = useAuth();
   const crmId = session?.user?.id ?? null;
   const qc = useQueryClient();
@@ -1000,10 +1024,9 @@ export function CrmApprovals() {
 
   /* Realtime: new/changed requests appear instantly — no manual refresh. */
   React.useEffect(() => {
-    const bump = (keys: string[][]) => {
-      keys.forEach((k) => qc.invalidateQueries({ queryKey: k }));
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-    };
+    // Debounced + no per-event haptic: a bulk roster create used to mean
+    // 50-100 refetches and 50-100 buzzes on this screen.
+    const bump = (keys: string[][]) => keys.forEach((k) => invalidateDebounced(qc, k));
     const ch = supabase
       .channel('crm-approvals-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'session_schedule' }, () => bump([['crm-reschedule-requests']]))
@@ -1159,7 +1182,7 @@ export function CrmApprovals() {
       {/* Schedule Session sheet — single-day roster approve (web CreateSessionDialog port) */}
       <Modal visible={!!schedFor} transparent animationType="slide" onRequestClose={() => !reviewM.isPending && setSchedFor(null)}>
         <Pressable onPress={() => !reviewM.isPending && setSchedFor(null)} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' }}>
-          <Pressable onPress={() => {}} style={{ backgroundColor: C.sheetBg, borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 10, paddingBottom: 26, maxHeight: '88%' }}>
+          <Pressable onPress={() => {}} style={{ backgroundColor: C.sheetBg, borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 10, paddingBottom: kb > 0 ? kb + 14 : 26, maxHeight: '88%' }}>
             <View style={{ alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.14)', marginBottom: 14 }} />
             <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 11, marginBottom: 14 }}>

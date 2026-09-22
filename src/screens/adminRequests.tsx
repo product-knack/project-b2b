@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, Pressable, TextInput, ActivityIndicator, Modal, Linking, Animated, Easing } from 'react-native';
+import { View, Text, Pressable, TextInput, ActivityIndicator, Modal, Linking, Animated, Easing, ScrollView } from 'react-native';
+import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import { LinearGradient } from 'expo-linear-gradient';
 import { C, F, hexA } from '../theme';
 import { Icon, IconName } from '../icons';
@@ -82,12 +83,13 @@ function ConfirmSheet({ action, title, clientName, detail, busy, onConfirm, onCl
   action: 'approve' | 'reject'; title: string; clientName: string; detail?: React.ReactNode;
   busy: boolean; onConfirm: (notes: string) => void; onClose: () => void;
 }) {
+  const kb = useKeyboardHeight(); // Android edge-to-edge: lift the sheet above the keyboard
   const [notes, setNotes] = React.useState('');
   const col = action === 'approve' ? C.green : C.red;
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.62)', justifyContent: 'flex-end' }}>
-        <View style={{ backgroundColor: '#0E0A09', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 14, paddingBottom: 24 }}>
+        <View style={{ maxHeight: '90%', backgroundColor: '#0E0A09', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 14, paddingBottom: kb > 0 ? kb + 14 : 24 }}>
           <View style={{ width: 40, height: 4, borderRadius: 99, backgroundColor: 'rgba(255,255,255,0.2)', alignSelf: 'center', marginBottom: 12 }} />
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9, marginBottom: 8 }}>
             <View style={{ flex: 1 }}>
@@ -98,6 +100,7 @@ function ConfirmSheet({ action, title, clientName, detail, busy, onConfirm, onCl
               <Icon name="close" size={13} color="#B8B2AC" strokeWidth={2.3} />
             </Pressable>
           </View>
+          <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           {detail ? <View style={{ marginBottom: 10 }}>{detail}</View> : null}
           <Mono style={{ fontSize: 8.5, letterSpacing: 0.8, color: C.mono2, marginBottom: 5 }}>{action === 'approve' ? 'NOTES (OPTIONAL)' : 'REJECTION REASON'}</Mono>
           <TextInput value={notes} onChangeText={setNotes} multiline placeholder={action === 'approve' ? 'Add any notes…' : 'Explain why this request is being rejected…'} placeholderTextColor={C.muted3}
@@ -105,6 +108,7 @@ function ConfirmSheet({ action, title, clientName, detail, busy, onConfirm, onCl
           <Pressable disabled={busy} onPress={() => onConfirm(notes)} style={{ alignItems: 'center', paddingVertical: 12, borderRadius: 12, backgroundColor: hexA(col, busy ? 0.06 : 0.16), borderWidth: 1, borderColor: hexA(col, busy ? 0.2 : 0.5) }}>
             <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: busy ? C.muted3 : col }}>{busy ? 'Processing…' : action === 'approve' ? 'Confirm Approval' : 'Confirm Rejection'}</Text>
           </Pressable>
+          </ScrollView>
         </View>
       </View>
     </Modal>
@@ -385,6 +389,7 @@ function ClientFormSheet({ title, initFirst, initLast, initPhone, busy, onSubmit
   title: string; initFirst: string; initLast: string; initPhone: string; busy: boolean;
   onSubmit: (f: { firstName: string; lastName: string; email: string; phone: string; goal: string }) => void; onClose: () => void;
 }) {
+  const kb = useKeyboardHeight(); // Android edge-to-edge: lift the sheet above the keyboard
   const [first, setFirst] = React.useState(initFirst);
   const [last, setLast] = React.useState(initLast);
   const [email, setEmail] = React.useState('');
@@ -394,7 +399,7 @@ function ClientFormSheet({ title, initFirst, initLast, initPhone, busy, onSubmit
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.62)', justifyContent: 'flex-end' }}>
-        <View style={{ maxHeight: '92%', backgroundColor: '#0E0A09', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 14, paddingBottom: 24 }}>
+        <View style={{ maxHeight: '92%', backgroundColor: '#0E0A09', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 14, paddingBottom: kb > 0 ? kb + 14 : 24 }}>
           <View style={{ width: 40, height: 4, borderRadius: 99, backgroundColor: 'rgba(255,255,255,0.2)', alignSelf: 'center', marginBottom: 12 }} />
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9, marginBottom: 10 }}>
             <Serif style={{ flex: 1, fontSize: 18 }}>{title}</Serif>
@@ -402,7 +407,7 @@ function ClientFormSheet({ title, initFirst, initLast, initPhone, busy, onSubmit
               <Icon name="close" size={13} color="#B8B2AC" strokeWidth={2.3} />
             </Pressable>
           </View>
-          <View style={{ gap: 9 }}>
+          <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 9 }}>
             <View style={{ flexDirection: 'row', gap: 8 }}>
               <TextInput value={first} onChangeText={setFirst} placeholder="First name *" placeholderTextColor={C.muted3} style={[inp, { flex: 1 }]} />
               <TextInput value={last} onChangeText={setLast} placeholder="Last name" placeholderTextColor={C.muted3} style={[inp, { flex: 1 }]} />
@@ -414,7 +419,7 @@ function ClientFormSheet({ title, initFirst, initLast, initPhone, busy, onSubmit
               style={{ alignItems: 'center', paddingVertical: 12, borderRadius: 12, backgroundColor: hexA(C.green, busy || !first.trim() || !email.trim() ? 0.06 : 0.16), borderWidth: 1, borderColor: hexA(C.green, busy || !first.trim() || !email.trim() ? 0.2 : 0.5) }}>
               <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: busy || !first.trim() || !email.trim() ? C.muted3 : C.green }}>{busy ? 'Creating…' : 'Create client'}</Text>
             </Pressable>
-          </View>
+          </ScrollView>
         </View>
       </View>
     </Modal>
@@ -559,6 +564,7 @@ function RefLeadsTab() {
 const payStatusColor = (s: string | null) => (s === 'paid' ? C.green : s === 'awaiting_payment' ? C.blue : s === 'failed' || s === 'rejected' || s === 'cancelled' || s === 'expired' ? C.red : C.gold);
 const methodLabel = (m: string | null) => (m === 'bank_transfer' ? 'Bank Transfer' : m === 'razorpay' ? 'Razorpay' : m === 'cash' ? 'Cash' : m ?? '—');
 function RenewalPayTab({ profileId }: { profileId: string | null }) {
+  const kb = useKeyboardHeight(); // Android edge-to-edge: lift the sheet above the keyboard
   const q = useRenewalPayRequests();
   const decide = useDecideRenewalPayment();
   const markPaid = useMarkRenewalCashPaid();
@@ -627,7 +633,7 @@ function RenewalPayTab({ profileId }: { profileId: string | null }) {
       {payingId ? (
         <Modal visible transparent animationType="slide" onRequestClose={() => setPayingId(null)}>
           <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.62)', justifyContent: 'flex-end' }}>
-            <View style={{ backgroundColor: '#0E0A09', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 14, paddingBottom: 24, gap: 10 }}>
+            <View style={{ maxHeight: '90%', backgroundColor: '#0E0A09', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 14, paddingBottom: kb > 0 ? kb + 14 : 24, gap: 10 }}>
               <View style={{ width: 40, height: 4, borderRadius: 99, backgroundColor: 'rgba(255,255,255,0.2)', alignSelf: 'center' }} />
               <Serif style={{ fontSize: 18 }}>Mark payment received</Serif>
               <Body style={{ fontSize: 11, color: C.muted2 }}>This marks the request as paid and updates the client's package immediately. This cannot be undone.</Body>
@@ -651,6 +657,7 @@ function RenewalPayTab({ profileId }: { profileId: string | null }) {
 
 /* ---------------- Tab: Invoice Raised (generate the payment) ---------------- */
 function InvoiceRaisedTab({ profileId }: { profileId: string | null }) {
+  const kb = useKeyboardHeight(); // Android edge-to-edge: lift the sheet above the keyboard
   const pendingQ = useInvoiceRaisedRows();
   const reqQ = useLeadInvoiceRequests();
   const generate = useGenerateLeadPayment();
@@ -754,7 +761,7 @@ function InvoiceRaisedTab({ profileId }: { profileId: string | null }) {
       {genLead ? (
         <Modal visible transparent animationType="slide" onRequestClose={() => setGenLead(null)}>
           <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.62)', justifyContent: 'flex-end' }}>
-            <View style={{ backgroundColor: '#0E0A09', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 14, paddingBottom: 24, gap: 10 }}>
+            <View style={{ maxHeight: '90%', backgroundColor: '#0E0A09', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 14, paddingBottom: kb > 0 ? kb + 14 : 24, gap: 10 }}>
               <View style={{ width: 40, height: 4, borderRadius: 99, backgroundColor: 'rgba(255,255,255,0.2)', alignSelf: 'center' }} />
               <Serif style={{ fontSize: 18 }}>Generate Payment</Serif>
               <Body style={{ fontSize: 11, color: C.muted2 }}>{genLead.name} · ₹{Number(genLead.invoice_details?.amount ?? 0).toLocaleString('en-IN')} · {genLead.invoice_details?.sessions_in_package} sessions · {genLead.invoice_details?.subscription_type ?? '—'}</Body>

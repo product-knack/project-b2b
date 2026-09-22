@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from './supabase';
+import { invokeWithTimeout, uploadWithTimeout, SLOW_FN_MS } from './withTimeout';
 
 /* ============ CRM Clients list + Client Details — mirrors the web CRMClients /
    CRMClientDetails contracts (useCRMClients, useCRMClientDetails,
@@ -103,7 +104,9 @@ export function useCrmClientDetail(clientId: string | null) {
         .select('trainer_id, actively_training, profiles:trainer_id(id, first_name, last_name, role)')
         .eq('client_id', clientId);
       const active = ((tc ?? []) as any[]).filter((t) => t.actively_training && t.profiles);
-      const trainers = active.filter((t) => t.profiles.role === 'trainer').map((t) => ({ id: t.profiles.id, name: fullName(t.profiles), role: t.profiles.role }));
+      // Everyone actively training the client, not only role 'trainer': an assigned
+      // doctor or therapist used to vanish from the card the moment they were assigned.
+      const trainers = active.filter((t) => ['trainer', 'doctor', 'therapist'].includes(t.profiles.role)).map((t) => ({ id: t.profiles.id, name: fullName(t.profiles), role: t.profiles.role }));
       const crms = active.filter((t) => t.profiles.role === 'crm').map((t) => ({ id: t.profiles.id, name: fullName(t.profiles) }));
       // Latest assessment → basicInfo (age/gender/height/weight/dob).
       const { data: assess } = await supabase
@@ -355,7 +358,7 @@ export function useTrainingFrequency(clientId: string | null, period: FreqPeriod
 export const COMM_CATEGORIES = ['Regular Touch Point', 'After 3 Session Feedback', 'After 6 Session Feedback', 'Renewal', 'Upsell'] as const;
 export const COMM_STATUSES = ['Follow Up Done', 'Follow-up Required', 'Not Responding', 'Counselling Done', 'Call Rescheduled', 'Client Not Available'] as const;
 export const COMM_MEDIUMS = ['phone', 'whatsapp', 'email'] as const;
-export type CommEntry = { id: string; callDate: string; status: string | null; category: string | null; medium: string | null; remarks: string | null; followUp: string | null; overdue: boolean };
+export type CommEntry = { id: string; callDate: string; status: string | null; category: string | null; medium: string | null; remarks: string | null; followUp: string | null; overdue: boolean; voicePath: string | null; voiceSec: number | null };
 export function useClientComms(clientId: string | null) {
   return useQuery({
     queryKey: ['crm-client-comms', clientId],
@@ -364,7 +367,7 @@ export function useClientComms(clientId: string | null) {
     queryFn: async (): Promise<CommEntry[]> => {
       const { data, error } = await supabase
         .from('crm_communications')
-        .select('id, call_date, call_status, call_medium, category, remarks, next_follow_up_date')
+        .select('id, call_date, call_status, call_medium, category, remarks, next_follow_up_date, voice_note_path, voice_note_duration_sec')
         .eq('client_id', clientId).order('call_date', { ascending: false }).limit(50);
       if (error) throw new Error(error.message);
       const now = Date.now();
@@ -372,6 +375,7 @@ export function useClientComms(clientId: string | null) {
         id: r.id, callDate: r.call_date, status: r.call_status ?? null, category: r.category ?? null,
         medium: r.call_medium ?? null, remarks: r.remarks ?? null, followUp: r.next_follow_up_date ?? null,
         overdue: r.call_status !== 'Follow Up Done' && !!r.next_follow_up_date && new Date(r.next_follow_up_date).getTime() < now,
+        voicePath: r.voice_note_path ?? null, voiceSec: r.voice_note_duration_sec ?? null,
       }));
     },
   });
@@ -383,12 +387,14 @@ export type CommsBookRow = {
   clientId: string; clientName: string; phone: string | null;
   commId: string; callDate: string; status: string | null; medium: string | null;
   category: string | null; remarks: string | null; followUp: string | null; overdue: boolean;
+  voicePath: string | null;
 };
 /* One entry in the full chronological log (every communication, not deduped). */
 export type CommLogRow = {
   id: string; clientId: string; clientName: string; phone: string | null;
   callDate: string; status: string | null; medium: string | null;
   category: string | null; remarks: string | null; followUp: string | null; overdue: boolean;
+  voicePath: string | null;
 };
 export type CommsBook = {
   rows: CommsBookRow[];   // latest touch point per client
@@ -406,7 +412,7 @@ export function useCrmCommsBook(crmId: string | null) {
     queryFn: async (): Promise<CommsBook> => {
       const { data, error } = await supabase
         .from('crm_communications')
-        .select('id, client_id, call_date, call_status, call_medium, category, remarks, next_follow_up_date, clients(id, first_name, last_name, phone)')
+        .select('id, client_id, call_date, call_status, call_medium, category, remarks, next_follow_up_date, voice_note_path, clients(id, first_name, last_name, phone)')
         .eq('crm_id', crmId)
         .order('call_date', { ascending: false })
         .limit(5000);
@@ -421,7 +427,7 @@ export function useCrmCommsBook(crmId: string | null) {
           id: cm.id, clientId: cm.client_id, clientName: cl ? fullName(cl) : 'Client', phone: cl?.phone ?? null,
           callDate: cm.call_date, status: cm.call_status ?? null, medium: cm.call_medium ?? null,
           category: cm.category ?? null, remarks: cm.remarks ?? null, followUp: cm.next_follow_up_date ?? null,
-          overdue: overdueOf(cm),
+          overdue: overdueOf(cm), voicePath: cm.voice_note_path ?? null,
         };
       });
       // Latest comm per client (rows come newest-first).
@@ -434,7 +440,7 @@ export function useCrmCommsBook(crmId: string | null) {
           commId: cm.id, callDate: cm.call_date, status: cm.call_status ?? null,
           medium: cm.call_medium ?? null, category: cm.category ?? null, remarks: cm.remarks ?? null,
           followUp: cm.next_follow_up_date ?? null,
-          overdue: overdueOf(cm),
+          overdue: overdueOf(cm), voicePath: cm.voice_note_path ?? null,
         });
       });
       // 30-day analytics (same window + formulas as the web).
@@ -465,7 +471,7 @@ export function useCrmCommsBook(crmId: string | null) {
 export function useLogCommunication() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { crmId: string; clientId: string; category: string; status: string; medium: string | null; remarks: string; followUpDate: string | null }) => {
+    mutationFn: async (input: { crmId: string; clientId: string; category: string; status: string; medium: string | null; remarks: string; followUpDate: string | null; voiceNotePath?: string | null; voiceNoteDurationSec?: number | null }) => {
       if (!input.remarks.trim()) throw new Error('Remarks are required');
       const { error } = await supabase.from('crm_communications').insert({
         crm_id: input.crmId,
@@ -476,6 +482,9 @@ export function useLogCommunication() {
         category: input.category,
         remarks: input.remarks.trim(),
         next_follow_up_date: input.followUpDate,
+        // Voice memo (web parity, 15 Sep 2026): storage path + length; both NULL on plain entries.
+        voice_note_path: input.voiceNotePath ?? null,
+        voice_note_duration_sec: input.voiceNoteDurationSec ?? null,
       });
       if (error) throw new Error(error.message);
     },
@@ -484,6 +493,66 @@ export function useLogCommunication() {
       qc.invalidateQueries({ queryKey: ['crm-comms-book'] });
       qc.invalidateQueries({ queryKey: ['crm-stale-comms'] });
       qc.invalidateQueries({ queryKey: ['crm-pending-comms'] });
+    },
+  });
+}
+
+/* ---------- E3. Voice memos on a communication (web parity, 15 Sep 2026) ----------
+   Bucket `crm-voice-notes` (private, 25 MB, RLS roles crm / admin / super_admin /
+   ops), object path `<client_id>/<auth_user_id>-<epoch_ms>.<ext>`. The edge
+   function `transcribe-crm-voice-note` reads the object back with the service
+   role and returns a verbatim Gemini transcript, so the file must be uploaded
+   BEFORE transcription. Playback signs the path for an hour, like the web. */
+export const VOICE_BUCKET = 'crm-voice-notes';
+export const VOICE_MAX_MS = 5 * 60_000;      // web ceiling: 5 minutes
+const VOICE_MIN_BYTES = 4 * 1024;             // web rejects empty takes under 4 KB client-side
+const VOICE_MAX_BYTES = 25 * 1024 * 1024;
+
+/** Edge-function errors hide the JSON body behind error.context; surface its message. */
+async function fnMessage(error: any, fallback: string): Promise<string> {
+  try {
+    if (error?.context?.text) {
+      const j = JSON.parse(await error.context.text());
+      if (j?.error) return String(j.error);
+    }
+  } catch { /* not JSON */ }
+  return error?.message || fallback;
+}
+
+export async function uploadCrmVoiceNote(clientId: string, userId: string, memo: { uri: string; name: string; mime: string }): Promise<string> {
+  const ext = (memo.name.split('.').pop() || 'm4a').toLowerCase();
+  const path = `${clientId}/${userId}-${Date.now()}.${ext}`;
+  // fetch → arrayBuffer is the RN-safe route for file:// recorder uris.
+  const body = await (await fetch(memo.uri)).arrayBuffer();
+  if (body.byteLength < VOICE_MIN_BYTES) throw new Error('The recording is empty. Try again.');
+  if (body.byteLength > VOICE_MAX_BYTES) throw new Error('The recording is over 25 MB.');
+  const { error } = await uploadWithTimeout(VOICE_BUCKET, path, body, { contentType: memo.mime, upsert: false });
+  if (error) throw new Error(error.message);
+  return path;
+}
+
+/** Verbatim transcript of an uploaded memo; '' means no clear speech was detected. */
+export async function transcribeCrmVoiceNote(path: string, mimeType: string): Promise<string> {
+  const { data, error } = await invokeWithTimeout('transcribe-crm-voice-note', { body: { path, mimeType } }, SLOW_FN_MS);
+  if (error) throw new Error(await fnMessage(error, 'Transcription failed'));
+  return typeof data?.text === 'string' ? data.text.trim() : '';
+}
+
+/** Best-effort: a memo the CRM discarded before saving must not linger in the bucket. */
+export async function removeCrmVoiceNote(path: string): Promise<void> {
+  try { await supabase.storage.from(VOICE_BUCKET).remove([path]); } catch { /* orphan at worst */ }
+}
+
+/** Signed playback URL, 1 hour like the web; refreshed a little before it expires. */
+export function useSignedVoiceUrl(path: string | null) {
+  return useQuery({
+    queryKey: ['crm-voice-url', path],
+    enabled: !!path,
+    staleTime: 50 * 60_000,
+    queryFn: async (): Promise<string | null> => {
+      const { data, error } = await supabase.storage.from(VOICE_BUCKET).createSignedUrl(path as string, 3600);
+      if (error) throw new Error(error.message);
+      return data?.signedUrl ?? null;
     },
   });
 }
@@ -531,6 +600,30 @@ export function useSetClientStatus() {
         category: 'Regular Touch Point',
         remarks: `Status changed to ${input.toStatus}${input.reason ? ` — ${input.reason}` : ''}`,
       });
+    },
+    onSuccess: (_r, v) => {
+      qc.invalidateQueries({ queryKey: ['crm-client-detail', v.clientId] });
+      qc.invalidateQueries({ queryKey: ['crm-client-list'] });
+    },
+  });
+}
+
+/* ---------- Irregular client flag (web useIrregularClient.ts parity) ----------
+   clients.irregular_client jsonb = { marked, at, by, by_name, note, history[] }.
+   Written ONLY via rpc toggle_irregular_client (server stamps who/when, keeps
+   the last 50 toggles; 42501 when the CRM is not assigned to the client). */
+export type IrregularMark = { marked: boolean; at: string; by: string | null; by_name: string | null; note?: string | null; history?: any[] };
+export const readIrregularMark = (raw: any): IrregularMark | null =>
+  raw && typeof raw === 'object'
+    ? { marked: raw.marked === true, at: typeof raw.at === 'string' ? raw.at : '', by: raw.by ?? null, by_name: raw.by_name ?? null, note: raw.note ?? null, history: Array.isArray(raw.history) ? raw.history : [] }
+    : null;
+export function useToggleIrregularClient() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { clientId: string; note?: string }): Promise<IrregularMark> => {
+      const { data, error } = await supabase.rpc('toggle_irregular_client', { _client_id: input.clientId, _note: input.note?.trim() || null } as any);
+      if (error) throw new Error(error.message);
+      return readIrregularMark(data) ?? { marked: false, at: '', by: null, by_name: null, history: [] };
     },
     onSuccess: (_r, v) => {
       qc.invalidateQueries({ queryKey: ['crm-client-detail', v.clientId] });

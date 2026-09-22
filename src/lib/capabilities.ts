@@ -59,7 +59,10 @@ const EMPTY: Capabilities = {
   isPilatesHead: false,
 };
 
-export function useMyCapabilities(): { data: Capabilities; isLoading: boolean } {
+/* `isPending` (no data yet — loading OR paused offline) and `isError` are exposed
+   so gated screens can show "Checking access…" / "Couldn't verify — Retry"
+   instead of rendering EMPTY (= every flag false) as a hard denial. */
+export function useMyCapabilities(): { data: Capabilities; isLoading: boolean; isPending: boolean; isPaused: boolean; isError: boolean; refetch: () => void } {
   const { session } = useAuth();
   const uid = session?.user?.id ?? null;
   const q = useQuery({
@@ -93,5 +96,5 @@ export function useMyCapabilities(): { data: Capabilities; isLoading: boolean } 
       };
     },
   });
-  return { data: q.data ?? EMPTY, isLoading: q.isLoading };
+  return { data: q.data ?? EMPTY, isLoading: q.isLoading, isPending: q.isPending, isPaused: q.fetchStatus === 'paused', isError: q.isError, refetch: () => { q.refetch(); } };
 }

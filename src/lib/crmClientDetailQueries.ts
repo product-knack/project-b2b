@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from './supabase';
+import { invokeWithTimeout } from './withTimeout';
 
 /* ============ CRM Client Detail — tabs + actions data layer.
    Mirrors the web CRMClientDetails contracts:
@@ -441,7 +442,7 @@ export function useResumeJourney() {
       const { error } = await supabase
         .from('client_pause_history').update({ is_active: false, pause_end: today }).eq('id', input.pauseId);
       if (error) throw new Error(error.message);
-      try { await supabase.functions.invoke('notify-pause-ended', { body: { pause_id: input.pauseId } }); } catch { /* best-effort */ }
+      try { await invokeWithTimeout('notify-pause-ended', { body: { pause_id: input.pauseId } }); } catch { /* best-effort */ }
       await pauseCommLog(input.clientId, input.crmId, 'Journey Resumed',
         `Journey Resumed on ${today}${input.pausedSince ? ` (was paused since ${input.pausedSince})` : ''}`);
     },
@@ -531,7 +532,9 @@ export function useStaffDirectory() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('profiles').select('id, first_name, last_name, role')
-        .in('role', ['trainer', 'doctor']).order('first_name', { ascending: true });
+        // Everyone who can be actively training a client. Therapists were added as a
+        // role after this list was written and silently never appeared in Assign Team.
+        .in('role', ['trainer', 'doctor', 'therapist']).order('first_name', { ascending: true });
       if (error) throw new Error(error.message);
       return ((data ?? []) as any[]).map((p) => ({ id: p.id, name: fullName(p), role: p.role as string }));
     },
@@ -598,7 +601,7 @@ export function useClientCredentials(client: { id: string; profile_id: string | 
 export function useTenDayInsight() {
   return useMutation({
     mutationFn: async (clientId: string) => {
-      const { data, error } = await supabase.functions.invoke('crm-client-10day-summary', { body: { client_id: clientId } });
+      const { data, error } = await invokeWithTimeout('crm-client-10day-summary', { body: { client_id: clientId } });
       if (error) throw new Error(error.message ?? 'Insight service unavailable');
       return data as { activity_snapshot?: string; doctor_notes?: string; conversation_starters?: string[] | string };
     },

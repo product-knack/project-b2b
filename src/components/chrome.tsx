@@ -5,12 +5,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { C, F, hexA, ORANGE_GRAD } from '../theme';
 import { Icon, MenuIcon, IconName } from '../icons';
 import { useStore } from '../store';
-import { trainerNav, crmNav, coachNav, opsNav, adminNav, doctorNav, marketingNav, academyNav, bottomTabs, tabMap } from '../data';
+import { trainerNav, crmNav, coachNav, opsNav, adminNav, doctorNav, consultantNav, therapistNav, marketingNav, academyNav, techNav, bottomTabs, tabMap } from '../data';
+import { useDoctorIdentity } from '../lib/doctorQueries';
 import { OddsWordmark } from './oddsAi';
 import { useAuth } from '../auth';
 import { useSidebarProfile, useNavBadges } from '../lib/navQueries';
 import { useMyCapabilities } from '../lib/capabilities';
 import { useMyAcademyLink } from '../lib/academyAttendanceQueries';
+import { canUseTechDesk, useTechDeskBadge } from '../lib/techDeskQueries';
 
 /* ---------- Top header (logo + hamburger) ---------- */
 export function Header() {
@@ -21,6 +23,8 @@ export function Header() {
       {/* left: menu */}
       <Pressable
         onPress={openDrawer}
+        accessibilityRole="button"
+        accessibilityLabel="Open menu"
         style={{ width: 42, height: 42, borderRadius: 13, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(242,107,26,0.32)', backgroundColor: 'rgba(242,107,26,0.10)' }}
       >
         <MenuIcon />
@@ -108,6 +112,8 @@ function NavRow({ label, icon, active, badgeText, onPress, isNew }: { label: str
   return (
     <Pressable
       onPress={onPress}
+      accessibilityRole="button"
+      accessibilityState={{ selected: !!active }}
       onPressIn={() => Animated.spring(press, { toValue: 1, useNativeDriver: false, speed: 40, bounciness: 0 }).start()}
       onPressOut={() => Animated.spring(press, { toValue: 0, useNativeDriver: false, speed: 26, bounciness: 6 }).start()}
     >
@@ -131,10 +137,12 @@ function NavRow({ label, icon, active, badgeText, onPress, isNew }: { label: str
 
 /* ---------- Side drawer ("More") ---------- */
 export function Drawer() {
-  const { drawerOpen, closeDrawer, role, route, go, set } = useStore();
-  const { signOut, session } = useAuth();
+  const { drawerOpen, closeDrawer, role, route, go, set, resetSession } = useStore();
+  const { signOut, session, dbRole } = useAuth();
   const insets = useSafeAreaInsets();
-  const baseGroups = role === 'crm' ? crmNav : role === 'coach' ? coachNav : role === 'ops' ? opsNav : role === 'admin' ? adminNav : role === 'doctor' ? doctorNav : role === 'marketing' ? marketingNav : role === 'academy' ? academyNav : trainerNav;
+  // A consultant doctor gets the web's trimmed sidebar (Consultant Dashboard, All Calls, ...); the profile read runs for doctors only.
+  const doctorIdent = useDoctorIdentity(role === 'doctor');
+  const baseGroups = role === 'tech' ? techNav : role === 'crm' ? crmNav : role === 'coach' ? coachNav : role === 'ops' ? opsNav : role === 'admin' ? adminNav : role === 'doctor' ? (doctorIdent.data.isConsultant ? consultantNav : doctorNav) : role === 'therapist' ? therapistNav : role === 'marketing' ? marketingNav : role === 'academy' ? academyNav : trainerNav;
   // Web-parity sidebar injection: any app role linked in academy_users as an
   // active teacher/student gets an Odds Academy entry — the link, not the app
   // role, decides (a doctor or trainer can be an academy teacher).
@@ -148,12 +156,15 @@ export function Drawer() {
   const profile = useSidebarProfile();
   const badges = useNavBadges();
   const caps = useMyCapabilities();
+  const techBadge = useTechDeskBadge();
   // Trainer sub-role gating — mirrors the web sidebar:
   //  QHP Manager & Stats → can_schedule_assessments_for_others; QHP → assessor/view-all;
   //  Managers Dashboard/Overview & QHP Overview → profile.managers;
   //  Trainers Tracker → role_specialization 'trainer-manager';
   //  Trainer Roster → can_view_all_trainers; Workout Analyst → workout_analysist.
   const itemVisible = (it: { route: string; label: string }) => {
+    // Tech Desk is for every staff role except super_admin (which never sees it).
+    if (it.route === 'tech-desk' || it.route === 'tech-desk-inbox') return canUseTechDesk(dbRole);
     if (it.route === 'qhp-manager') return caps.data.isQhpManager;
     if (it.route === 'qhp-stats') return role === 'ops' || caps.data.isQhpManager; // ops sees QHP Stats by role (web parity)
     if (it.route === 'qhp') return caps.data.isQhpManager || caps.data.canConductAssessments || caps.data.canViewAllAssessments || caps.data.qhpReportCreator;
@@ -169,6 +180,7 @@ export function Drawer() {
     if (it.route === 'plans-analyst') return caps.data.workoutComplianceAnalyst;
     if (it.route === 'academy-senior-analyst') return caps.data.seniorAnalyst;
     if (it.route === 'doctor-rehab-recommendation') return caps.data.isPhysioHod;
+    if (it.route === 'doctor-reimbursement-review') return caps.data.isPhysioHod; // doctors' manager reviews reimbursements
     // Doctor HOD-only surfaces — the web hardcodes the Head Doctor uuid (doc §0).
     if (it.route === 'doctor-all-clients' || it.route === 'doctor-roster' || it.route === 'doctor-protocol-approvals') {
       return session?.user?.id === '30df5c2b-0f40-4736-9f41-7cbc830a191a';
@@ -177,18 +189,19 @@ export function Drawer() {
   };
   return (
     <Modal visible={drawerOpen} transparent animationType="fade" onRequestClose={closeDrawer}>
-      <Pressable onPress={closeDrawer} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)' }}>
-        <Pressable onPress={() => {}} style={[styles.drawerPanel, { paddingTop: insets.top + 14 }]}>
+      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)' }}>
+        <Pressable onPress={closeDrawer} accessibilityRole="button" accessibilityLabel="Close menu" importantForAccessibility="no-hide-descendants" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} />
+        <View accessibilityViewIsModal style={[styles.drawerPanel, { paddingTop: insets.top + 14 }]}>
           {/* Header: brand + close */}
           <View style={styles.drawerHead}>
             <OddsWordmark height={24} />
-            <Pressable onPress={closeDrawer} style={styles.closeBtn}>
+            <Pressable onPress={closeDrawer} accessibilityRole="button" accessibilityLabel="Close menu" style={styles.closeBtn}>
               <Icon name="close" size={15} color="#B8B2AC" strokeWidth={2.3} />
             </Pressable>
           </View>
 
           {/* Profile strip */}
-          <Pressable onPress={() => go('profile')} style={styles.profileStrip}>
+          <Pressable onPress={() => go('profile')} accessibilityRole="button" accessibilityLabel="Open my profile" style={styles.profileStrip}>
             {profile.avatarUrl ? (
               <Image source={{ uri: profile.avatarUrl }} style={styles.profileAvatar} />
             ) : (
@@ -216,7 +229,8 @@ export function Drawer() {
                 <View style={styles.groupCard}>
                   {items.map((item, i) => {
                     const active = route === item.route;
-                    const count = badges[item.route] ?? 0;
+                    const isTech = item.route === 'tech-desk' || item.route === 'tech-desk-inbox';
+                    const count = isTech ? (techBadge.data?.count ?? 0) : (badges[item.route] ?? 0);
                     const badgeText = count > 0 ? (count > 99 ? '99+' : String(count)) : null;
                     return (
                       <NavRow
@@ -241,12 +255,12 @@ export function Drawer() {
           </ScrollView>
 
           {/* Logout footer */}
-          <Pressable onPress={() => { signOut(); go('signin', true); }} style={[styles.logoutRow, { paddingBottom: insets.bottom + 14 }]}>
+          <Pressable onPress={() => { resetSession(); signOut(); go('signin', true); }} accessibilityRole="button" accessibilityLabel="Log out" style={[styles.logoutRow, { paddingBottom: insets.bottom + 14 }]}>
             <Icon name="logout" size={17} color={C.red} strokeWidth={2} />
             <Text style={{ fontFamily: F.bodySemi, fontSize: 13.5, color: C.red }}>Log out</Text>
           </Pressable>
-        </Pressable>
-      </Pressable>
+        </View>
+      </View>
     </Modal>
   );
 }

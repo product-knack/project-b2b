@@ -28,7 +28,7 @@ const WARM_INTERVAL_HOURS = 3;
 const LAST_KEY = 'offline-warmup:lastAt';
 const BATCH_SIZE = 4;
 const BATCH_DELAY_MS = 4000;
-const MAX_CLIENTS = 40;
+const MAX_CLIENTS = 10; // was 40: the warm-up alone put 320 queries through the persisted cache
 
 export function OfflineWarmup() {
   const { session, dbRole } = useAuth();
@@ -105,10 +105,11 @@ function TrainerWarm({ uid, trainerId, onDone }: { uid: string; trainerId: strin
 /* One client's full detail bundle — mirrors what ClientDetail mounts. */
 function WarmClient({ clientId }: { clientId: string }) {
   useClientDetail(clientId);
-  useClientSessions(clientId);
+  // useClientSessions / useClientReports deliberately NOT warmed: they carry the
+  // heavy payloads (AI analysis blobs, full QHP json, extracted lab data) that
+  // bloated the persisted cache. They load on demand when a client is opened.
   useClientPlans(clientId);
   useClientGoals(clientId);
-  useClientReports(clientId);
   useClientBioAge(clientId);
   useClientProgression(clientId);
   useClientDailyStats(clientId);
