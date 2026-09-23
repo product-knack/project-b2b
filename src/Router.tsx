@@ -478,11 +478,11 @@ export function Router() {
   }, []);
   const { session, loading, role: accountRole } = useAuth();
   useEffect(() => { shotUidRef.current = session?.user?.id ?? null; }, [session?.user?.id]);
-  // The consultant's home is the shared 'doctor-dashboard' route (it forks to the
-  // Consultant Dashboard), so the Odds AI launcher must be hidden there too, not
-  // only on the explicit consultant routes (user request, 23 Sep 2026).
+  // A consultant doctor never gets the Odds AI / Home launcher: the light pages
+  // carry their own bottom pill and the profile and client record have back
+  // links (user request, 23 Sep 2026: no Odds AI button, no Home button).
   const doctorIdent = useDoctorIdentity(role === 'doctor');
-  const consultantHome = role === 'doctor' && doctorIdent.data.isConsultant && route === 'doctor-dashboard';
+  const consultant = role === 'doctor' && doctorIdent.data.isConsultant;
 
   // Android system back: close overlays first, then pop in-app history, then land on
   // the role's dashboard; only exit the app from the dashboard itself. (Modals with
@@ -565,7 +565,7 @@ export function Router() {
         {route !== 'workout' && route !== 'create-plan' && route !== 'messenger' && route !== 'manager-chat'
           && route !== 'tech-desk-ticket' && route !== 'tech-desk-inbox-ticket' && !threadViewOpen
           // The consultant pages carry their own bottom pill; the call screen must stay clear.
-          && route !== 'doctor-consultant-calls' && route !== 'doctor-consultant-dashboard' && route !== 'doctor-consultation-join' && !consultantHome ? (
+          && route !== 'doctor-consultant-calls' && route !== 'doctor-consultant-dashboard' && route !== 'doctor-consultation-join' && !consultant ? (
           <View pointerEvents="box-none" style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }}>
             <OddsAiBar />
           </View>
