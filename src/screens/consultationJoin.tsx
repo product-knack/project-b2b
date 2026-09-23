@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, Pressable, ActivityIndicator, Alert, Platform, PermissionsAndroid, Linking } from 'react-native';
 import { WebView } from 'react-native-webview';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { F } from '../theme';
 import { Icon } from '../icons';
 import { useStore } from '../store';
@@ -17,8 +18,46 @@ import { CX } from '../components/consultantUi';
    here therefore have no transcript of their own; the CRM's browser in the
    same room still records one when the CRM is present. */
 
+/* Runs inside the room page. The 100ms prebuilt's in-call toolbar is two
+   centred groups with 24px gaps: 460px at a 375px phone, so the leave button
+   sat off the left edge and the settings button off the right (reproduced in
+   a desktop browser at 375px on 23 Sep 2026). Tighter gaps fit it at 375; a
+   measuring pass then zooms the toolbar down on anything narrower or on a
+   browser without :has(). Selectors hang off the stable data-testid buttons,
+   never the hashed class names. Also stops the page's own rubber-banding. */
+const FIT_SCRIPT = `
+(function () {
+  try {
+    if (window.__oddsFit) return; window.__oddsFit = true;
+    var css = 'div:has(> div > [data-testid="leave_room_btn"]){gap:8px !important;justify-content:space-between !important;padding:8px 10px !important;width:100% !important;box-sizing:border-box !important}'
+      + 'div:has(> [data-testid="leave_room_btn"]),div:has(> [data-testid="more_settings_btn"]){gap:6px !important;flex-shrink:1 !important;min-width:0 !important}'
+      + 'html,body{overflow-x:hidden !important;overscroll-behavior:none !important;-webkit-tap-highlight-color:transparent}';
+    var style = document.createElement('style'); style.id = 'odds-app-fit'; style.textContent = css;
+    (document.head || document.documentElement).appendChild(style);
+    function fit() {
+      var leave = document.querySelector('[data-testid="leave_room_btn"]'); if (!leave) return;
+      var footer = leave.parentElement && leave.parentElement.parentElement; if (!footer) return;
+      footer.style.zoom = '';
+      var need = 20, kids = footer.children, visible = 0;
+      for (var i = 0; i < kids.length; i++) { var r = kids[i].getBoundingClientRect(); if (r.width > 0) { need += r.width; visible++; } }
+      need += 8 * Math.max(0, visible - 1);
+      var w = window.innerWidth;
+      if (need > w) footer.style.zoom = String(Math.max(0.7, w / need));
+    }
+    var t = null;
+    function schedule() { clearTimeout(t); t = setTimeout(fit, 150); }
+    new MutationObserver(schedule).observe(document.documentElement, { childList: true, subtree: true });
+    window.addEventListener('resize', schedule);
+    window.addEventListener('orientationchange', schedule);
+    schedule();
+  } catch (e) {}
+})();
+true;
+`;
+
 export function ConsultationJoin() {
   const { back } = useStore();
+  const insets = useSafeAreaInsets();
   const target = joinTargetRef.current;
   const ended = useCallEnded();
   const [perm, setPerm] = React.useState<'asking' | 'ok' | 'denied'>(Platform.OS === 'android' ? 'asking' : 'ok');
@@ -88,26 +127,42 @@ export function ConsultationJoin() {
           </View>
         </View>
       ) : (
-        <WebView
-          key={attempt}
-          source={{ uri: target.url }}
-          style={{ flex: 1, backgroundColor: '#000' }}
-          javaScriptEnabled
-          domStorageEnabled
-          mediaPlaybackRequiresUserAction={false}
-          allowsInlineMediaPlayback
-          allowsFullscreenVideo
-          originWhitelist={['*']}
-          setSupportMultipleWindows={false}
-          startInLoadingState
-          renderLoading={() => (
-            <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#000' }}>
-              <ActivityIndicator color={CX.indigoB} size="large" />
-            </View>
-          )}
-          onError={() => setFailed(true)}
-          onHttpError={(e) => { if (e.nativeEvent.statusCode >= 500) setFailed(true); }}
-        />
+        // The room fills the screen down to the home indicator; the inset keeps
+        // its toolbar above the swipe area so every button stays tappable.
+        <View style={{ flex: 1, paddingBottom: insets.bottom, backgroundColor: '#000' }}>
+          <WebView
+            key={attempt}
+            source={{ uri: target.url }}
+            style={{ flex: 1, backgroundColor: '#000' }}
+            javaScriptEnabled
+            domStorageEnabled
+            mediaPlaybackRequiresUserAction={false}
+            allowsInlineMediaPlayback
+            allowsFullscreenVideo
+            originWhitelist={['*']}
+            setSupportMultipleWindows={false}
+            injectedJavaScriptBeforeContentLoaded={FIT_SCRIPT}
+            injectedJavaScript={FIT_SCRIPT}
+            // Native-feeling page: no rubber-banding, no over-scroll glow, no
+            // back-swipe inside the page, no system font zoom on the toolbar.
+            bounces={false}
+            overScrollMode="never"
+            pullToRefreshEnabled={false}
+            allowsBackForwardNavigationGestures={false}
+            contentInsetAdjustmentBehavior="never"
+            automaticallyAdjustContentInsets={false}
+            textZoom={100}
+            setBuiltInZoomControls={false}
+            startInLoadingState
+            renderLoading={() => (
+              <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#000' }}>
+                <ActivityIndicator color={CX.indigoB} size="large" />
+              </View>
+            )}
+            onError={() => setFailed(true)}
+            onHttpError={(e) => { if (e.nativeEvent.statusCode >= 500) setFailed(true); }}
+          />
+        </View>
       )}
     </View>
   );
