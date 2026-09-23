@@ -2,7 +2,9 @@ import React from 'react';
 import { View, Text, Pressable, ScrollView, Image, StyleSheet, Modal, Animated, Easing } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
 import { C, F, hexA, ORANGE_GRAD } from '../theme';
+import { CX, INDIGO_GRAD } from './consultantUi';
 import { Icon, MenuIcon, IconName } from '../icons';
 import { useStore } from '../store';
 import { trainerNav, crmNav, coachNav, opsNav, adminNav, doctorNav, consultantNav, therapistNav, marketingNav, academyNav, techNav, bottomTabs, tabMap } from '../data';
@@ -14,24 +16,47 @@ import { useMyCapabilities } from '../lib/capabilities';
 import { useMyAcademyLink } from '../lib/academyAttendanceQueries';
 import { canUseTechDesk, useTechDeskBadge } from '../lib/techDeskQueries';
 
+/* A consultant doctor's workspace is the web's light indigo look; the header
+   and the drawer follow it (user request, 23 Sep 2026) while every other role
+   keeps the obsidian chrome. */
+export function useConsultantChrome(): boolean {
+  const { role } = useStore();
+  const ident = useDoctorIdentity(role === 'doctor');
+  return role === 'doctor' && ident.data.isConsultant;
+}
+
+/** The white wordmark on the web's indigo pill, for light surfaces. */
+function WordmarkPill({ height = 24 }: { height?: number }) {
+  return (
+    <LinearGradient colors={[CX.indigo, '#7d8bfd']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+      style={{ height: height + 16, borderRadius: 999, paddingHorizontal: 14, alignItems: 'center', justifyContent: 'center', shadowColor: CX.indigo, shadowOpacity: 0.35, shadowRadius: 10, shadowOffset: { width: 0, height: 6 }, elevation: 4 }}>
+      <OddsWordmark height={height} />
+    </LinearGradient>
+  );
+}
+
 /* ---------- Top header (logo + hamburger) ---------- */
 export function Header() {
-  const { openDrawer, go } = useStore();
+  const { openDrawer } = useStore();
   const insets = useSafeAreaInsets();
+  const light = useConsultantChrome();
   return (
-    <View style={{ paddingTop: insets.top + 8, paddingBottom: 12, paddingHorizontal: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+    <View style={{ paddingTop: insets.top + 8, paddingBottom: 12, paddingHorizontal: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: light ? CX.bgA : 'transparent' }}>
+      {light ? <StatusBar style="dark" /> : null}
       {/* left: menu */}
       <Pressable
         onPress={openDrawer}
         accessibilityRole="button"
         accessibilityLabel="Open menu"
-        style={{ width: 42, height: 42, borderRadius: 13, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(242,107,26,0.32)', backgroundColor: 'rgba(242,107,26,0.10)' }}
+        style={light
+          ? { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', backgroundColor: CX.white, shadowColor: '#4f5bd5', shadowOpacity: 0.14, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 2 }
+          : { width: 42, height: 42, borderRadius: 13, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(242,107,26,0.32)', backgroundColor: 'rgba(242,107,26,0.10)' }}
       >
-        <MenuIcon />
+        {light ? <MenuIcon color={CX.slate700} accent={CX.indigo} /> : <MenuIcon />}
       </Pressable>
 
       {/* center: brand logo */}
-      <OddsWordmark height={28} />
+      {light ? <WordmarkPill height={22} /> : <OddsWordmark height={28} />}
 
       {/* right: spacer keeps the logo centered */}
       <View style={{ width: 42, height: 42 }} />
@@ -100,15 +125,20 @@ function NewBadge() {
   );
 }
 
-function NavRow({ label, icon, active, badgeText, onPress, isNew }: { label: string; icon: IconName; active: boolean; badgeText: string | null; onPress: () => void; isNew?: boolean }) {
+function NavRow({ label, icon, active, badgeText, onPress, isNew, light }: { label: string; icon: IconName; active: boolean; badgeText: string | null; onPress: () => void; isNew?: boolean; light?: boolean }) {
   const press = React.useRef(new Animated.Value(0)).current;
   const act = React.useRef(new Animated.Value(active ? 1 : 0)).current;
   React.useEffect(() => {
     Animated.timing(act, { toValue: active ? 1 : 0, duration: 240, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start();
   }, [active]);
   const scale = press.interpolate({ inputRange: [0, 1], outputRange: [1, 0.965] });
-  const bg = act.interpolate({ inputRange: [0, 1], outputRange: ['rgba(255,255,255,0)', hexA(C.orange, 0.12)] });
-  const bd = act.interpolate({ inputRange: [0, 1], outputRange: ['rgba(255,255,255,0)', hexA(C.orange, 0.25)] });
+  // Ember for the dark drawer, indigo for the consultant's light one.
+  const accent = light ? CX.indigo : C.orange;
+  const bg = act.interpolate({ inputRange: [0, 1], outputRange: ['rgba(255,255,255,0)', light ? CX.indigo50 : hexA(C.orange, 0.12)] });
+  const bd = act.interpolate({ inputRange: [0, 1], outputRange: ['rgba(255,255,255,0)', light ? CX.indigo200 : hexA(C.orange, 0.25)] });
+  const chipBg = active ? (light ? CX.indigo100 : hexA(C.orange, 0.16)) : light ? CX.slate100 : 'rgba(255,255,255,0.04)';
+  const iconColor = active ? accent : light ? CX.slate500 : '#B8B2AC';
+  const textColor = active ? accent : light ? CX.slate700 : '#C8C2BC';
   return (
     <Pressable
       onPress={onPress}
@@ -119,15 +149,15 @@ function NavRow({ label, icon, active, badgeText, onPress, isNew }: { label: str
     >
       <Animated.View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, paddingHorizontal: 10, borderRadius: 12, backgroundColor: bg, borderWidth: 1, borderColor: bd, transform: [{ scale }] }}>
         {/* sliding left accent bar */}
-        <Animated.View style={{ position: 'absolute', left: 0, top: 9, bottom: 9, width: 3, borderRadius: 2, backgroundColor: C.orange, opacity: act, transform: [{ scaleY: act }] }} />
-        <View style={{ width: 30, height: 30, borderRadius: 9, alignItems: 'center', justifyContent: 'center', backgroundColor: active ? hexA(C.orange, 0.16) : 'rgba(255,255,255,0.04)' }}>
-          <Icon name={icon} size={15} color={active ? C.orange : '#B8B2AC'} strokeWidth={1.9} />
+        <Animated.View style={{ position: 'absolute', left: 0, top: 9, bottom: 9, width: 3, borderRadius: 2, backgroundColor: accent, opacity: act, transform: [{ scaleY: act }] }} />
+        <View style={{ width: 30, height: 30, borderRadius: 9, alignItems: 'center', justifyContent: 'center', backgroundColor: chipBg }}>
+          <Icon name={icon} size={15} color={iconColor} strokeWidth={1.9} />
         </View>
-        <Text style={{ flex: 1, fontSize: 13.5, fontFamily: active ? F.bodySemi : F.body, color: active ? C.orange : '#C8C2BC' }}>{label}</Text>
+        <Text style={{ flex: 1, fontSize: 13.5, fontFamily: active ? F.bodySemi : F.body, color: textColor }}>{label}</Text>
         {isNew ? <NewBadge /> : null}
         {badgeText ? (
-          <View style={styles.navBadge}>
-            <Text style={{ color: C.orange, fontSize: 10.5, fontFamily: F.bodyBold }}>{badgeText}</Text>
+          <View style={[styles.navBadge, light ? { backgroundColor: CX.indigo50 } : null]}>
+            <Text style={{ color: accent, fontSize: 10.5, fontFamily: F.bodyBold }}>{badgeText}</Text>
           </View>
         ) : null}
       </Animated.View>
@@ -187,33 +217,35 @@ export function Drawer() {
     }
     return true;
   };
+  // The consultant's drawer follows the light dashboard: white panel, indigo accents, slate text.
+  const light = role === 'doctor' && doctorIdent.data.isConsultant;
   return (
     <Modal visible={drawerOpen} transparent animationType="fade" onRequestClose={closeDrawer}>
-      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)' }}>
+      <View style={{ flex: 1, backgroundColor: light ? 'rgba(15,23,42,0.45)' : 'rgba(0,0,0,0.65)' }}>
         <Pressable onPress={closeDrawer} accessibilityRole="button" accessibilityLabel="Close menu" importantForAccessibility="no-hide-descendants" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }} />
-        <View accessibilityViewIsModal style={[styles.drawerPanel, { paddingTop: insets.top + 14 }]}>
+        <View accessibilityViewIsModal style={[styles.drawerPanel, { paddingTop: insets.top + 14 }, light ? { backgroundColor: CX.white, borderRightColor: CX.indigo100 } : null]}>
           {/* Header: brand + close */}
-          <View style={styles.drawerHead}>
-            <OddsWordmark height={24} />
-            <Pressable onPress={closeDrawer} accessibilityRole="button" accessibilityLabel="Close menu" style={styles.closeBtn}>
-              <Icon name="close" size={15} color="#B8B2AC" strokeWidth={2.3} />
+          <View style={[styles.drawerHead, light ? { borderBottomColor: CX.slate100 } : null]}>
+            {light ? <WordmarkPill height={20} /> : <OddsWordmark height={24} />}
+            <Pressable onPress={closeDrawer} accessibilityRole="button" accessibilityLabel="Close menu" style={[styles.closeBtn, light ? { backgroundColor: CX.slate100 } : null]}>
+              <Icon name="close" size={15} color={light ? CX.slate600 : '#B8B2AC'} strokeWidth={2.3} />
             </Pressable>
           </View>
 
           {/* Profile strip */}
-          <Pressable onPress={() => go('profile')} accessibilityRole="button" accessibilityLabel="Open my profile" style={styles.profileStrip}>
+          <Pressable onPress={() => go('profile')} accessibilityRole="button" accessibilityLabel="Open my profile" style={[styles.profileStrip, light ? { backgroundColor: CX.indigo50, borderColor: CX.indigo100 } : null]}>
             {profile.avatarUrl ? (
               <Image source={{ uri: profile.avatarUrl }} style={styles.profileAvatar} />
             ) : (
-            <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.profileAvatar}>
+            <LinearGradient colors={light ? INDIGO_GRAD : ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.profileAvatar}>
               <Text style={{ fontFamily: F.bodyBold, fontSize: 16, color: '#fff' }}>{profile.initial}</Text>
             </LinearGradient>
             )}
             <View style={{ flex: 1 }}>
-              <Text numberOfLines={1} style={{ fontFamily: F.bodySemi, fontSize: 14.5, color: '#fff' }}>{profile.fullName}</Text>
-              <Text numberOfLines={1} style={{ fontFamily: F.body, fontSize: 11.5, color: C.muted2, marginTop: 1 }}>{profile.roleLabel}</Text>
+              <Text numberOfLines={1} style={{ fontFamily: F.bodySemi, fontSize: 14.5, color: light ? CX.slate900 : '#fff' }}>{profile.fullName}</Text>
+              <Text numberOfLines={1} style={{ fontFamily: F.body, fontSize: 11.5, color: light ? CX.slate500 : C.muted2, marginTop: 1 }}>{profile.roleLabel}</Text>
             </View>
-            <Icon name="chevRight" size={15} color={C.muted3} strokeWidth={2.2} />
+            <Icon name="chevRight" size={15} color={light ? CX.slate400 : C.muted3} strokeWidth={2.2} />
           </Pressable>
 
           <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 16 }} showsVerticalScrollIndicator={false}>
@@ -223,10 +255,10 @@ export function Drawer() {
               return (
               <View key={group.label} style={{ marginTop: 14 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 10, marginBottom: 7 }}>
-                  <Text style={styles.groupLabel}>{group.label}</Text>
-                  <View style={{ flex: 1, height: 1, backgroundColor: 'rgba(255,255,255,0.05)' }} />
+                  <Text style={[styles.groupLabel, light ? { color: CX.indigo } : null]}>{group.label}</Text>
+                  <View style={{ flex: 1, height: 1, backgroundColor: light ? CX.slate200 : 'rgba(255,255,255,0.05)' }} />
                 </View>
-                <View style={styles.groupCard}>
+                <View style={[styles.groupCard, light ? { backgroundColor: CX.slate50, borderColor: CX.slate200 } : null]}>
                   {items.map((item, i) => {
                     const active = route === item.route;
                     const isTech = item.route === 'tech-desk' || item.route === 'tech-desk-inbox';
@@ -240,6 +272,7 @@ export function Drawer() {
                         active={active}
                         badgeText={badgeText}
                         isNew={item.route === 'client-threads'}
+                        light={light}
                         onPress={() => {
                           // Workout Templates lives as a sheet on the trainer dashboard, not a route.
                           if (item.route === 'workout-templates') { set({ workoutTemplatesOpen: true }); go('dashboard'); closeDrawer(); return; }
@@ -255,9 +288,9 @@ export function Drawer() {
           </ScrollView>
 
           {/* Logout footer */}
-          <Pressable onPress={() => { resetSession(); signOut(); go('signin', true); }} accessibilityRole="button" accessibilityLabel="Log out" style={[styles.logoutRow, { paddingBottom: insets.bottom + 14 }]}>
-            <Icon name="logout" size={17} color={C.red} strokeWidth={2} />
-            <Text style={{ fontFamily: F.bodySemi, fontSize: 13.5, color: C.red }}>Log out</Text>
+          <Pressable onPress={() => { resetSession(); signOut(); go('signin', true); }} accessibilityRole="button" accessibilityLabel="Log out" style={[styles.logoutRow, { paddingBottom: insets.bottom + 14 }, light ? { borderTopColor: CX.slate200 } : null]}>
+            <Icon name="logout" size={17} color={light ? CX.rose600 : C.red} strokeWidth={2} />
+            <Text style={{ fontFamily: F.bodySemi, fontSize: 13.5, color: light ? CX.rose600 : C.red }}>Log out</Text>
           </Pressable>
         </View>
       </View>

@@ -99,14 +99,15 @@ export function Icon({
   );
 }
 
-// The hamburger / "more" glyph — two-tone, as in the header.
-export function MenuIcon() {
+// The hamburger / "more" glyph — two-tone, as in the header. The colours are
+// props so the consultant's light header can draw it in slate and indigo.
+export function MenuIcon({ color = '#F2F0EC', accent = '#F47A2A' }: { color?: string; accent?: string } = {}) {
   return (
     <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
-      <Path d="M4 6.5h16" stroke="#F2F0EC" strokeWidth={2.4} strokeLinecap="round" />
-      <Path d="M4 12h9" stroke="#F47A2A" strokeWidth={2.4} strokeLinecap="round" />
-      <Path d="M4 17.5h16" stroke="#F2F0EC" strokeWidth={2.4} strokeLinecap="round" />
-      <Circle cx={18} cy={12} r={1.5} fill="#F47A2A" />
+      <Path d="M4 6.5h16" stroke={color} strokeWidth={2.4} strokeLinecap="round" />
+      <Path d="M4 12h9" stroke={accent} strokeWidth={2.4} strokeLinecap="round" />
+      <Path d="M4 17.5h16" stroke={color} strokeWidth={2.4} strokeLinecap="round" />
+      <Circle cx={18} cy={12} r={1.5} fill={accent} />
     </Svg>
   );
 }
