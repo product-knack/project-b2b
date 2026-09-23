@@ -490,19 +490,14 @@ export const doctorNav: NavGroup[] = [
   ] },
 ];
 
-/* Consultant doctor (doctor_specialization_tag 'consultant'): the web strips
-   Messenger, My Clients and Sessions and puts the Consultant Dashboard first.
-   'doctor-dashboard' is the home route and forks to the consultant dashboard. */
+/* Consultant doctor (doctor_specialization_tag 'consultant'): only the two
+   consultant pages (user decision, 23 Sep 2026: no Reimbursement, Client
+   Threads, Referrals or Tech Desk for consultants). 'doctor-dashboard' is the
+   home route and forks to the consultant dashboard. */
 export const consultantNav: NavGroup[] = [
   { label: 'Workspace', items: [
     { label: 'Consultant Dashboard', icon: 'home', route: 'doctor-dashboard' },
     { label: 'All Calls', icon: 'calendar', route: 'doctor-consultant-calls' },
-    { label: 'Reimbursement', icon: 'rupee', route: 'doctor-reimbursements' },
-    { label: 'Client Threads', icon: 'atSign', route: 'client-threads' },
-    { label: 'Referrals', icon: 'userPlus', route: 'referrals' },
-  ] },
-  { label: 'Support', items: [
-    { label: 'Tech Desk', icon: 'activity', route: 'tech-desk' },
   ] },
 ];
 

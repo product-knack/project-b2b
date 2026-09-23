@@ -5,14 +5,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle } from 'react-native-svg';
 import { F } from '../theme';
 import { Icon } from '../icons';
-import { useStore } from '../store';
 import { useAuth } from '../auth';
 import { useDoctorIdentity } from '../lib/doctorQueries';
 import {
   useDoctorConsultationSlots, useConsultantConsultations, computeConsultantStats, dayCountsOf, ConsultationSlot, DiagnosisRow,
   sameDay, addDays, startOfWeekSun, dateFromYmd, ymdLocal, MONTHS_LONG, MONTHS_SHORT, DAYS_SHORT, DAYS_LONG, fmtStampLocal, slotPersonName,
 } from '../lib/consultantQueries';
-import { CX, INDIGO_GRAD, ConsultantShell, LCard, CardHead, SearchBox, SlotCard, DiagRow, useSlotActions, useNow, initialsOf, LightBtn, SlotActions } from '../components/consultantUi';
+import { CX, INDIGO_GRAD, ConsultantShell, LCard, CardHead, SearchBox, SlotCard, DiagRow, useSlotActions, useNow, initialsOf, SlotActions } from '../components/consultantUi';
 
 /* ============ CONSULTANT DASHBOARD (port of web ConsultantDashboard.tsx, 22 Sep 2026) ============
    Bookings (doctor_consultation_details) and medical_diagnosis requests naming
@@ -167,7 +166,6 @@ function CalendarMonthSheet({ visible, onClose, slots, consultations, clientName
 /* ---------- the page ---------- */
 export function ConsultantDashboard() {
   const { session } = useAuth();
-  const { go } = useStore();
   const uid = session?.user?.id ?? null;
   const ident = useDoctorIdentity();
   const doctorName = ident.data.fullName;
@@ -215,10 +213,6 @@ export function ConsultantDashboard() {
           <Text style={{ fontFamily: F.bodyBold, fontSize: 24, color: '#fff', marginTop: 12 }}>Good Day, {doctorName || firstName}!</Text>
           <Text style={{ fontFamily: F.bodyReg, fontSize: 13, color: 'rgba(255,255,255,0.8)', marginTop: 3 }}>Have a nice {DAYS_LONG[nowDate.getDay()]}!</Text>
         </LinearGradient>
-      </View>
-
-      <View style={{ flexDirection: 'row', justifyContent: 'flex-end' }}>
-        <LightBtn label="Reimbursement" icon="rupee" tone="outline" onPress={() => go('doctor-reimbursements')} />
       </View>
 
       {slotsQ.isError ? (
