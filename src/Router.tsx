@@ -67,6 +67,16 @@ import { DoctorReimbursements, DoctorReimbursementReview } from './screens/docto
 import { ConsultantDashboard } from './screens/consultantDashboard';
 import { ConsultantCalls } from './screens/consultantCalls';
 import { ConsultationJoin } from './screens/consultationJoin';
+import { ConsultantProfile } from './screens/consultantProfile';
+
+/* The drawer's profile strip opens 'profile'. A consultant doctor gets the
+   light consultant profile (two exact counts, no certifications); everyone
+   else keeps the trainer-style Profile screen. */
+function ProfileFork() {
+  const { role } = useStore();
+  const ident = useDoctorIdentity(role === 'doctor');
+  return role === 'doctor' && ident.data.isConsultant ? <ConsultantProfile /> : <Profile />;
+}
 import { AdminRenewals } from './screens/adminRenewals';
 import { AdminRequests } from './screens/adminRequests';
 import { AdminIncidents } from './screens/adminIncidents';
@@ -116,7 +126,7 @@ const SCREENS: Record<string, React.ComponentType> = {
   'client-threads': ClientThreads,
   'manager-chat': ManagerChat,
   'crm-ai': CrmAi,
-  profile: Profile,
+  profile: ProfileFork,
   'mgr-dash': MgrDash,
   'trainer-leaderboard': TrainerLeaderboard,
   'crm-dashboard': CrmDashboard,

@@ -48,7 +48,7 @@ export const initialsOf = (name: string) => name.split(' ').filter(Boolean).slic
 const shadow = { shadowColor: '#4f5bd5', shadowOpacity: 0.12, shadowRadius: 14, shadowOffset: { width: 0, height: 8 }, elevation: 2 } as const;
 
 /* ---------- shell: gradient canvas, scroll body, bottom pill ---------- */
-export function ConsultantShell({ active, children }: { active: 'dashboard' | 'calls'; children: React.ReactNode }) {
+export function ConsultantShell({ active, children }: { active: 'dashboard' | 'calls' | 'profile'; children: React.ReactNode }) {
   const qc = useQueryClient();
   const [refreshing, setRefreshing] = React.useState(false);
   const onRefresh = React.useCallback(async () => {
@@ -74,7 +74,7 @@ export function ConsultantShell({ active, children }: { active: 'dashboard' | 'c
   );
 }
 
-function PillNav({ active }: { active: 'dashboard' | 'calls' }) {
+function PillNav({ active }: { active: 'dashboard' | 'calls' | 'profile' }) {
   const insets = useSafeAreaInsets();
   const { go, resetSession } = useStore();
   const { signOut } = useAuth();
