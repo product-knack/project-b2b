@@ -32,6 +32,8 @@ export const ic = {
   trash: 'M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6',
   crown: 'M5 18h14l1-9-5 4-3-7-3 7-5-4z',
   award: 'M12 13a5 5 0 1 0 0-10 5 5 0 0 0 0 10ZM9 12l-2 8 5-3 5 3-2-8',
+  gavel: 'M14 13l-7.5 7.5a2.12 2.12 0 0 1-3-3L11 10M16 16l6-6M8 8l6-6M9 7l8 8M21 11l-8-8',
+  flame: 'M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.07-2.14-.22-4.05 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.15.43-2.29 1-3a2.5 2.5 0 0 0 2.5 2.5Z',
   phone: 'M5 4h4l2 5-3 2a11 11 0 0 0 5 5l2-3 5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2Z',
   copy: 'M9 9h10v10H9zM5 15V5h10',
   userPlus: 'M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7ZM2 20c0-3.5 3-5 7-5M17 8v6M14 11h6',
@@ -65,6 +67,15 @@ export const ic = {
   help: 'M12 12m-10 0a10 10 0 1 0 20 0a10 10 0 1 0-20 0M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h.01',
   // Luggage tag — a ticket type someone wrote by hand rather than picked.
   tag: 'M12.6 2.6A2 2 0 0 0 11.2 2H4a2 2 0 0 0-2 2v7.2a2 2 0 0 0 .6 1.4l8.7 8.7a2.4 2.4 0 0 0 3.4 0l6.6-6.6a2.4 2.4 0 0 0 0-3.4zM7.5 7.5h.01',
+  // "Listen before the session" (9 Oct 2026): play / stop / who listened / health context.
+  play: 'M7 4.5v15l12-7.5z',
+  stopSq: 'M6 6h12v12H6z',
+  history: 'M3.5 12a8.5 8.5 0 1 0 2.5-6M3 4v5h5M12 7.5V12l3 2',
+  stethoscope: 'M6 3v6a4 4 0 0 0 8 0V3M4.5 3h3M12.5 3h3M10 13v3a5 5 0 0 0 10 0v-3M20 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4z',
+  headphones: 'M4 18v-6a8 8 0 0 1 16 0v6M4 14h2a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H4zM20 14h-2a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h2z',
+  // Essentials Auction bids (10 Oct 2026): the won card's trophy and the one-attempt lock.
+  trophy: 'M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0zM7 6H4v2a3 3 0 0 0 3 3M17 6h3v2a3 3 0 0 1-3 3',
+  lock: 'M5 11h14v10H5zM8 11V7a4 4 0 0 1 8 0v4M12 15v2',
 } as const;
 
 export type IconName = keyof typeof ic;

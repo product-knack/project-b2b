@@ -232,7 +232,7 @@ export function useCrmOpenTicketsCount() {
 }
 
 /* ---------- 6. Pending communications (latest per client = Follow-up Required) ---------- */
-export type CommRow = { id: string; clientId: string; clientName: string; phone: string | null; callDate: string; medium: string | null; followUpDate: string | null; overdue: boolean };
+export type CommRow = { id: string; clientId: string; clientName: string; phone: string | null; callDate: string; medium: string | null; followUpDate: string | null; overdue: boolean; agenda: string | null };
 export function useCrmPendingComms(crmId: string | null) {
   return useQuery({
     queryKey: ['crm-pending-comms', crmId],
@@ -241,7 +241,7 @@ export function useCrmPendingComms(crmId: string | null) {
     queryFn: async (): Promise<CommRow[]> => {
       const { data, error } = await supabase
         .from('crm_communications')
-        .select('id, client_id, call_date, call_status, call_medium, next_follow_up_date, clients(first_name, last_name, phone)')
+        .select('id, client_id, call_date, call_status, call_medium, next_follow_up_date, next_call_agenda, clients(first_name, last_name, phone)')
         .eq('crm_id', crmId)
         .order('call_date', { ascending: false });
       if (error) throw new Error(error.message);
@@ -254,6 +254,7 @@ export function useCrmPendingComms(crmId: string | null) {
           id: r.id, clientId: r.client_id, clientName: fullName(r.clients) ?? 'Client', phone: r.clients?.phone ?? null,
           callDate: r.call_date, medium: r.call_medium ?? null, followUpDate: r.next_follow_up_date ?? null,
           overdue: !!r.next_follow_up_date && new Date(r.next_follow_up_date).getTime() < now,
+          agenda: r.next_call_agenda ?? null,
         }));
     },
   });

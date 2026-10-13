@@ -1,4 +1,7 @@
 import React from 'react';
+import { CommAgendaBlock } from '../components/commAgenda';
+import { EssentialsBadge } from '../components/essentialsBadge';
+import { ClientHealthSummaryCard } from '../components/clientHealthSummaryCard';
 import { View, Text, Pressable, TextInput, Alert, ActivityIndicator, Linking, StyleSheet } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { C, F, hexA, ORANGE_GRAD } from '../theme';
@@ -285,7 +288,7 @@ export function CrmClientDetail() {
             </View>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
               <Badge text={isActive ? 'Active' : 'Inactive'} color={isActive ? C.green : C.muted2} />
-              {d!.subscription ? <Badge text={d!.subscription} color={C.gold} /> : null}
+              {d!.essentials ? <EssentialsBadge status={d!.essentials} /> : d!.subscription ? <Badge text={d!.subscription} color={C.gold} /> : null}
               {d!.appUser ? <Badge text="App User" color={C.blue} /> : null}
               {pkg?.renewalPending ? <Badge text="Renewal Pending" color={C.red} /> : null}
               {activePause ? <Badge text="Paused" color={C.purple} /> : null}
@@ -351,6 +354,9 @@ export function CrmClientDetail() {
             ) : null}
             </View>
           </Card>
+
+          {/* Listen before the session (9 Oct 2026): same card as the trainer's client page */}
+          <ClientHealthSummaryCard clientId={clientId} />
 
           {/* ---------- Action rail ---------- */}
           <View style={{ gap: 8 }}>
@@ -807,6 +813,7 @@ function CommsTab({ clientId, crmId, formOpen, setFormOpen }: { clientId: string
   const [status, setStatus] = React.useState<string>('Follow Up Done');
   const [medium, setMedium] = React.useState<string | null>('phone');
   const [remarks, setRemarks] = React.useState('');
+  const [agenda, setAgenda] = React.useState(''); // Next Call Agenda, required (25 Sep 2026)
   const [followDays, setFollowDays] = React.useState<number | null>(null);
   const [memo, setMemo] = React.useState<Memo | null>(null);
   // Mirrors of the memo for async callbacks and the unmount sweep; seq ignores
@@ -854,7 +861,7 @@ function CommsTab({ clientId, crmId, formOpen, setFormOpen }: { clientId: string
   };
   const memoBusy = !!memo && (memo.stage === 'uploading' || memo.stage === 'transcribing');
   const memoStuck = !!memo && memo.stage === 'failed'; // no object in the bucket yet: retry or remove first
-  const resetForm = () => { setFormOpen(false); setRemarks(''); setFollowDays(null); setStatus('Follow Up Done'); setMemo(null); };
+  const resetForm = () => { setFormOpen(false); setRemarks(''); setAgenda(''); setFollowDays(null); setStatus('Follow Up Done'); setMemo(null); };
   const closeForm = () => {
     if (rec.recording) rec.finish(false);
     if (!memo) { resetForm(); return; }
@@ -865,12 +872,12 @@ function CommsTab({ clientId, crmId, formOpen, setFormOpen }: { clientId: string
   };
 
   const submit = async () => {
-    if (!crmId || !remarks.trim() || memoBusy || memoStuck) return;
+    if (!crmId || !remarks.trim() || !agenda.trim() || memoBusy || memoStuck) return;
     const followUpDate = followDays != null ? new Date(Date.now() + followDays * 864e5).toISOString() : null;
     const saved = memoRef.current;
     try {
       await logM.mutateAsync({
-        crmId, clientId, category: cat, status, medium, remarks, followUpDate,
+        crmId, clientId, category: cat, status, medium, remarks, agenda, followUpDate,
         voiceNotePath: saved?.path ?? null,
         voiceNoteDurationSec: saved?.path ? Math.max(1, Math.round(saved.durationMs / 1000)) : null,
       });
@@ -945,6 +952,9 @@ function CommsTab({ clientId, crmId, formOpen, setFormOpen }: { clientId: string
               )}
             </View>
           )}
+          <Mono style={{ fontSize: 8.5, letterSpacing: 0.7, color: C.muted3 }}>NEXT CALL AGENDA <Text style={{ color: C.red }}>*</Text></Mono>
+          <TextInput value={agenda} onChangeText={setAgenda} placeholder="What to cover on the next call..." placeholderTextColor={C.muted3} multiline accessibilityLabel="Next call agenda, required" style={[INPUT, { minHeight: 70, textAlignVertical: 'top' }]} />
+          {!agenda.trim() ? <Body style={{ fontSize: 10.5, color: C.muted3 }}>Required. Write what the next call should cover before saving.</Body> : null}
           <Mono style={{ fontSize: 8.5, letterSpacing: 0.7, color: C.muted3 }}>FOLLOW-UP</Mono>
           <View style={{ flexDirection: 'row', gap: 6 }}>
             {([[null, 'None'], [1, '+1 day'], [3, '+3 days'], [7, '+7 days']] as [number | null, string][]).map(([v, lbl]) => {
@@ -956,7 +966,7 @@ function CommsTab({ clientId, crmId, formOpen, setFormOpen }: { clientId: string
               );
             })}
           </View>
-          <GradientBtn label={memo?.path ? 'Save with Voice Memo' : 'Save Communication'} onPress={submit} disabled={!remarks.trim() || memoBusy || memoStuck || rec.recording} busy={logM.isPending} />
+          <GradientBtn label={memo?.path ? 'Save with Voice Memo' : 'Save Communication'} onPress={submit} disabled={!remarks.trim() || !agenda.trim() || !cat || memoBusy || memoStuck || rec.recording} busy={logM.isPending} />
         </View>
       )}
       {commsQ.isLoading ? <Empty text="Loading…" />
@@ -973,6 +983,7 @@ function CommsTab({ clientId, crmId, formOpen, setFormOpen }: { clientId: string
               </View>
               {cm.remarks ? <Body style={{ fontSize: 12.5, color: C.ink3 }}>{cm.remarks}</Body> : null}
               {cm.voicePath ? <CrmVoicePlayer path={cm.voicePath} sec={cm.voiceSec} /> : null}
+              <CommAgendaBlock agenda={cm.agenda} />
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 {cm.followUp ? <Body style={{ flex: 1, fontSize: 10.5, color: C.muted3 }}>Follow-up {istD(cm.followUp)}{cm.medium ? ` · ${cm.medium}` : ''}</Body> : <View style={{ flex: 1 }} />}
                 {cm.status !== 'Follow Up Done' ? (
@@ -1532,6 +1543,7 @@ function RosterSheet({ visible, onClose, clientId, onCreate }: { visible: boolea
     when: s.scheduled_datetime, modality: s.modality ?? s.session_type ?? null,
     status: s.status ?? 'scheduled', notes: s.notes ?? null,
     cancelled: (s.status ?? '') === 'cancelled', completed: false, hasRescheduleReq: false,
+    essentials: s.essentials ?? null,
   });
   return (
     <SheetShell visible={visible} onClose={onClose} accent={C.gold} icon="calendar" title="Upcoming Roster" subtitle="SCHEDULED SESSIONS">

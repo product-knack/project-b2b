@@ -11,8 +11,13 @@ import {
   useDoctorIdentity, useDoctorDaySessions, useNeuralChecksForDay, usePhysioSessionExercises,
   useDoctorOwnRoster, usePhysioDialogClients, useApprovedProtocols, useProtocolExercises,
   useRehabExerciseList, useSubmitPhysioSession, buildStructuredNotes, formatDoctorSessionType,
-  RECOVERY_MODALITIES, COGNITIVE_TRAINING_TYPES, PhysioSubmitInput, PhysioSet, HEAD_DOCTOR_ID,
+  RECOVERY_MODALITIES, COGNITIVE_TRAINING_TYPES, PhysioSubmitInput, PhysioSet, HEAD_DOCTOR_ID, DoctorDaySession,
 } from '../lib/doctorQueries';
+// Session voice notes (7 Oct 2026): the doctor records while logging and from
+// the day list, exactly like the trainer; same component, same RPC.
+import { VoiceNotesComposer, SessionVoiceSheet, SessionVoiceSheetInfo } from '../components/SessionVoice';
+import { discardTake, queueSessionVoiceNote, PendingVoiceTake } from '../lib/sessionVoiceQueries';
+import { startTimer, finishTimer, clearTimer } from '../lib/sessionTiming';
 
 /* ============ /doctor/sessions — day view + Log Physio Session (web port) ============ */
 
@@ -70,7 +75,7 @@ function SessionExerciseDetails({ sessionId }: { sessionId: string }) {
 }
 
 /* ---------- Log Physio Session sheet (web PhysioSessionDialog port) ---------- */
-export function PhysioSessionSheet({ visible, onClose, clientId, clientName }: { visible: boolean; onClose: () => void; clientId?: string; clientName?: string }) {
+export function PhysioSessionSheet({ visible, onClose, clientId, clientName, scheduleId }: { visible: boolean; onClose: () => void; clientId?: string; clientName?: string; scheduleId?: string | null }) {
   const { session } = useAuth();
   const uid = session?.user?.id ?? '';
   const isSenior = uid === HEAD_DOCTOR_ID;
@@ -80,6 +85,12 @@ export function PhysioSessionSheet({ visible, onClose, clientId, clientName }: {
   const [selClientName, setSelClientName] = React.useState('');
   const activeClientId = clientId || selClientId;
   const activeClientName = clientName || selClientName;
+  // Session timer (13 Oct 2026): no health gate here, so the timer starts when the sheet
+  // opens for a client (from the roster slot, or once one is picked); the row keeps its
+  // default duration_minutes and the measured timing goes into session_timing.
+  React.useEffect(() => {
+    if (visible && activeClientId) startTimer(activeClientId, scheduleId ?? null, 'skipped').catch(() => {});
+  }, [visible, activeClientId, scheduleId]);
   const clientsQ = usePhysioDialogClients(uid, visible && !clientId);
   const [clientSearch, setClientSearch] = React.useState('');
 
@@ -125,6 +136,12 @@ export function PhysioSessionSheet({ visible, onClose, clientId, clientName }: {
   const [err, setErr] = React.useState<string | null>(null);
   const [done, setDone] = React.useState(false);
 
+  // Voice notes recorded with the log (saved right after the session row lands;
+  // a cancelled or cognitive-only save has no session to attach them to).
+  const [voiceTakes, setVoiceTakes] = React.useState<PendingVoiceTake[]>([]);
+  const [voiceRecording, setVoiceRecording] = React.useState(false);
+  const voiceAllowed = !!category && !cancelled && !isCognitiveOnly;
+
   // Manual keyboard height — reliable on Android 15 edge-to-edge where
   // KeyboardAvoidingView isn't (same pattern as the messenger composers). The
   // sheet gets paddingBottom = keyboard height so the scroll viewport always
@@ -150,6 +167,8 @@ export function PhysioSessionSheet({ visible, onClose, clientId, clientName }: {
     setTherapyType(''); setTherapyNotes('');
     setCogOn(false); setMarkAsSession(false); setCog({ ...emptyCog });
     setErr(null); setDone(false);
+    setVoiceTakes((prev) => { prev.forEach((t) => discardTake(t.uri)); return []; });
+    setVoiceRecording(false);
     if (!clientId) { setSelClientId(''); setSelClientName(''); setClientSearch(''); }
   }, [visible]);
   // Approved protocols exist → default to With Plan (web effect)
@@ -179,8 +198,9 @@ export function PhysioSessionSheet({ visible, onClose, clientId, clientName }: {
   const doSubmit = async () => {
     if (!canSubmit || submitM.isPending) return;
     setErr(null);
+    const timed = await finishTimer(activeClientId, 'doctor');
     const input: PhysioSubmitInput = {
-      doctorId: uid, clientId: activeClientId, clientName: activeClientName,
+      doctorId: uid, clientId: activeClientId, clientName: activeClientName, sessionTiming: timed?.timing ?? null,
       category, cancelled, tab, protocolId,
       protocolComplaint: (protocolsQ.data ?? []).find((p: any) => p.id === protocolId)?.complaint ?? null,
       rehabPhase, rehabNotes, checkedExercises: Object.values(checked),
@@ -189,7 +209,26 @@ export function PhysioSessionSheet({ visible, onClose, clientId, clientName }: {
       cognitiveEnabled: cogOn, markAsSession, cognitive: cog,
     };
     try {
-      await submitM.mutateAsync(input);
+      const res = await submitM.mutateAsync(input);
+      clearTimer(activeClientId).catch(() => {});
+      // The session is saved. Voice notes ride behind it through the outbox
+      // (offline-safe); a note the server refuses never undoes the log.
+      const takes = voiceAllowed ? voiceTakes : [];
+      if (takes.length && res?.sessionId) {
+        let failed: string | null = null;
+        for (const t of takes) {
+          const r = await queueSessionVoiceNote(
+            { workoutSessionId: res.sessionId, clientId: activeClientId, userId: uid, uri: t.uri, durationMs: t.durationMs, source: 'workout_form' },
+            `${activeClientName || 'Client'} · voice note`,
+          );
+          if (r.status === 'failed') failed = r.error ?? 'The server rejected a voice note.';
+        }
+        setVoiceTakes([]);
+        if (failed) setErr(`Session logged. Voice note not saved: ${failed}`);
+      } else if (voiceTakes.length) {
+        voiceTakes.forEach((t) => discardTake(t.uri));
+        setVoiceTakes([]);
+      }
       setDone(true);
       setTimeout(onClose, 700);
     } catch (e: any) {
@@ -572,6 +611,27 @@ export function PhysioSessionSheet({ visible, onClose, clientId, clientName }: {
               </View>
             ) : null}
 
+            {/* Voice notes (7 Oct 2026): same recorder as the trainer's Add Workout */}
+            {voiceAllowed ? (
+              <View style={{ gap: 8 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <View style={{ flex: 1 }}>
+                    <Mono style={labelStyle}>VOICE NOTES (OPTIONAL)</Mono>
+                    <Body style={{ fontSize: 11, color: C.muted3, marginTop: -2 }}>Speak your notes about this session</Body>
+                  </View>
+                  {voiceTakes.length ? <Badge text={`${voiceTakes.length} recorded`} color={C.purple} /> : null}
+                </View>
+                <VoiceNotesComposer
+                  takes={voiceTakes}
+                  onAdd={(t) => setVoiceTakes((x) => [...x, t])}
+                  onRemove={(uri) => { discardTake(uri); setVoiceTakes((x) => x.filter((t) => t.uri !== uri)); }}
+                  onRecordingChange={setVoiceRecording}
+                  disabled={submitM.isPending}
+                  hint="Up to 5 notes, 5 minutes each. Saved with the session; you can add more from the Sessions list."
+                />
+              </View>
+            ) : null}
+
             {/* Cancelled */}
             {category ? (
               <Pressable onPress={() => setCancelled((v) => !v)} style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
@@ -589,7 +649,7 @@ export function PhysioSessionSheet({ visible, onClose, clientId, clientName }: {
               </View>
             ) : null}
 
-            <Pressable onPress={doSubmit} disabled={!canSubmit || submitM.isPending} style={{ opacity: canSubmit && !submitM.isPending ? 1 : 0.5 }}>
+            <Pressable onPress={doSubmit} disabled={!canSubmit || submitM.isPending || voiceRecording} style={{ opacity: canSubmit && !submitM.isPending && !voiceRecording ? 1 : 0.5 }}>
               <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14, borderRadius: 14 }}>
                 <Icon name="checks" size={15} color="#fff" strokeWidth={2.5} />
                 <Text style={{ fontFamily: F.bodyBold, fontSize: 14, color: '#fff' }}>{submitM.isPending ? 'Saving…' : done ? 'Saved ✓' : isCognitiveOnly ? (markAsSession ? 'Log Neural Check Session' : 'Save Cognitive Metrics') : 'Log Session'}</Text>
@@ -643,6 +703,8 @@ export function DoctorSessionsPage() {
   const [date, setDate] = React.useState(new Date());
   const [view, setView] = React.useState<'sessions' | 'schedule'>('sessions');
   const [logOpen, setLogOpen] = React.useState(false);
+  // Voice notes sheet for a logged session (listen + add more), as on the trainer's roster.
+  const [voiceFor, setVoiceFor] = React.useState<SessionVoiceSheetInfo>(null);
 
   const dayQ = useDoctorDaySessions(date);
   const ncQ = useNeuralChecksForDay(uid, date, identity.data.isHeadDoctor);
@@ -658,6 +720,7 @@ export function DoctorSessionsPage() {
           time: new Date(nc.created_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }),
           location: '', focus: 'neural_check', attended: true, remarks: null, date: nc.created_at,
           cancelled: false, isUnique: null, sessionName: 'Neural Check', hasPhysioExercises: false,
+          voiceNotes: [] as DoctorDaySession['voiceNotes'], voiceSessionId: '',
           isNeuralCheck: true as const, neural: nc,
         }))
       : [];
@@ -678,7 +741,9 @@ export function DoctorSessionsPage() {
         <View style={{ flex: 1 }}>
           <TitleBlock title="Sessions" sub="Doctor session log & schedule" />
         </View>
-        {identity.data.isPhysio || identity.data.isHeadDoctor || identity.data.therapyModalities.length > 0 ? (
+        {/* Log Session: the doctors' manager (physio HOD) only; every other doctor logs from
+            the dashboard's Today's Roster (user rule 29 Sep 2026). */}
+        {identity.data.isPhysioHod ? (
           <Pressable onPress={() => setLogOpen(true)}>
             <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 10, paddingHorizontal: 14, borderRadius: 12 }}>
               <Icon name="plus" size={13} color="#fff" strokeWidth={2.6} />
@@ -761,6 +826,16 @@ export function DoctorSessionsPage() {
                   </View>
                 ) : null}
                 {s.remarks ? <Body style={{ fontSize: 11, color: C.muted2, fontStyle: 'italic' }} numberOfLines={4}>"{s.remarks}"</Body> : null}
+                {!isNC && !s.cancelled && s.clientId && uid ? (
+                  <Pressable
+                    onPress={() => setVoiceFor({ workoutSessionId: s.voiceSessionId || s.id, clientId: s.clientId, clientName: s.clientName, notes: s.voiceNotes })}
+                    accessibilityRole="button" accessibilityLabel={s.voiceNotes.length ? `${s.voiceNotes.length} voice notes` : 'Add a voice note'}
+                    style={{ alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 7, paddingHorizontal: 11, borderRadius: 999, borderWidth: 1, borderColor: hexA(C.purple, 0.35), backgroundColor: hexA(C.purple, s.voiceNotes.length ? 0.14 : 0.06) }}
+                  >
+                    <Icon name="mic" size={12} color={C.purple} strokeWidth={2.2} />
+                    <Text style={{ fontFamily: F.bodySemi, fontSize: 11.5, color: C.purple }}>{s.voiceNotes.length ? `${s.voiceNotes.length} voice note${s.voiceNotes.length === 1 ? '' : 's'}` : 'Voice note'}</Text>
+                  </Pressable>
+                ) : null}
                 {s.hasPhysioExercises && !isNC ? <SessionExerciseDetails sessionId={s.id} /> : null}
               </Card>
             );
@@ -829,6 +904,7 @@ export function DoctorSessionsPage() {
       )}
 
       <PhysioSessionSheet visible={logOpen} onClose={() => setLogOpen(false)} />
+      <SessionVoiceSheet info={voiceFor} userId={uid ?? ''} onClose={() => setVoiceFor(null)} />
     </Page>
   );
 }

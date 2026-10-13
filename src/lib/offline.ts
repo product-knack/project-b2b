@@ -22,7 +22,7 @@ const OUTBOX_KEY = 'outbox:v1';
 export type OutboxItem = {
   id: string;
   userId?: string;        // who queued it — items never drain (or show) under another account
-  kind: 'workout-log' | 'create-plan' | 'edit-plan' | 'chat-message' | 'location-log' | 'screenshot-log';
+  kind: 'workout-log' | 'create-plan' | 'edit-plan' | 'chat-message' | 'location-log' | 'screenshot-log' | 'session-voice-note' | 'nav-track';
   label: string;          // human line for the pending-sync UI
   createdAt: string;      // ORIGINAL device timestamp at submit time
   status: 'pending' | 'syncing' | 'failed';
@@ -217,7 +217,11 @@ async function processItem(item: OutboxItem): Promise<{ linkPending?: boolean } 
     qcRef?.invalidateQueries({ queryKey: ['client-sessions'] });
     qcRef?.invalidateQueries({ queryKey: ['trainer-month-sessions-v2'] }); // key was bumped to v2 — the old prefix matched nothing
     qcRef?.invalidateQueries({ queryKey: ['mgr-plan-outcome-v5'] }); // crew card LOGGED tick
-    if (p.health) qcRef?.invalidateQueries({ queryKey: ['client-health-check', p.clientId] });
+    if (p.health) {
+      qcRef?.invalidateQueries({ queryKey: ['client-health-check', 'v4', p.clientId] }); // v3: today-attributed gate (24 Sep 2026)
+      qcRef?.invalidateQueries({ queryKey: ['weekly-health-summary', p.clientId] });
+      qcRef?.invalidateQueries({ queryKey: ['client-daily-stats', p.clientId] });
+    }
     // The workout is saved regardless; a still-unresolved schedule link only changes
     // which confirmation the dashboard shows (see addSyncedNotice tone).
     return { linkPending: link?.status === 'unresolved' };
@@ -246,6 +250,21 @@ async function processItem(item: OutboxItem): Promise<{ linkPending?: boolean } 
     // Same silent-replay contract as location logs (original taken_at kept).
     const { submitScreenshotLog } = require('./screenshotAudit');
     await submitScreenshotLog(item.payload);
+  } else if (item.kind === 'session-voice-note') {
+    // Workout session voice note (30 Sep 2026): upload the durable local file, then
+    // append it to training_sessions through the RPC. Queued AFTER its workout item,
+    // so the drain lands the session first. Lazy require: sessionVoiceQueries
+    // imports this module's enqueue/submit.
+    const { submitSessionVoiceNote } = require('./sessionVoiceQueries');
+    await submitSessionVoiceNote(item.payload);
+    qcRef?.invalidateQueries({ queryKey: ['client-sessions'] });
+    qcRef?.invalidateQueries({ queryKey: ['trainer-roster'] });
+  } else if (item.kind === 'nav-track') {
+    // QHP ride track (14 Oct 2026): the json exactly as captured at Arrived / End.
+    // Lazy require: qhpNavigationQueries imports this module's enqueue.
+    const { submitNavigationTrack } = require('./qhpNavigationQueries');
+    await submitNavigationTrack(item.payload);
+    qcRef?.invalidateQueries({ queryKey: ['qhp-assessments'] });
   }
 }
 
@@ -353,7 +372,7 @@ export function initOffline(queryClient: QueryClient) {
 // Location logs are captured silently and must NEVER appear in the pending-sync
 // list — the user should never see their location syncing. They still drain via
 // the internal `items` list above; this hook just hides them from the UI.
-const uiVisible = (list: OutboxItem[]) => list.filter((i) => i.kind !== 'location-log' && mine(i));
+const uiVisible = (list: OutboxItem[]) => list.filter((i) => i.kind !== 'location-log' && i.kind !== 'nav-track' && mine(i));
 export function useOutbox(): OutboxItem[] {
   const [snap, setSnap] = React.useState<OutboxItem[]>(uiVisible(items));
   React.useEffect(() => {

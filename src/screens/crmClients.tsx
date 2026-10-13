@@ -8,6 +8,7 @@ import { Page, Badge, MiniAvatar, AnimChip } from './common';
 import { useStore } from '../store';
 import { useAuth } from '../auth';
 import { useCrmClientList } from '../lib/crmClientQueries';
+import { EssentialsBadge } from '../components/essentialsBadge';
 
 /* ============ CRM: My Clients list — mirrors the web CRMClients,
    restyled for the app's obsidian/ember system. Detail page lives in
@@ -76,7 +77,7 @@ export function CrmClients() {
               </View>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
                 <Badge text={c.status === 'active' ? 'Active' : c.status[0].toUpperCase() + c.status.slice(1)} color={c.status === 'active' ? C.green : C.muted2} />
-                {c.subscription ? <Badge text={c.subscription} color={C.gold} /> : null}
+                {c.essentials ? <EssentialsBadge status={c.essentials} /> : c.subscription ? <Badge text={c.subscription} color={C.gold} /> : null}
                 {c.appUser ? <Badge text="App User" color={C.blue} /> : null}
                 {c.renewalPending ? <Badge text="Renewal Pending" color={C.red} /> : null}
                 {c.paused ? <Badge text="Paused" color={C.purple} /> : null}

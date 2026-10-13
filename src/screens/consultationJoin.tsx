@@ -8,6 +8,8 @@ import { useStore } from '../store';
 import { backOverride } from '../gestureLock';
 import { joinTargetRef, useCallEnded } from '../lib/consultantQueries';
 import { CX } from '../components/consultantUi';
+import { useAuth } from '../auth';
+import { NextFollowUpDialog } from '../components/consultCrmUi';
 
 /* ============ CONSULTATION JOIN (native stand-in for /doctor/consultation-room) ============
    The web room joins 100ms with the SDK, records per-mic audio and transcribes
@@ -60,6 +62,9 @@ export function ConsultationJoin() {
   const insets = useSafeAreaInsets();
   const target = joinTargetRef.current;
   const ended = useCallEnded();
+  // The CRM alone answers the mandatory next-follow-up question on the way out (6 Oct 2026).
+  const { dbRole } = useAuth();
+  const [followUpFor, setFollowUpFor] = React.useState<string | null>(null);
   const [perm, setPerm] = React.useState<'asking' | 'ok' | 'denied'>(Platform.OS === 'android' ? 'asking' : 'ok');
   const [failed, setFailed] = React.useState(false);
   const [attempt, setAttempt] = React.useState(0);
@@ -73,13 +78,17 @@ export function ConsultationJoin() {
       .catch(() => setPerm('denied'));
   }, []);
 
+  const finishLeave = React.useCallback(() => {
+    joinTargetRef.current = null;
+    back();
+  }, [back]);
   const doLeave = React.useCallback(() => {
     if (leftRef.current) return;
     leftRef.current = true;
     if (target) ended.mutate(target.slotId, { onError: () => { /* the Complete trigger catches it later */ } });
-    joinTargetRef.current = null;
-    back();
-  }, [target, ended, back]);
+    if (dbRole === 'crm' && target) { setFollowUpFor(target.slotId); return; }
+    finishLeave();
+  }, [target, ended, dbRole, finishLeave]);
   const leave = React.useCallback(() => {
     Alert.alert('Leave the call?', 'The AI notes and the meeting summary start generating once you leave.', [
       { text: 'Stay', style: 'cancel' },
@@ -92,6 +101,7 @@ export function ConsultationJoin() {
   if (!target) return <View style={{ flex: 1, backgroundColor: '#000' }} />;
   return (
     <View style={{ flex: 1, backgroundColor: '#000' }}>
+      <NextFollowUpDialog slotId={followUpFor} clientName={target.clientName} onDone={() => { setFollowUpFor(null); finishLeave(); }} />
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: CX.white, borderBottomWidth: 1, borderBottomColor: CX.indigo100 }}>
         <View style={{ width: 30, height: 30, borderRadius: 10, backgroundColor: CX.indigo50, alignItems: 'center', justifyContent: 'center' }}><Icon name="phone" size={14} color={CX.indigo} strokeWidth={2.2} /></View>
         <View style={{ flex: 1 }}>

@@ -5,6 +5,7 @@ import { supabase } from './supabase';
 import { useAuth } from '../auth';
 import { getIsOnline } from './offline';
 import { invalidateDebounced } from './invalidateDebounced';
+import { computeEssentials, EssentialsStatus } from './essentials';
 
 /* ============================================================================
    Managers Messenger — one chat thread per competition team (manager_score row).
@@ -55,12 +56,12 @@ export type ManagerTeamInfo = {
   members: ManagerTeamMember[];
 };
 
-export function useMyManagerTeam() {
+export function useMyManagerTeam(enabled: boolean = true) {
   const { session } = useAuth();
   const uid = session?.user?.id ?? null;
   return useQuery({
     queryKey: ['my-manager-team', uid],
-    enabled: !!uid,
+    enabled: !!uid && enabled,
     staleTime: 120_000,
     queryFn: async (): Promise<ManagerTeamInfo | null> => {
       // EXACTLY the leaderboard's competition resolution (useManagerLeaderboard):
@@ -104,7 +105,7 @@ export function useMyManagerTeam() {
 /* ---------- messages ---------- */
 // schedule_id/roster arrive from plan_sync_roster: the entry's linked
 // session_schedule row and how it got there ('created' | 'linked' | 'moved' | 'conflict').
-export type TomorrowPlanEntry = { client_id: string | null; name: string; time: string; modality?: string | null; schedule_id?: string | null; roster?: string | null }; // time 'HH:mm'
+export type TomorrowPlanEntry = { client_id: string | null; name: string; time: string; modality?: string | null; schedule_id?: string | null; roster?: string | null; auction?: boolean }; // time 'HH:mm'; auction = booked from the Essentials Auction (1 Oct 2026)
 
 /* Modality options per role + normalizer for the mixed-case session_type values
    that exist in training_sessions ('Strength', 'strength', 'recovery', …). */
@@ -174,7 +175,7 @@ export type ManagerChatMessage = {
   //   {request_id, approved:false} (manager-only kind).
   // reply_to (kind 'text'): WhatsApp-style quoted reply — { id, name, body } of
   // the original message (body truncated to 120 chars). Interop with iOS.
-  payload: { date?: string; entries?: TomorrowPlanEntry[]; client_id?: string | null; name?: string; trainer_id?: string; remark?: string; time?: string; modality?: string | null; schedule_id?: string | null; history?: PlanRescheduleHop[]; request_id?: string; approved?: boolean; from_time?: string; to_time?: string; from_modality?: string | null; to_modality?: string | null; reason?: string; flags?: TeamFlagTrainer[]; reply_to?: { id: string; name: string; body: string } } | null;
+  payload: { date?: string; entries?: TomorrowPlanEntry[]; client_id?: string | null; name?: string; trainer_id?: string; remark?: string; time?: string; modality?: string | null; schedule_id?: string | null; forced?: boolean; replaced_schedule_id?: string | null; replaced_trainer_id?: string | null; replaced_trainer_name?: string | null; history?: PlanRescheduleHop[]; request_id?: string; approved?: boolean; from_time?: string; to_time?: string; from_modality?: string | null; to_modality?: string | null; reason?: string; flags?: TeamFlagTrainer[]; reply_to?: { id: string; name: string; body: string }; source?: string | null } | null;
   body: string;
   createdAt: string;
   /** Screen-local: a send that failed (offline / rejected) — rendered with a Retry. Never from the server. */
@@ -636,6 +637,30 @@ export function usePhysioHodBoard(open: boolean) {
         .sort((a, b) => Number(!!a.trainer.remark) - Number(!!b.trainer.remark));
 
       return { physios: physioList, today: group(today), tomorrow: group(tomorrow), requests, flags };
+    },
+  });
+}
+
+/* ---------- Essentials by Odds status per client (1 Oct 2026) ----------
+   Batch-read for the visible client ids: the ESSENTIALS badge on My Crew rows,
+   and the rule that the manager cannot reschedule an Essentials session from
+   the day card (the plan moves only through its own rules). Plain object. */
+export function useClientsEssentials(clientIds: string[]) {
+  const key = [...new Set(clientIds)].sort().join(',');
+  return useQuery({
+    queryKey: ['mgr-client-essentials', key],
+    enabled: clientIds.length > 0,
+    staleTime: 300_000,
+    queryFn: async (): Promise<Record<string, EssentialsStatus>> => {
+      const ids = [...new Set(clientIds)];
+      const { data, error } = await supabase.from('clients').select('id, subscription_type, essentials_extensions').in('id', ids);
+      if (error) throw new Error(error.message);
+      const out: Record<string, EssentialsStatus> = {};
+      (data ?? []).forEach((r: any) => {
+        const s = computeEssentials(r.subscription_type, r.essentials_extensions);
+        if (s) out[r.id] = s;
+      });
+      return out;
     },
   });
 }

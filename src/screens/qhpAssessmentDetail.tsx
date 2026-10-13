@@ -453,8 +453,16 @@ export function QhpAssessmentDetail() {
             </Card>
           ) : null}
 
-          {/* Notes */}
-          {a.notes ? (
+          {/* Ops booking note (coach_assessment.qhp_pref_notes, copied at scheduling) */}
+          {a.qhp_pref_notes?.trim() ? (
+            <Card colors={['rgba(46,28,18,0.4)', 'rgba(18,14,14,0.5)']} border="rgba(255,150,90,0.1)" radius={16} style={{ padding: 14, gap: 8 }}>
+              <Mono style={{ fontSize: 10, letterSpacing: 1.4, color: C.gold }}>NOTES FROM OPS</Mono>
+              <Body style={{ fontSize: 12, color: C.ink2, lineHeight: 18 }}>{a.qhp_pref_notes.trim()}</Body>
+            </Card>
+          ) : null}
+
+          {/* Notes (hidden when it only repeats the Ops note the schedule sheet prefilled) */}
+          {a.notes?.trim() && a.notes.trim() !== (a.qhp_pref_notes?.trim() || '') ? (
             <Card colors={['rgba(46,28,18,0.4)', 'rgba(18,14,14,0.5)']} border="rgba(255,150,90,0.1)" radius={16} style={{ padding: 14, gap: 8 }}>
               <Mono style={{ fontSize: 10, letterSpacing: 1.4, color: C.mono }}>NOTES</Mono>
               <Body style={{ fontSize: 12, color: C.ink2, lineHeight: 18 }}>{a.notes}</Body>

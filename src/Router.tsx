@@ -21,6 +21,8 @@ import { CreatePlan } from './screens/createPlan';
 import { Payouts } from './screens/payouts';
 import { Referrals } from './screens/referrals';
 import { Incentives } from './screens/incentives';
+import { EssentialsAuction } from './screens/essentialsAuction';
+import { QhpNavigation } from './screens/qhpNavigation';
 import { WorkoutAnalyst } from './screens/workoutAnalyst';
 import { Messenger, ChatNotifications } from './screens/messenger';
 import { ClientThreads } from './screens/clientThreads';
@@ -43,6 +45,7 @@ import { CrmJourney, CrmJourneyDetail } from './screens/crmJourney';
 import { CrmSectionPage } from './screens/crmTabs';
 import { CrmClients } from './screens/crmClients';
 import { CrmClientDetail } from './screens/crmClientDetail';
+import { CrmDoctorConsultation, CrmDoctorConsultClient } from './screens/crmDoctorConsult';
 import { CrmDistribution } from './screens/crmDistribution';
 import {
   CoachDashboard, CoachClients, CoachClientsOverview, CoachClientOverviewDetail, CoachTrainers, CoachTrainerDetail, CoachAssessments,
@@ -118,6 +121,8 @@ const SCREENS: Record<string, React.ComponentType> = {
   payouts: Payouts,
   referrals: Referrals,
   incentives: Incentives,
+  'essentials-auction': EssentialsAuction,
+  'qhp-navigate': QhpNavigation,
   qhp: Qhp,
   'qhp-manager': QhpManager,
   'qhp-stats': QhpStats,
@@ -133,6 +138,8 @@ const SCREENS: Record<string, React.ComponentType> = {
   'crm-section': CrmSectionPage,
   'crm-clients': CrmClients,
   'crm-client': CrmClientDetail,
+  'crm-doctor-consult': CrmDoctorConsultation,
+  'crm-doctor-consult-client': CrmDoctorConsultClient,
   'crm-distribution': CrmDistribution,
   'crm-birthdays': CrmBirthdays,
   'crm-sales': CrmSales,
@@ -241,10 +248,12 @@ const SENSITIVE_ROUTES = new Set([
   'tech-desk', 'tech-desk-ticket', 'tech-desk-inbox', 'tech-desk-inbox-ticket',
   // Trainer — client detail (age scores, QHP, reports, medical), workout form
   // (sleep/nutrition/steps check-in), QHP surfaces
-  'client', 'workout', 'qhp', 'qhp-manager', 'qhp-stats', 'qhp-assessment-detail', 'qhp-review',
+  'client', 'workout', 'qhp', 'qhp-manager', 'qhp-stats', 'qhp-assessment-detail', 'qhp-review', 'qhp-navigate',
   // CRM — client detail (medical history, diagnoses, reports), health/QHP/blood pages
   // + Odds AI (chat answers quote QHP/blood/medical data)
   'crm-client', 'crm-qhp', 'crm-blood', 'crm-health', 'crm-assessment', 'crm-ai',
+  // CRM Doctor Consultation (6 Oct 2026): reports, records, AI summary, prescriptions
+  'crm-doctor-consult', 'crm-doctor-consult-client',
   // Doctor — everything clinical (protocols, physio sessions, counselling, findings)
   'doctor-client-detail', 'doctor-sessions', 'doctor-protocol-approvals', 'doctor-rehab-recommendation',
   // Reimbursements — payment screenshots (bank / UPI details)
@@ -338,7 +347,7 @@ function ScreenHost({ route }: { route: string }) {
   // Screens where the edge swipe-back is DISABLED — long data-entry forms where an
   // accidental horizontal drag must never navigate away mid-entry. The on-screen
   // back button (and the hardware back button) remain the way out.
-  const NO_SWIPE_BACK = React.useMemo(() => new Set(['workout', 'create-plan', 'doctor-consultation-join']), []);
+  const NO_SWIPE_BACK = React.useMemo(() => new Set(['workout', 'create-plan', 'doctor-consultation-join', 'qhp-navigate']), []);
   const noSwipeRef = useRef(false);
   noSwipeRef.current = NO_SWIPE_BACK.has(route);
 
@@ -555,7 +564,8 @@ export function Router() {
         <LocationCapture />
         <OfflineWarmup />
         <PushTokenManager />
-        <Header />
+        {/* The navigation map is full-bleed: no header, no launcher (14 Oct 2026). */}
+        {route !== 'qhp-navigate' ? <Header /> : null}
         <TechDeskAlertBanner />
         <View style={{ flex: 1 }}>
           <ScreenHost route={route} />
@@ -565,7 +575,7 @@ export function Router() {
         {route !== 'workout' && route !== 'create-plan' && route !== 'messenger' && route !== 'manager-chat'
           && route !== 'tech-desk-ticket' && route !== 'tech-desk-inbox-ticket' && !threadViewOpen
           // The consultant pages carry their own bottom pill; the call screen must stay clear.
-          && route !== 'doctor-consultant-calls' && route !== 'doctor-consultant-dashboard' && route !== 'doctor-consultation-join' && !consultant ? (
+          && route !== 'doctor-consultant-calls' && route !== 'doctor-consultant-dashboard' && route !== 'doctor-consultation-join' && route !== 'qhp-navigate' && !consultant ? (
           <View pointerEvents="box-none" style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }}>
             <OddsAiBar />
           </View>

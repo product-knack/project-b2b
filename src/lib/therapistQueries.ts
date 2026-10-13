@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { parseVoiceNotes, type SessionVoiceNote } from './sessionVoiceTypes';
 import { supabase } from './supabase';
+import type { SessionTiming } from './sessionTiming';
 import { useAuth } from '../auth';
 
 /* ============================================================================
@@ -137,6 +139,7 @@ export type TherapySessionRow = {
   id: string; scheduledAt: string | null; durationMinutes: number | null;
   status: string | null; note: string | null; therapistName: string;
   sessionName: string | null; // sub-modality label, e.g. "Massage Therapy" (null on legacy rows)
+  voiceNotes: SessionVoiceNote[]; // 7 Oct 2026: recorded by the therapist, played back to back
 };
 export function useTherapySessions(clientId: string | null) {
   return useQuery({
@@ -146,7 +149,7 @@ export function useTherapySessions(clientId: string | null) {
     queryFn: async (): Promise<TherapySessionRow[]> => {
       const { data, error } = await supabase
         .from('training_sessions')
-        .select('id, scheduled_at, duration_minutes, status, session_name, notes, trainer:trainer_id(first_name, last_name)')
+        .select('id, scheduled_at, duration_minutes, status, session_name, notes, voice_notes, trainer:trainer_id(first_name, last_name)')
         .eq('client_id', clientId)
         .eq('session_type', 'therapy')
         .order('scheduled_at', { ascending: false });
@@ -158,6 +161,7 @@ export function useTherapySessions(clientId: string | null) {
         status: r.status ?? null, note: r.notes ?? null,
         therapistName: fullName(emb(r.trainer)) || 'Therapist',
         sessionName: r.session_name ?? null,
+        voiceNotes: parseVoiceNotes(r.voice_notes),
       }));
     },
   });
@@ -175,18 +179,22 @@ export function useAddTherapySession() {
   const { session } = useAuth();
   const meId = session?.user?.id ?? null;
   return useMutation({
-    mutationFn: async (input: { clientId: string; durationMinutes: number; note: string; therapyType: string }) => {
+    mutationFn: async (input: { clientId: string; durationMinutes: number; note: string; therapyType: string; sessionTiming?: SessionTiming | null }) => {
       if (!meId) throw new Error('Not signed in');
       // Validation order per web spec §2.1: therapy type → note → duration.
       if (!THERAPY_MODALITIES.some((m) => m.value === input.therapyType)) throw new Error('Pick a therapy type');
       const note = input.note.trim();
       if (!note) throw new Error('Session note is required');
       if (!(input.durationMinutes > 0)) throw new Error('Duration must be greater than 0');
+      // Session timer (13 Oct 2026): p_timing carries the measured start / end / minutes;
+      // p_duration stays the typed value, which the RPC keeps in duration_minutes
+      // (user decision: the sheets keep their typed duration, the json holds the timer).
       const { data, error } = await supabase.rpc('therapist_log_session', {
         p_client: input.clientId,
         p_duration: input.durationMinutes,
         p_note: note,
         p_therapy_type: input.therapyType,
+        p_timing: input.sessionTiming ?? null,
       });
       if (error) throw new Error(error.message);
       // roster_error non-null = session saved, roster step failed — the RPC has

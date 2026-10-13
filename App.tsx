@@ -58,7 +58,14 @@ const PERSIST_PREFIXES = [
   'crm-client-list', 'crm-client-detail', 'crm-metrics', 'crm-journey-clients', 'crm-tasks', 'crm-my-tasks', 'coach-clients-overview', 'coach-overview-client',
   'academy-', 'admin-', 'ops-',
 ];
-const NEVER_PERSIST = new Set(['client-sessions', 'client-reports', 'prev-exercise-data', 'session-exercises', 'crm-month-roster', 'head-doctor-month-sessions', 'hod-feed-msgs', 'doctor-day-sessions']);
+const NEVER_PERSIST = new Set([
+  'client-sessions', 'client-reports', 'prev-exercise-data', 'session-exercises', 'crm-month-roster', 'head-doctor-month-sessions', 'hod-feed-msgs', 'doctor-day-sessions',
+  // Daily quiz (23 Sep 2026): the 'trainer-' prefix would persist these, but a stale
+  // "due" restored from disk must never open the mandatory popup before the server answers.
+  'trainer-quiz-score', 'trainer-quiz-score-nav', 'trainer-quiz-question',
+  // Menstrual cycle label (25 Sep 2026): health data, never written to the on-device cache.
+  'client-cycle-status',
+]);
 
 // Sign-out / account switch: drop every cached query (memory AND the persisted
 // SQLite copy) so the next user can never see the previous user's data.

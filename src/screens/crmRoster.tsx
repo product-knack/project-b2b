@@ -11,6 +11,7 @@ import {
   useCancelRosterSession, useDeleteFutureSessions, countFutureSessions, useInferRoster, MODALITIES, modalityColor, RosterSession, RosterConflict,
 } from '../lib/rosterQueries';
 import { SheetShell } from './reportDetail';
+import { EssentialsBadge } from '../components/essentialsBadge';
 
 /* ============ CRM: Roster Management — live month agenda over session_schedule
    + the web's "Create Roster" bulk flow with identical conflict rules. ============ */
@@ -230,6 +231,7 @@ export function CrmRoster() {
           <Body numberOfLines={1} style={{ fontSize: 13, fontFamily: F.bodySemi, color: s.cancelled ? C.muted2 : '#fff', textDecorationLine: s.cancelled ? 'line-through' : 'none' }}>{s.clientName}</Body>
           <Mono style={{ fontSize: 7.5, color: C.muted3, marginTop: 2 }} numberOfLines={1}>{(s.modality ?? 'SESSION').toUpperCase()} · {s.trainerName.toUpperCase()}</Mono>
         </View>
+        {s.essentials ? <EssentialsBadge status={s.essentials} compact /> : null}
         {s.hasRescheduleReq && !s.cancelled ? <Badge text="Resched" color={C.gold} /> : null}
         {s.cancelled
           ? <Badge text="Cancelled" color={C.red} />
@@ -496,6 +498,7 @@ export function SessionActionSheet({ session, crmId, onClose }: { session: Roste
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
         <Badge text={session.cancelled ? 'Cancelled' : 'Scheduled'} color={session.cancelled ? C.red : C.green} />
         <Badge text={session.modality ?? 'Session'} color={col} />
+        {session.essentials ? <EssentialsBadge status={session.essentials} compact /> : null}
         <Body style={{ flex: 1, fontSize: 11.5, color: C.muted2 }} numberOfLines={1}>with {session.trainerName}</Body>
       </View>
       {session.notes ? <Body style={{ fontSize: 11.5, color: C.muted2 }}>{session.notes}</Body> : null}

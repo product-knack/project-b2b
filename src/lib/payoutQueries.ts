@@ -169,6 +169,41 @@ export function usePayoutHistory(trainerId: string | null) {
   });
 }
 
+/* ---------- QHP payouts (24 Sep 2026) ----------
+   QHP money reaches trainer_payout_records in two ways:
+   1. a formal record, payout_type 'qhp' (assessor) or 'qhp_supporting', written by Plutus's
+      QHP Payouts tab (amount in qhp_fee, cycle_payout_amount 0, assessment_id set);
+   2. far more often, an extra_earnings line the admin typed into a training payout, named
+      like "QHP Ravinder Tokas, rahul Aggarwal" or "dolly qhp" (live data, Sep 2026).
+   The Payouts page lists both so a trainer sees every QHP payment in one place. An extra
+   line counts when its name contains the word "qhp" (any case); its amount is shown as
+   the admin wrote it (a mixed line such as "recovery 300, kavya qhp 480" is not split). */
+export const isQhpExtra = (name: string | null | undefined) => /\bqhp\b/i.test(String(name ?? ''));
+export type QhpPayoutEntry = {
+  key: string;
+  paidAt: string | null;
+  label: string;                       // client name for a record, the admin's text for an extra line
+  source: 'record' | 'extra';
+  payoutType: string;                  // 'qhp' | 'qhp_supporting' for records, the parent row's type for extras
+  amount: number;
+};
+export function qhpPayoutsOf(batches: PayoutBatch[]): QhpPayoutEntry[] {
+  const out: QhpPayoutEntry[] = [];
+  for (const b of batches) {
+    for (const r of b.records) {
+      if (r.payout_type.startsWith('qhp')) {
+        out.push({ key: `r-${r.id}`, paidAt: r.paid_at ?? b.paidAt, label: r.clientName || 'QHP Assessment', source: 'record', payoutType: r.payout_type, amount: r.amount });
+      }
+    }
+    b.extras.forEach((e, i) => {
+      if (isQhpExtra(e.name)) {
+        out.push({ key: `e-${b.batchId}-${i}`, paidAt: b.paidAt, label: String(e.name).replace(/\s+/g, ' ').trim(), source: 'extra', payoutType: b.types[0] ?? 'training', amount: Number(e.amount || 0) });
+      }
+    });
+  }
+  return out.sort((a, b) => (b.paidAt ?? '').localeCompare(a.paidAt ?? ''));
+}
+
 /* Lazy per-record session breakdown — fetched when a record row is expanded. */
 export type PayoutSession = { id: string; scheduled_at: string | null; session_type: string | null; cancelled: boolean };
 export function usePayoutSessionDetails(record: PayoutRecord | null) {

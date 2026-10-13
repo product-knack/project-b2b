@@ -1,4 +1,5 @@
 import { CrmRevenueForecastBanner } from './crmRevenueForecast';
+import { ConsultFollowUpBanner } from '../components/consultCrmUi';
 import React from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Alert, Animated, Easing, Modal, ActivityIndicator } from 'react-native';
 import { useKeyboardHeight } from '../lib/useKeyboardHeight';
@@ -27,6 +28,7 @@ import { useCrmIncentives } from '../lib/crmTabQueries';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCrmCommsBook, useMarkCommDone } from '../lib/crmClientQueries';
 import { CrmVoicePlayer } from './crmClientDetail';
+import { CommAgendaBlock } from '../components/commAgenda';
 import { ensureAiCacheFresh } from '../lib/aiCache';
 import { CrmWorkspace, RetentionBreakdownSheet } from './crmTabs';
 import {
@@ -332,6 +334,8 @@ export function CrmDashboard() {
       <LongevityUnreadAlert crmId={crmId} />
       {/* Birthday alert — shows only when a client's birthday is today */}
       <BirthdayBanner crmId={crmId} />
+      {/* Doctor follow-ups due (30 days since the last consultation, nothing booked) */}
+      <ConsultFollowUpBanner crmId={crmId} />
       {/* Pause-ended alert — clients whose pause lapsed and are active again */}
       <PauseEndedBanner crmId={crmId} />
       {/* Client Threads — one team chat per client (trainers + CRMs + doctors) */}
@@ -732,10 +736,10 @@ export function CrmComms() {
   const q = query.trim().toLowerCase();
 
   // Unified item shape for both modes (latest-per-client vs full log).
-  type Item = { key: string; commId: string; clientId: string; clientName: string; callDate: string; status: string | null; medium: string | null; category: string | null; remarks: string | null; followUp: string | null; overdue: boolean; voicePath: string | null };
+  type Item = { key: string; commId: string; clientId: string; clientName: string; callDate: string; status: string | null; medium: string | null; category: string | null; remarks: string | null; followUp: string | null; overdue: boolean; voicePath: string | null; agenda: string | null };
   const source: Item[] = mode === 'client'
-    ? (book?.rows ?? []).map((r) => ({ key: r.clientId, commId: r.commId, clientId: r.clientId, clientName: r.clientName, callDate: r.callDate, status: r.status, medium: r.medium, category: r.category, remarks: r.remarks, followUp: r.followUp, overdue: r.overdue, voicePath: r.voicePath }))
-    : (book?.log ?? []).map((r) => ({ key: r.id, commId: r.id, clientId: r.clientId, clientName: r.clientName, callDate: r.callDate, status: r.status, medium: r.medium, category: r.category, remarks: r.remarks, followUp: r.followUp, overdue: r.overdue, voicePath: r.voicePath }));
+    ? (book?.rows ?? []).map((r) => ({ key: r.clientId, commId: r.commId, clientId: r.clientId, clientName: r.clientName, callDate: r.callDate, status: r.status, medium: r.medium, category: r.category, remarks: r.remarks, followUp: r.followUp, overdue: r.overdue, voicePath: r.voicePath, agenda: r.agenda }))
+    : (book?.log ?? []).map((r) => ({ key: r.id, commId: r.id, clientId: r.clientId, clientName: r.clientName, callDate: r.callDate, status: r.status, medium: r.medium, category: r.category, remarks: r.remarks, followUp: r.followUp, overdue: r.overdue, voicePath: r.voicePath, agenda: r.agenda }));
 
   const statusesPresent = COMM_STATUS_ORDER.filter((s) => (book?.log ?? []).some((r) => r.status === s));
 
@@ -884,6 +888,7 @@ export function CrmComms() {
                   ) : null}
                   {r.remarks ? <Body numberOfLines={2} style={{ fontSize: 11.5, color: C.muted3, paddingLeft: 17 }}>{r.remarks}</Body> : null}
                   {r.voicePath ? <View style={{ paddingLeft: 17 }}><CrmVoicePlayer path={r.voicePath} sec={null} /></View> : null}
+                  <CommAgendaBlock agenda={r.agenda} style={{ marginLeft: 17 }} />
                   {r.status !== 'Follow Up Done' ? (
                     <View style={{ flexDirection: 'row', paddingLeft: 17 }}>
                       <Pressable onPress={() => doneM.mutate({ id: r.commId, clientId: r.clientId }, { onError: (e: any) => Alert.alert("Couldn't mark done", e?.message ?? "Try again.") })} disabled={doneM.isPending} hitSlop={6} style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 5, paddingHorizontal: 11, borderRadius: 999, backgroundColor: hexA(C.green, 0.12), borderWidth: 1, borderColor: hexA(C.green, 0.35) }}>

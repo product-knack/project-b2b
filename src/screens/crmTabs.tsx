@@ -20,6 +20,7 @@ import {
 import { useRescheduleRequests, useRosterRequests } from '../lib/approvalQueries';
 import { useMarkCommDone } from '../lib/crmClientQueries';
 import type { CommRow } from '../lib/crmTabQueries';
+import { CommAgendaBlock } from '../components/commAgenda';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { invalidateDebounced } from '../lib/invalidateDebounced';
@@ -235,6 +236,7 @@ function FollowUpCard({ row, index, busy, onCall, onDone, onView }: {
               </Body>
             </View>
           ) : null}
+          <CommAgendaBlock agenda={row.agenda} />
           <View style={{ flexDirection: 'row', gap: 8 }}>
             {row.phone ? <Act label="Call" icon="phone" color={C.green} filled onPress={onCall} /> : null}
             <Act label={busy ? 'Saving…' : 'Mark Done'} icon="checks" color={C.orange} filled onPress={onDone} disabled={busy} />
@@ -583,6 +585,7 @@ export function CrmSectionPage() {
                               trainerId: l.trainerId, trainerName: l.trainerName,
                               when: s.when, modality: s.modality, status: s.status,
                               notes: null, cancelled: s.status === 'cancelled', completed: false, hasRescheduleReq: false,
+                              essentials: (s as any).essentials ?? null,
                             })}
                             style={{ flexDirection: 'row', alignItems: 'center', gap: 8, padding: 9, borderRadius: 10, backgroundColor: hexA(s.status === 'cancelled' ? C.muted2 : C.red, 0.06), borderWidth: 1, borderColor: hexA(s.status === 'cancelled' ? C.muted2 : C.red, 0.25), opacity: s.status === 'cancelled' ? 0.6 : 1 }}
                           >

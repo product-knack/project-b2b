@@ -307,6 +307,7 @@ export const trainerNav: NavGroup[] = [
     { label: 'My Clients', icon: 'users', route: 'clients' },
     { label: 'Workout Templates', icon: 'file', route: 'workout-templates' },
     { label: 'Sessions', icon: 'dumbbell', route: 'sessions' },
+    { label: 'Essentials Auction', icon: 'gavel', route: 'essentials-auction' },
     { label: 'Payouts', icon: 'rupee', route: 'payouts' },
     { label: 'Referrals', icon: 'userPlus', route: 'referrals' },
     { label: 'Incentive', icon: 'gift', route: 'incentives' },
@@ -347,6 +348,7 @@ export const crmNav: NavGroup[] = [
   { label: 'Operations', items: [
     { label: 'Roster Management', icon: 'map', route: 'crm-roster' },
     { label: 'QHP', icon: 'heart', route: 'crm-qhp' },
+    { label: 'Doctor Consultation', icon: 'clipboard', route: 'crm-doctor-consult' },
     { label: 'Escalations', icon: 'alert', route: 'crm-esc' },
     { label: 'Tasks', icon: 'clipboard', route: 'crm-tasks' },
     { label: 'Tools', icon: 'grid', route: 'crm-tools' },
@@ -474,6 +476,7 @@ export const doctorNav: NavGroup[] = [
     { label: 'Reimbursements', icon: 'checks', route: 'doctor-reimbursement-review' },
     { label: 'Dashboard', icon: 'grid', route: 'doctor-dashboard' },
     { label: 'Sessions', icon: 'activity', route: 'doctor-sessions' },
+    { label: 'Essentials Auction', icon: 'gavel', route: 'essentials-auction' },
     { label: 'My Clients', icon: 'users', route: 'doctor-clients' },
     { label: 'Messenger', icon: 'chat', route: 'messenger' },
     { label: 'Client Threads', icon: 'atSign', route: 'client-threads' },

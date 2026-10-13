@@ -6,6 +6,7 @@ import { C, F, hexA, ORANGE_GRAD } from '../theme';
 import { Icon } from '../icons';
 import { Serif, Body, Mono, Card, Avatar } from '../components/primitives';
 import { Page, BackLink, Badge, AnimChip, HScroll } from './common';
+import { ClientHealthSummaryCard } from '../components/clientHealthSummaryCard';
 import { PdfPreview } from '../components/PdfPreview';
 import { useStore } from '../store';
 import { useAuth } from '../auth';
@@ -32,6 +33,9 @@ import { useSaveClientHomeLocation } from '../lib/clientQueries';
 import { useWorkoutSessions } from '../lib/adminClientDetailQueries';
 import { useClientHealthReports } from '../lib/qhpQueries';
 import { PhysioSessionSheet } from './doctorSessions';
+// Session voice notes (7 Oct 2026): a rehab / recovery / therapy session's notes play back to back, as on the trainer's Sessions list.
+import { SessionVoicePlaylistPlayer } from '../components/SessionVoice';
+import { parseVoiceNotes } from '../lib/sessionVoiceTypes';
 import { ServicesButton } from '../components/servicesButton';
 
 /* ============ Doctor → Client Detail (web DoctorClientDetail.tsx port) ============
@@ -416,6 +420,8 @@ function CreateProtocolSheet({ visible, onClose, clientId, clientName, physioId 
 /* ============ Rehab sessions block ============ */
 function RehabSessionCard({ s, onShowText }: { s: any; onShowText: (title: string, text: string) => void }) {
   const [open, setOpen] = React.useState(false);
+  const [voiceOpen, setVoiceOpen] = React.useState(false);
+  const voiceNotes = React.useMemo(() => parseVoiceNotes(s.voice_notes), [s.voice_notes]);
   const grouped = new Map<string, any[]>();
   (s.exercises ?? []).forEach((e: any) => {
     const k = `${e.exercise_order}-${(e.exercise_name ?? '').toLowerCase()}`;
@@ -446,7 +452,17 @@ function RehabSessionCard({ s, onShowText }: { s: any; onShowText: (title: strin
             <Icon name="sparkle" size={11} color={C.gold} /><Text style={{ fontFamily: F.bodySemi, fontSize: 10.5, color: C.gold }}>Rehab AI</Text>
           </Pressable>
         ) : null}
+        {voiceNotes.length ? (
+          <Pressable
+            onPress={() => setVoiceOpen((v) => !v)}
+            accessibilityRole="button" accessibilityLabel={`Play ${voiceNotes.length} voice notes`}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: hexA(C.purple, voiceOpen ? 0.2 : 0.12), borderRadius: 9, paddingHorizontal: 9, paddingVertical: 5, borderWidth: 1, borderColor: hexA(C.purple, 0.3) }}
+          >
+            <Icon name="mic" size={11} color={C.purple} strokeWidth={2.2} /><Text style={{ fontFamily: F.bodySemi, fontSize: 10.5, color: C.purple }}>Play{voiceNotes.length > 1 ? ` · ${voiceNotes.length}` : ''}</Text>
+          </Pressable>
+        ) : null}
       </View>
+      {voiceOpen && voiceNotes.length ? <SessionVoicePlaylistPlayer notes={voiceNotes} /> : null}
       {grouped.size ? (
         <>
           <Pressable onPress={() => setOpen((v) => !v)} hitSlop={10} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6 }}>
@@ -1045,6 +1061,8 @@ export function DoctorClientDetail() {
   const sessCount = countsQ.data?.[clientId] ?? 0;
   const isHead = uid === HEAD_DOCTOR_ID;
   const isPhysio = ident.data.isPhysio;
+  // Log Physio / Add Workout: the doctors' manager (physio HOD) only (user rule 29 Sep 2026).
+  const canLogHere = isPhysio && ident.data.isPhysioHod;
 
   const remarks = remarksQ.data ?? [];
   const remarkPages = Math.max(1, Math.ceil(remarks.length / REMARKS_PER_PAGE));
@@ -1111,9 +1129,9 @@ export function DoctorClientDetail() {
       </Card>
 
       {/* actions */}
-      {isPhysio || isHead ? (
+      {canLogHere || isHead ? (
         <View style={{ gap: 8 }}>
-          {isPhysio ? (
+          {canLogHere ? (
             <View style={{ flexDirection: 'row', gap: 8 }}>
               <Pressable onPress={() => setLogOpen(true)} style={{ flex: 1, borderRadius: 13, overflow: 'hidden' }}>
                 <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 12 }}>
@@ -1135,6 +1153,9 @@ export function DoctorClientDetail() {
           ) : null}
         </View>
       ) : null}
+
+      {/* Listen before the session (9 Oct 2026): doctors and therapists may listen too */}
+      <ClientHealthSummaryCard clientId={clientId} />
 
       {/* tabs — segmented pill */}
       <View style={{ flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: 999, padding: 3 }}>

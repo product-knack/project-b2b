@@ -1,6 +1,16 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from './supabase';
-import { invokeWithTimeout } from './withTimeout';
+import type { SessionTiming } from './sessionTiming';
+import { computeEssentials, EssentialsStatus } from './essentials';
+import { invokeWithTimeout, withTimeout, NET_MS } from './withTimeout';
+import type { ConsultAINotes } from './consultantQueries';
+import { parseVoiceNotes, SessionVoiceNote } from './sessionVoiceTypes';
+
+/* Same test as consultantQueries.hasAiNotes; local so this module does not pull the
+   consultant workspace in at runtime. */
+const hasAiNotes = (n: ConsultAINotes | null | undefined): boolean =>
+  !!n && (!!n.short_summary || (n.summary_points?.length ?? 0) > 0 || !!n.clinical_impression || (n.red_flags?.length ?? 0) > 0
+    || (n.recommendations?.length ?? 0) > 0 || (n.tests_suggested?.length ?? 0) > 0 || (n.medications?.length ?? 0) > 0);
 
 /* ---------- Create a workout session (strength) ---------- */
 // RFC4122-ish v4 uuid (Hermes has no crypto.randomUUID).
@@ -12,38 +22,65 @@ export function uuidv4() {
   });
 }
 
-// Local (device = IST) yesterday as YYYY-MM-DD — sleep/nutrition are logged against yesterday.
-function localYesterday() {
+// Local (device = IST) today as YYYY-MM-DD.
+// ATTRIBUTION RULE (24 Sep 2026, same as iOS): the workout health check-in ("Sleep hours
+// (last night)", "Nutrition rating (yesterday)", "Steps count (yesterday)") is stored on
+// the WORKOUT day, i.e. today, not yesterday. Before this, Trends showed every workout day
+// with its three values one row behind, and manual sleep disagreed by a day with wearable
+// sleep (daily_health_metrics.metric_date = the wake day). Historical rows keep their old
+// date; nothing is migrated. The questions' wording stays as is.
+export function localToday() {
   const d = new Date();
-  d.setDate(d.getDate() - 1);
   const p = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
-/* ---------- Health-data gate (sleep + nutrition for yesterday) ---------- */
+/* ---------- Health-data gate (sleep + nutrition + steps for TODAY, the workout day) ---------- */
+// Key bumped to v3 (24 Sep 2026) with the attribution change, so a cached "yesterday"
+// result can never wrongly lock or unlock the gate. Expected one-time effect: the first
+// log after the update asks again, because today's row does not exist yet.
+export const HEALTH_CHECK_KEY = 'client-health-check';
+// nutrition_tracker.hydration_inputs (litres) arrived on 5 Oct 2026 (hub-track migration
+// 20261005120000). Until it is run live the select is retried without it and hydration is
+// neither asked nor written (hydrationSupported false), so the gate never breaks.
+let hydrationColumnMissing = false;
+async function nutritionTodayQuery(clientId: string, today: string) {
+  if (!hydrationColumnMissing) {
+    const r = await supabase.from('nutrition_tracker').select('nutrition_rating, steps_by_trainer, hydration_inputs').eq('client_id', clientId).eq('rating_date', today).limit(1);
+    if (!r.error || (r.error as any).code !== '42703') return r;
+    hydrationColumnMissing = true;
+  }
+  return supabase.from('nutrition_tracker').select('nutrition_rating, steps_by_trainer').eq('client_id', clientId).eq('rating_date', today).limit(1);
+}
 export function useClientHealthCheck(clientId: string | null) {
   return useQuery({
-    queryKey: ['client-health-check', clientId],
+    queryKey: [HEALTH_CHECK_KEY, 'v4', clientId],
     enabled: !!clientId,
     staleTime: 60_000,
     queryFn: async () => {
-      const yesterday = localYesterday();
+      const today = localToday();
       const now = new Date();
       const [hmR, slR, nutR, schedR] = await Promise.all([
-        supabase.from('daily_health_metrics').select('sleep_duration_minutes').eq('client_id', clientId).eq('metric_date', yesterday).limit(1),
-        supabase.from('daily_sleep_logs').select('hours_slept').eq('client_id', clientId).eq('log_date', yesterday).limit(1),
-        supabase.from('nutrition_tracker').select('nutrition_rating, steps_by_trainer').eq('client_id', clientId).eq('rating_date', yesterday).limit(1),
+        supabase.from('daily_health_metrics').select('sleep_duration_minutes').eq('client_id', clientId).eq('metric_date', today).limit(1),
+        supabase.from('daily_sleep_logs').select('hours_slept').eq('client_id', clientId).eq('log_date', today).limit(1),
+        nutritionTodayQuery(clientId!, today),
         supabase.from('monthly_sleep_schedules').select('average_sleep_hours').eq('client_id', clientId).eq('month', now.getMonth() + 1).eq('year', now.getFullYear()).limit(1),
       ]);
       const hmMins = hmR.data?.[0]?.sleep_duration_minutes;
       const slHours = slR.data?.[0]?.hours_slept;
       const rating = nutR.data?.[0]?.nutrition_rating;
       const steps = nutR.data?.[0]?.steps_by_trainer;
+      const hydrationRaw = (nutR.data?.[0] as any)?.hydration_inputs;
+      const hydrationLitres = hydrationRaw != null && Number.isFinite(Number(hydrationRaw)) ? Number(hydrationRaw) : null;
       const sleepHours = hmMins != null ? Math.round((hmMins / 60) * 10) / 10 : slHours != null ? Number(slHours) : null;
       return {
         sleepMissing: sleepHours == null,
         nutritionMissing: rating == null,
         stepsMissing: steps == null,
+        // Hydration (5 Oct 2026): asked like the other three once the column is live.
+        hydrationMissing: !hydrationColumnMissing && hydrationLitres == null,
+        hydrationSupported: !hydrationColumnMissing,
+        hydrationLitres,
         sleepHours,
         nutritionRating: rating ?? null,
         stepsCount: steps ?? null,
@@ -60,15 +97,19 @@ export type HealthDataInput = {
   scheduledHours: number;
   nutritionRating?: number | null;
   stepsCount?: number | null;
-  /** Offline sync: the device date the data was entered for (defaults to yesterday-now). */
+  /** Litres of water drunk that day (nutrition_tracker.hydration_inputs, 5 Oct 2026). */
+  hydrationLitres?: number | null;
+  /** The day the values belong to (YYYY-MM-DD, local). Defaults to today (the workout day).
+      The workout gate stamps it at ENTRY time so an offline item that drains the next day
+      still lands on the entry day; the Trends add / edit sheet passes the selected day. */
   logDate?: string;
 };
 
-// Plain submit fn — used by the mutation hook AND the offline outbox drainer.
-// All writes are upserts keyed on (client, date), so retries are idempotent.
+// Plain submit fn — used by the mutation hook, the Trends add / edit sheet AND the offline
+// outbox drainer. All writes are upserts keyed on (client, date), so retries and edits are idempotent.
 export async function submitHealthData(args: HealthDataInput) {
-  const { clientId, trainerId, hoursSlept, scheduledHours, nutritionRating, stepsCount } = args;
-  const yesterday = args.logDate ?? localYesterday();
+  const { clientId, trainerId, hoursSlept, scheduledHours, nutritionRating, stepsCount, hydrationLitres } = args;
+  const yesterday = args.logDate ?? localToday(); // (name kept; it is the log date)
 
   if (hoursSlept != null) {
     const { error } = await supabase.from('daily_sleep_logs').upsert(
@@ -78,18 +119,24 @@ export async function submitHealthData(args: HealthDataInput) {
     if (error) throw new Error(error.message);
   }
 
-  if (nutritionRating != null || stepsCount != null) {
+  if (nutritionRating != null || stepsCount != null || hydrationLitres != null) {
     const payload: Record<string, any> = { updated_at: new Date().toISOString() };
     if (nutritionRating != null) payload.nutrition_rating = nutritionRating;
     if (stepsCount != null) payload.steps_by_trainer = stepsCount;
-    const { data: existing } = await supabase.from('nutrition_tracker').select('id').eq('client_id', clientId).eq('rating_date', yesterday).limit(1);
-    if (existing && existing.length > 0) {
-      const { error } = await supabase.from('nutrition_tracker').update(payload).eq('client_id', clientId).eq('rating_date', yesterday);
-      if (error) throw new Error(error.message);
-    } else {
-      const { error } = await supabase.from('nutrition_tracker').insert({ client_id: clientId, rating_date: yesterday, ...payload });
-      if (error) throw new Error(error.message);
+    if (hydrationLitres != null && !hydrationColumnMissing) payload.hydration_inputs = hydrationLitres;
+    // One write, retried once without hydration when the column is not live yet (42703).
+    const write = async (): Promise<{ error: any }> => {
+      const { data: existing } = await supabase.from('nutrition_tracker').select('id').eq('client_id', clientId).eq('rating_date', yesterday).limit(1);
+      if (existing && existing.length > 0) return supabase.from('nutrition_tracker').update(payload).eq('client_id', clientId).eq('rating_date', yesterday);
+      return supabase.from('nutrition_tracker').insert({ client_id: clientId, rating_date: yesterday, ...payload });
+    };
+    let { error } = await write();
+    if (error && (error as any).code === '42703' && 'hydration_inputs' in payload) {
+      hydrationColumnMissing = true;
+      delete payload.hydration_inputs;
+      ({ error } = await write());
     }
+    if (error) throw new Error(error.message);
   }
 }
 
@@ -97,8 +144,25 @@ export function useSaveHealthData() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: submitHealthData,
-    onSuccess: (_res, vars) => qc.invalidateQueries({ queryKey: ['client-health-check', vars.clientId] }),
+    onSuccess: (_res, vars) => invalidateHealthViews(qc, vars.clientId),
   });
+}
+
+/* Everything that shows a client's sleep / nutrition / steps: the workout gate, the Trends
+   weekly summary and the daily-stats list. */
+export function invalidateHealthViews(qc: ReturnType<typeof useQueryClient>, clientId: string) {
+  qc.invalidateQueries({ queryKey: [HEALTH_CHECK_KEY, 'v4', clientId] });
+  qc.invalidateQueries({ queryKey: ['weekly-health-summary', clientId] });
+  qc.invalidateQueries({ queryKey: ['client-daily-stats', clientId] });
+}
+
+/* The client's scheduled sleep for the month of `ymd` (monthly_sleep_schedules), else 8,
+   the same source the workout gate uses; the Trends sheet needs it for deviation_hours. */
+export async function fetchScheduledSleepHours(clientId: string, ymd: string): Promise<number> {
+  const [y, m] = ymd.split('-').map(Number);
+  const { data } = await supabase.from('monthly_sleep_schedules').select('average_sleep_hours').eq('client_id', clientId).eq('month', m).eq('year', y).limit(1);
+  const v = Number(data?.[0]?.average_sleep_hours);
+  return Number.isFinite(v) && v > 0 ? v : 8;
 }
 
 /* ---------- Exercise DB (for the Add-Exercise picker) ---------- */
@@ -210,6 +274,9 @@ export type WorkoutLogInput = {
       time the trainer actually logged it, never the sync time. */
   sessionId?: string;
   sessionDate?: string;
+  /** Session timer (13 Oct 2026): built at submit time, carried through the outbox
+      unchanged, written to training_sessions.duration_minutes + session_timing. */
+  sessionTiming?: SessionTiming | null;
 };
 
 /* Result of the schedule-link step. 'skipped' = no slot (ad-hoc / partner 2nd leg);
@@ -276,7 +343,7 @@ async function linkWorkoutToSchedule(workoutSessionId: string, scheduleSessionId
 // body_part 'Aerobics Activity'; everything else is the reps/load/duration set model
 // with the plan-carried per-set columns (tempo/rest/%RM/RIR/superset/equipment).
 export async function submitWorkoutLog(args: WorkoutLogInput) {
-  const { trainerId, clientId, sessionName, modality, exercises, remark, rpe, scheduleSessionId, partnerSessionGroupId } = args;
+  const { trainerId, clientId, sessionName, modality, exercises, remark, rpe, scheduleSessionId, partnerSessionGroupId, sessionTiming } = args;
   const m = (modality || '').toLowerCase();
   const isYoga = m === 'yoga';
   const isBoxing = m === 'boxing';
@@ -414,6 +481,20 @@ export async function submitWorkoutLog(args: WorkoutLogInput) {
   // 2. RPE on the auto-created training_sessions row (integer, web parity).
   if (rpe != null) {
     await supabase.from('training_sessions').update({ rpe: Math.round(rpe) }).eq('workout_session_id', sessionId);
+  }
+  // 2b. Session timer (13 Oct 2026): the measured minutes into the integer column and the
+  //     detail into session_timing. Same values on every retry (built once at submit).
+  //     Non-fatal; one short retry when the trigger-created row is not there yet.
+  if (sessionTiming) {
+    const writeTiming = async () => {
+      const { data } = await supabase.from('training_sessions')
+        .update({ duration_minutes: sessionTiming.duration_minutes, session_timing: sessionTiming })
+        .eq('workout_session_id', sessionId).select('id');
+      return (data ?? []).length > 0;
+    };
+    try {
+      if (!(await writeTiming())) { await new Promise((r) => setTimeout(r, LINK_RETRY_MS)); await writeTiming(); }
+    } catch { /* non-fatal: the log stands without its timing */ }
   }
   // 3. Training-partner group id (shared across the two parallel sessions).
   if (partnerSessionGroupId) {
@@ -740,9 +821,14 @@ export function useSaveWorkoutTemplate() {
           });
         });
       } else {
-        exercises.filter((e) => e.name.trim() && e.sets.some((s) => s.reps.trim() || s.load.trim() || (s.duration ?? '').trim())).forEach((ex, i) => {
+        // A template is a plan skeleton, so values are optional (user rule 25 Sep 2026,
+        // web WorkoutTemplateBuilder parity): every named exercise and every set is kept,
+        // an empty reps / load / duration is stored as NULL. An exercise with no set row
+        // still gets one, so it is never dropped.
+        exercises.filter((e) => e.name.trim()).forEach((ex, i) => {
           const isDur = ex.measurement === 'duration';
-          ex.sets.filter((s) => s.reps.trim() || s.load.trim() || (s.duration ?? '').trim()).forEach((st, si) => {
+          const sets = ex.sets.length ? ex.sets : [{ reps: '', load: '', duration: '', note: '' }];
+          sets.forEach((st, si) => {
             const loadNum = st.load.trim() && !isNaN(Number(st.load)) ? Number(st.load) : null;
             rows.push({
               ...base, body_part: (ex.body_part || '').trim() || (sessionName || '').trim() || ex.name.trim(),
@@ -755,7 +841,7 @@ export function useSaveWorkoutTemplate() {
           });
         });
       }
-      if (!rows.length) throw new Error('Nothing to save — add exercises first');
+      if (!rows.length) throw new Error('Nothing to save. Add at least one exercise first.');
       const { error } = await supabase.from('workout_templates').insert(rows);
       if (error) throw new Error(error.message);
       return { templateId };
@@ -794,6 +880,8 @@ export type MyClientRow = {
   phone: string | null;
   status: string | null;
   subscription_type: string | null;
+  /** Essentials 30-day pass status (30 Sep 2026); null for every other subscription. */
+  essentials: EssentialsStatus | null;
   cycle_sessions: number;
   sessions_in_cycle: number;
   sessions_30d: number; // completed non-rehab sessions in the rolling last 30 days
@@ -810,7 +898,7 @@ export function useMyClients(trainerId: string) {
     queryFn: async (): Promise<MyClientRow[]> => {
       const { data: assigned, error } = await supabase
         .from('trainer_clients')
-        .select('client:clients(id, first_name, last_name, phone, status, subscription_type, sessions_per_cycle, created_at, client_training_plans(id))')
+        .select('client:clients(id, first_name, last_name, phone, status, subscription_type, essentials_extensions, sessions_per_cycle, created_at, client_training_plans(id))')
         .eq('actively_training', true)
         .eq('trainer_id', trainerId);
       if (error) throw new Error(error.message);
@@ -884,6 +972,7 @@ export function useMyClients(trainerId: string) {
             phone: c.phone ?? null,
             status: c.status ?? null,
             subscription_type: c.subscription_type ?? null,
+            essentials: computeEssentials(c.subscription_type, c.essentials_extensions),
             cycle_sessions: perCycle,
             sessions_in_cycle: inCycle,
             sessions_30d: monthCount.get(c.id) ?? 0,
@@ -907,6 +996,8 @@ export type ClientDetail = {
   crm: { name: string; phone: string | null } | null;
   /** Tier for the Services drawer: profiles.subscription_type wins for app (B2C) clients, else clients.subscription_type. */
   serviceTier: string | null;
+  /** Essentials 30-day pass status from clients.subscription_type + essentials_extensions (30 Sep 2026). */
+  essentials: EssentialsStatus | null;
 };
 
 export function useClientDetail(clientId: string | null) {
@@ -916,7 +1007,7 @@ export function useClientDetail(clientId: string | null) {
     staleTime: 120_000,
     queryFn: async (): Promise<ClientDetail> => {
       const [clientR, assessR, bioR, renewR, qhpR, crmR, progR, dhmR] = await Promise.all([
-        supabase.from('clients').select('id, profile_id, first_name, last_name, email, phone, date_of_birth, status, session_package, sessions_per_cycle, cycle_type, package_duration, subscription_type, client_type, location, brb_location, is_monthly_subscription, is_hybrid, created_at').eq('id', clientId).maybeSingle(),
+        supabase.from('clients').select('id, profile_id, first_name, last_name, email, phone, date_of_birth, status, session_package, sessions_per_cycle, cycle_type, package_duration, subscription_type, essentials_extensions, client_type, location, brb_location, is_monthly_subscription, is_hybrid, created_at').eq('id', clientId).maybeSingle(),
         supabase.from('coach_assessment').select('qhp_data, new_client_assessment_data, existing_client_assessment_data, assessment_date').eq('client_id', clientId).order('assessment_date', { ascending: false }).limit(10),
         supabase.from('biological_age_history').select('vo2_max, calculation_date').eq('client_id', clientId).not('vo2_max', 'is', null).order('calculation_date', { ascending: false }).limit(1),
         supabase.from('client_renewals').select('renewed_at, package_sessions, cycle_sessions, package_duration, cycle_type').eq('client_id', clientId).order('renewed_at', { ascending: false }).limit(1),
@@ -988,6 +1079,7 @@ export function useClientDetail(clientId: string | null) {
         renewal: renewR.data?.[0] ?? null,
         crm: crmName ? { name: crmName, phone: crmProfile.phone ?? null } : null,
         serviceTier,
+        essentials: computeEssentials(clientR.data?.subscription_type, clientR.data?.essentials_extensions),
       };
     },
   });
@@ -1253,6 +1345,8 @@ export type ClientSessionRow = {
   category: 'workout' | 'rehab';
   ai_analysis: string | null;
   workout_session_id: string | null;
+  /** Trainer voice notes (training_sessions.voice_notes, 30 Sep 2026). */
+  voice_notes: SessionVoiceNote[];
 };
 
 export function useClientSessions(clientId: string | null) {
@@ -1261,9 +1355,11 @@ export function useClientSessions(clientId: string | null) {
     enabled: !!clientId,
     staleTime: 60_000,
     queryFn: async (): Promise<ClientSessionRow[]> => {
-      const { data, error } = await supabase
+      // `voice_notes` arrived on 30 Sep 2026 (migration 20260930100000); until it is
+      // run live the select is retried without it, so the list never blanks.
+      const sessionsQuery = (withVoice: boolean) => supabase
         .from('training_sessions')
-        .select('id, scheduled_at, session_type, status, trainer_id, notes, session_name, workout_session_id, rehab_ai_analysis, created_at')
+        .select(`id, scheduled_at, session_type, status, trainer_id, notes, session_name, workout_session_id, rehab_ai_analysis, created_at${withVoice ? ', voice_notes' : ''}`)
         .eq('client_id', clientId)
         .neq('status', 'parked')
         .neq('status', 'cancelled')
@@ -1272,6 +1368,9 @@ export function useClientSessions(clientId: string | null) {
         .gte('scheduled_at', new Date(Date.now() - 365 * 864e5).toISOString())
         .order('scheduled_at', { ascending: false })
         .limit(60);
+      let res = await sessionsQuery(true);
+      if (res.error && (res.error as any).code === '42703') res = await sessionsQuery(false);
+      const { data, error } = res;
       if (error) throw new Error(error.message);
       const rows = (data ?? []) as any[];
 
@@ -1323,6 +1422,7 @@ export function useClientSessions(clientId: string | null) {
           category,
           ai_analysis: ai,
           workout_session_id: r.workout_session_id ?? null,
+          voice_notes: parseVoiceNotes(r.voice_notes),
         };
       });
     },
@@ -1829,6 +1929,37 @@ export function useClientReports(clientId: string | null) {
       if (qhpR.error) throw new Error(qhpR.error.message);
       if (healthR.error) throw new Error(healthR.error.message);
       return { qhp: qhpR.data ?? [], health: healthR.data ?? [] };
+    },
+  });
+}
+
+/* ---------- Reports: doctor-consultation AI summaries (25 Sep 2026) ----------
+   doctor_consultation_details RLS keeps trainers out, so the rows come through the
+   definer RPC get_client_consult_ai_summaries (hub-track migration 20260925120000):
+   ai_notes only (no transcript / prescription / link), newest first, and only for a
+   client the caller actively trains (admin / super_admin too). Anyone else: []. */
+export type ClientConsultAi = {
+  id: string;
+  consultation_date: string; // YYYY-MM-DD
+  start_time: string;        // HH:mm:ss
+  end_time: string;
+  status: string;
+  doctor_name: string | null;
+  ai_notes: ConsultAINotes | null;
+};
+export function useClientConsultAi(clientId: string | null) {
+  return useQuery({
+    queryKey: ['client-consult-ai', clientId],
+    enabled: !!clientId,
+    staleTime: 120_000,
+    queryFn: async (): Promise<ClientConsultAi[]> => {
+      const { data, error } = await withTimeout(
+        Promise.resolve(supabase.rpc('get_client_consult_ai_summaries', { p_client_id: clientId })),
+        NET_MS,
+        'Doctor consultations',
+      );
+      if (error) throw new Error(error.message);
+      return ((data ?? []) as ClientConsultAi[]).filter((r) => hasAiNotes(r.ai_notes));
     },
   });
 }

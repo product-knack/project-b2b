@@ -8,8 +8,8 @@ import { Page } from './common';
 import { useAuth } from '../auth';
 import { DEV_TRAINER_ID } from '../lib/supabase';
 import {
-  usePayoutHistory, usePayoutSessionDetails, payoutTypeMeta, inr,
-  PayoutBatch, PayoutRecord,
+  usePayoutHistory, usePayoutSessionDetails, payoutTypeMeta, inr, qhpPayoutsOf, isQhpExtra,
+  PayoutBatch, PayoutRecord, QhpPayoutEntry,
 } from '../lib/payoutQueries';
 
 /* ============ TRAINER PAYOUTS — obsidian/ember redesign ============ */
@@ -158,7 +158,7 @@ function BatchCard({ batch, isLatest, isLast }: { batch: PayoutBatch; isLatest: 
               <View style={{ padding: 13, gap: 9 }}>
                 <Mono style={{ fontSize: 9, letterSpacing: 1.2, color: C.mono2 }}>BREAKDOWN</Mono>
                 <Row label={`Sessions · ${batch.sessionCount}`} value={inr(batch.gross)} />
-                {batch.extras.map((e, i) => <Row key={`e${i}`} label={e.name} value={`+ ${inr(e.amount)}`} color={C.green} />)}
+                {batch.extras.map((e, i) => <Row key={`e${i}`} label={e.name} value={`+ ${inr(e.amount)}`} color={isQhpExtra(e.name) ? C.blue : C.green} />)}
                 {batch.deductions.map((d, i) => <Row key={`d${i}`} label={d.name} value={`− ${inr(d.amount)}`} color={C.red} />)}
               </View>
               <LinearGradient colors={[hexA(C.orange, 0.16), hexA(C.orange, 0.06)]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 11, paddingHorizontal: 13, borderTopWidth: 1, borderTopColor: hexA(C.orange, 0.2) }}>
@@ -183,6 +183,53 @@ function BatchCard({ batch, isLatest, isLast }: { batch: PayoutBatch; isLatest: 
   );
 }
 
+/* QHP Payouts (24 Sep 2026): every QHP payment in this trainer's payout rows, the formal QHP
+   records and the QHP lines admins added as extra earnings. Renders nothing when there are none. */
+function QhpPayoutsCard({ entries }: { entries: QhpPayoutEntry[] }) {
+  const [showAll, setShowAll] = React.useState(false);
+  if (!entries.length) return null;
+  const total = entries.reduce((s, e) => s + e.amount, 0);
+  const shown = showAll ? entries : entries.slice(0, 4);
+  return (
+    <Card colors={['rgba(24,30,58,0.5)', 'rgba(14,14,20,0.55)']} border={hexA(C.blue, 0.24)} radius={19} style={{ overflow: 'hidden' }}>
+      <LinearGradient colors={[hexA(C.blue, 0.55), 'rgba(255,255,255,0.02)']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={{ height: 3 }} />
+      <View style={{ padding: 15, gap: 11 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          <View style={{ width: 40, height: 40, borderRadius: 13, backgroundColor: hexA(C.blue, 0.13), borderWidth: 1, borderColor: hexA(C.blue, 0.35), alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="heart" size={18} color={C.blue} strokeWidth={1.9} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Body style={{ fontSize: 14.5, fontFamily: F.bodyBold, color: '#fff' }}>QHP Payouts</Body>
+            <Body style={{ fontSize: 11, color: C.muted2, marginTop: 1 }}>{entries.length} {entries.length === 1 ? 'payment' : 'payments'} for QHP assessments</Body>
+          </View>
+          <View style={{ alignItems: 'flex-end' }}>
+            <Serif style={{ fontSize: 21, color: C.blue }}>{inr(total)}</Serif>
+            <Mono style={{ fontSize: 7.5, letterSpacing: 0.8, color: C.muted3, marginTop: 1 }}>TOTAL QHP</Mono>
+          </View>
+        </View>
+        <View style={{ gap: 7 }}>
+          {shown.map((e) => (
+            <View key={e.key} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 11, borderRadius: 13, backgroundColor: 'rgba(0,0,0,0.22)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)', borderLeftWidth: 3, borderLeftColor: C.blue }}>
+              <View style={{ flex: 1 }}>
+                <Body numberOfLines={2} style={{ fontSize: 13, fontFamily: F.bodySemi, color: '#fff', lineHeight: 17 }}>{e.label}</Body>
+                <Mono style={{ fontSize: 8.5, letterSpacing: 0.4, color: C.muted3, marginTop: 3 }}>
+                  PAID {fmtPaidDay(e.paidAt).toUpperCase()} · {e.source === 'record' ? payoutTypeMeta(e.payoutType).label.toUpperCase() : 'IN PAYOUT EXTRAS'}
+                </Mono>
+              </View>
+              <Text style={{ fontFamily: F.bodyBold, fontSize: 14, color: '#fff' }}>{inr(e.amount)}</Text>
+            </View>
+          ))}
+        </View>
+        {entries.length > 4 ? (
+          <Pressable onPress={() => setShowAll((v) => !v)} hitSlop={10} accessibilityRole="button" style={{ alignSelf: 'center', paddingVertical: 4, paddingHorizontal: 12 }}>
+            <Mono style={{ fontSize: 9.5, letterSpacing: 0.6, color: C.blue }}>{showAll ? 'SHOW FEWER' : `SHOW ALL ${entries.length}`}</Mono>
+          </Pressable>
+        ) : null}
+      </View>
+    </Card>
+  );
+}
+
 function Row({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -200,6 +247,7 @@ export function Payouts() {
   const q = usePayoutHistory(trainerId);
   const batches = q.data ?? [];
 
+  const qhpEntries = React.useMemo(() => qhpPayoutsOf(batches), [q.data]); // eslint-disable-line react-hooks/exhaustive-deps
   const totalEarnings = batches.reduce((s, b) => s + b.net, 0);
   const avg = batches.length ? Math.round(totalEarnings / batches.length) : 0;
   const lastPaid = batches[0]?.paidAt ?? null;
@@ -243,6 +291,9 @@ export function Payouts() {
           </View>
         </View>
       </Card>
+
+      {/* QHP payouts, only when this trainer has any */}
+      {!q.isLoading && !q.isError ? <QhpPayoutsCard entries={qhpEntries} /> : null}
 
       {/* History */}
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>

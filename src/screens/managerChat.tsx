@@ -16,10 +16,15 @@ import { supabase } from '../lib/supabase';
 import {
   useMyManagerTeam, useManagerTeamMessages, useManagerChatRealtime, useSendManagerTeamMessage,
   useManagerChatUnread, markManagerChatRead, useTomorrowCompose, tomorrowPlanBody, fmt12h,
-  usePlanOutcome, usePlanScheduleRows, useMemberClients, usePhysioHod, useHodTeams, useHodFeedMessages, useClientProtocols, ClientProtocol, protoModalityLabel, protoEntryCount, istToday, serverNow, ManagerChatMessage, ManagerTeamInfo, TomorrowPlanEntry, PlanRescheduleHop,
+  usePlanOutcome, usePlanScheduleRows, useMemberClients, usePhysioHod, useHodTeams, useHodFeedMessages, useClientProtocols, useClientsEssentials, ClientProtocol, protoModalityLabel, protoEntryCount, istToday, serverNow, ManagerChatMessage, ManagerTeamInfo, TomorrowPlanEntry, PlanRescheduleHop,
   TRAINER_MODALITIES, DOCTOR_MODALITIES, THERAPIST_MODALITIES, isHodManagedRole, TeamFlagTrainer,
 } from '../lib/managerChatQueries';
 import { useQueryClient } from '@tanstack/react-query';
+import { useClientCycleStatus } from '../lib/cycleQueries';
+import { CycleChip, CyclePopup, CyclePopupInfo } from '../components/cycleLabel';
+import { EssentialsBadge } from '../components/essentialsBadge';
+import { LatestVoiceChip, LatestVoicePopup, LatestVoiceInfo } from '../components/SessionVoice';
+import { useClientsLatestVoiceNotes } from '../lib/sessionVoiceQueries';
 
 /* "My Crew" identity: PINK (user pick). Semantic colors stay: green =
    done/approved, red = missed/rejected, gold = plans/times. */
@@ -542,7 +547,14 @@ function MergedPlanCard({ date, bySender, team, meId, timeEdits, onEditTime, onR
   // Weekly-protocol chips: batch lookup for every visible client (5 min cache).
   const protoQ = useClientProtocols(allIds);
   const protocols = protoQ.data ?? {};
+  // Essentials by Odds clients: badge on the row; the manager cannot reschedule them here (1 Oct 2026).
+  const essQ = useClientsEssentials(allIds);
+  const essentials = essQ.data ?? {};
   const [protoFor, setProtoFor] = React.useState<{ name: string; proto: ClientProtocol } | null>(null);
+  // Cycle phase label (25 Sep 2026): eligible women under 50 only; no row = no chip.
+  const cycleQ = useClientCycleStatus(allIds);
+  const cycles = cycleQ.data ?? {};
+  const [cycleFor, setCycleFor] = React.useState<CyclePopupInfo>(null);
   const outcomeQ = usePlanOutcome(date, allIds, mode !== 'upcoming', mode === 'live');
   // Linked entries display from session_schedule (source of truth), so CRM-side
   // changes and reschedules are always current; the payload is only a fallback.
@@ -729,8 +741,9 @@ function MergedPlanCard({ date, bySender, team, meId, timeEdits, onEditTime, onR
                   const needsRemark = showStatus && mode === 'final' && !isDone;
                   const canAct = doctorIds.has(s.id) ? meIsHod : isMgr;
                   const proto = e.client_id ? protocols[e.client_id] : undefined;
+                  const ess = e.client_id ? essentials[e.client_id] : undefined; // Essentials by Odds: badge, no reschedule from here
                   // §6: own not-yet-logged linked rows (today included) can request
-                  const canRequest = !!onRequestChange && mode !== 'final' && !e.cancelled && s.id === meId && !!e.client_id && !isDone && !!e.schedule_id;
+                  const canRequest = !!onRequestChange && mode !== 'final' && !e.cancelled && s.id === meId && !!e.client_id && !isDone && !!e.schedule_id && !ess;
                   return (
                     <View key={`${e.client_id ?? e.name}-${i}`}>
                     {/* two-line row: name + time pills, then meta + action chips */}
@@ -750,7 +763,7 @@ function MergedPlanCard({ date, bySender, team, meId, timeEdits, onEditTime, onR
                         <Body style={{ flex: 1, fontSize: 14, fontFamily: F.bodySemi, color: showStatus && !isDone && mode === 'final' ? C.muted : '#fff' }} numberOfLines={1}>{e.name}</Body>
                         {/* time pill — tap = reschedule when authorized */}
                         <Pressable
-                          disabled={!onEditTime || mode === 'final' || !e.client_id || !canAct}
+                          disabled={!onEditTime || mode === 'final' || !e.client_id || !canAct || !!ess}
                           onPress={() => onEditTime && e.client_id && onEditTime({ date, clientId: e.client_id, name: e.name, trainerId: s.id, current: e.time, currentModality: e.modality ?? null, scheduleId: e.schedule_id ?? null })}
                           style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 2.5, paddingHorizontal: 8, borderRadius: 999, backgroundColor: hexA(C.gold, e.edited ? 0.16 : 0.09), borderWidth: 1, borderColor: hexA(C.gold, e.edited ? 0.55 : 0.3) }}
                         >
@@ -766,7 +779,7 @@ function MergedPlanCard({ date, bySender, team, meId, timeEdits, onEditTime, onR
                       </View>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginLeft: 28 }}>
                         <View style={{ flex: 1, gap: 1.5 }}>
-                          {e.modality ? <Mono style={{ fontSize: 8, letterSpacing: 0.6, color: C.muted2 }}>{e.modality.toUpperCase()}{e.added ? ' · ADDED' : ''}</Mono> : e.added ? <Mono style={{ fontSize: 8, letterSpacing: 0.6, color: PINK_SOFT }}>ADDED BY MANAGER</Mono> : null}
+                          {e.modality ? <Mono style={{ fontSize: 8, letterSpacing: 0.6, color: C.muted2 }}>{e.modality.toUpperCase()}{e.added ? (e.auction ? ' · AUCTION' : ' · ADDED') : ''}</Mono> : e.added ? <Mono style={{ fontSize: 8, letterSpacing: 0.6, color: e.auction ? C.gold : PINK_SOFT }}>{e.auction ? 'WON IN THE ESSENTIALS AUCTION' : 'ADDED BY MANAGER'}</Mono> : null}
                           {e.roster === 'conflict' ? (
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                               <Mono style={{ fontSize: 8, letterSpacing: 0.6, color: C.red }}>ROSTER CONFLICT · NOT BOOKED</Mono>
@@ -794,6 +807,8 @@ function MergedPlanCard({ date, bySender, team, meId, timeEdits, onEditTime, onR
                             {entryAcked(s.id, e) ? '✓ ACKNOWLEDGED' : 'NOT ACKNOWLEDGED'}
                           </Mono>
                         ) : null}
+                        {e.client_id && cycles[e.client_id] ? <CycleChip cycle={cycles[e.client_id]} onPress={() => setCycleFor({ name: e.name, cycle: cycles[e.client_id!] })} /> : null}
+                        {ess ? <EssentialsBadge status={ess} compact /> : null}
                         {proto ? <ProtocolChip onPress={() => setProtoFor({ name: e.name, proto })} /> : null}
                         {canRequest ? (
                           <Pressable hitSlop={10} onPress={() => onRequestChange!({ date, clientId: e.client_id!, name: e.name, trainerId: s.id, current: e.time, currentModality: e.modality ?? null, scheduleId: e.schedule_id ?? null })} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 4, paddingHorizontal: 8, borderRadius: 999, backgroundColor: hexA(PINK, 0.12), borderWidth: 1, borderColor: hexA(PINK, 0.45) }}>
@@ -877,15 +892,26 @@ function MergedPlanCard({ date, bySender, team, meId, timeEdits, onEditTime, onR
       </View>
       </LinearGradient>
       <ProtocolPopup info={protoFor} onClose={() => setProtoFor(null)} />
+      <CyclePopup info={cycleFor} onClose={() => setCycleFor(null)} />
     </View>
   );
 }
 
 /* ---------- Manager: add a session into a member's day ---------- */
-function AddSessionModal({ visible, trainerId, trainerName, targetRole, date, busy, scheduledIds, onClose, onSave }: {
+/* A client clash the add RPC refused: another trainer's active session_schedule row for
+   that client at the exact datetime (unique index on client + datetime). The modal turns
+   it into a warning with Force create, which re-runs the add with p_force = true. */
+type AddClash = {
+  clientId: string; clientName: string; time: string; modality: string;
+  conflict: { schedule_id?: string | null; trainer_id?: string | null; trainer_name?: string | null; modality?: string | null; status?: string | null; logged?: boolean; source?: 'crew' | 'roster' } | null;
+};
+
+function AddSessionModal({ visible, trainerId, trainerName, targetRole, date, busy, scheduledIds, clash, onClose, onSave, onForce, onDismissClash }: {
   visible: boolean; trainerId: string | null; trainerName: string; targetRole?: string | null; date: string; busy: boolean;
   scheduledIds: string[]; // clients already in this trainer's day — locked (reschedule instead)
+  clash: AddClash | null; // the RPC's conflict reply for the last save: shows the Force create warning over the form
   onClose: () => void; onSave: (clientId: string, clientName: string, time: string, modality: string) => void;
+  onForce: () => void; onDismissClash: () => void;
 }) {
   const clientsQ = useMemberClients(trainerId, visible);
   const [cid, setCid] = React.useState<string | null>(null);
@@ -893,7 +919,11 @@ function AddSessionModal({ visible, trainerId, trainerName, targetRole, date, bu
   const [t, setT] = React.useState<string | null>(null);
   // Modality options follow the TARGET member's role — a therapist's sessions
   // are always Therapy (single option, preselected).
-  const modOptions = targetRole === 'therapist' ? THERAPIST_MODALITIES : [...new Set([...TRAINER_MODALITIES, ...DOCTOR_MODALITIES])];
+  // A doctor target (added by the doctor manager) lists physio first, then every workout modality,
+  // the same list the doctor's own plan sheet and roster use (29 Sep 2026).
+  const modOptions = targetRole === 'therapist' ? THERAPIST_MODALITIES
+    : targetRole === 'doctor' ? [...new Set([...DOCTOR_MODALITIES, ...TRAINER_MODALITIES])]
+    : [...new Set([...TRAINER_MODALITIES, ...DOCTOR_MODALITIES])];
   React.useEffect(() => { if (visible) { setCid(null); setMod(modOptions.length === 1 ? modOptions[0] : null); setT(null); } }, [visible, trainerId, targetRole]);
   const clients = clientsQ.data ?? [];
   const selName = clients.find((c) => c.clientId === cid)?.name ?? '';
@@ -971,6 +1001,37 @@ function AddSessionModal({ visible, trainerId, trainerName, targetRole, date, bu
               </LinearGradient>
             </Pressable>
           </View>
+          {/* Clash warning: an overlay inside this modal (never a second Modal), with Force create. */}
+          {clash ? (
+            <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: 18, backgroundColor: 'rgba(18,16,14,0.97)', padding: 18, justifyContent: 'center', gap: 12 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <View style={{ width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: hexA(C.gold, 0.14), borderWidth: 1, borderColor: hexA(C.gold, 0.4) }}>
+                  <Icon name="alert" size={17} color={C.gold} strokeWidth={2.2} />
+                </View>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Serif style={{ fontSize: 18 }}>Already booked at that time</Serif>
+                  <Mono style={{ fontSize: 8.5, letterSpacing: 0.6, color: C.gold }}>ROSTER CLASH · {fmt12h(clash.time).toUpperCase()}{date ? ` · ${istDayLabel(date).toUpperCase()}` : ''}</Mono>
+                </View>
+              </View>
+              <Body style={{ fontSize: 13, color: C.ink, lineHeight: 19 }}>
+                {clash.clientName} already has {clash.conflict?.modality ? `a ${clash.conflict.modality} session` : 'a session'} at {fmt12h(clash.time)} with {clash.conflict?.trainer_name ?? 'another trainer'}{clash.conflict?.source === 'crew' ? ' (from a crew plan)' : ''}.
+              </Body>
+              <View style={{ padding: 10, borderRadius: 12, backgroundColor: hexA(C.red, 0.07), borderWidth: 1, borderColor: hexA(C.red, 0.28), gap: 3 }}>
+                <Mono style={{ fontSize: 8.5, letterSpacing: 0.6, color: C.red }}>FORCE CREATE WILL</Mono>
+                <Body style={{ fontSize: 12, color: C.ink, lineHeight: 17 }}>
+                  Cancel that booking with a remark and schedule {clash.clientName} with {trainerName.split(' ')[0]} at {fmt12h(clash.time)}{clash.modality ? ` (${clash.modality})` : ''} instead. Both trainers see the change on their rosters.
+                </Body>
+              </View>
+              <View style={{ flexDirection: 'row', gap: 9 }}>
+                <Pressable onPress={onDismissClash} disabled={busy} hitSlop={10} style={{ flex: 1, paddingVertical: 12, borderRadius: 13, alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', opacity: busy ? 0.5 : 1 }}>
+                  <Text style={{ fontFamily: F.bodySemi, fontSize: 13, color: C.ink }}>Go back</Text>
+                </Pressable>
+                <Pressable onPress={onForce} disabled={busy} hitSlop={10} style={{ flex: 1, paddingVertical: 12, borderRadius: 13, alignItems: 'center', backgroundColor: hexA(C.red, 0.16), borderWidth: 1, borderColor: hexA(C.red, 0.55), opacity: busy ? 0.6 : 1 }}>
+                  <Text style={{ fontFamily: F.bodyBold, fontSize: 13, color: C.red }}>{busy ? 'Creating…' : 'Force create'}</Text>
+                </Pressable>
+              </View>
+            </View>
+          ) : null}
         </View>
       </View>
     </Modal>
@@ -1285,7 +1346,12 @@ function TomorrowPlanSheet({ visible, onClose, onSend, sending, existing, addOnl
 }) {
   const insets = useSafeAreaInsets();
   const { dbRole } = useAuth();
-  const modalityOptions = dbRole === 'doctor' ? DOCTOR_MODALITIES : dbRole === 'therapist' ? THERAPIST_MODALITIES : TRAINER_MODALITIES;
+  // Doctors plan physio AND workout sessions (29 Sep 2026, user request): their three physio
+  // modalities first, then every trainer workout modality. A workout-modality slot opens the
+  // trainer's Add Workout form from the doctor's Today's Roster.
+  const modalityOptions = dbRole === 'doctor'
+    ? [...DOCTOR_MODALITIES, ...TRAINER_MODALITIES.filter((m) => !DOCTOR_MODALITIES.includes(m))]
+    : dbRole === 'therapist' ? THERAPIST_MODALITIES : TRAINER_MODALITIES;
   const composeQ = useTomorrowCompose(visible);
   type SelVal = { time: string; modality: string | null };
   const [sel, setSel] = React.useState<Map<string, SelVal>>(new Map()); // clientId -> {time 'HH:mm', modality}
@@ -1325,7 +1391,16 @@ function TomorrowPlanSheet({ visible, onClose, onSend, sending, existing, addOnl
   // Weekly-protocol chips on compose rows (§8) — batch lookup, 5 min cache.
   const protoQ = useClientProtocols(rows.map((r) => r.clientId));
   const protocols = protoQ.data ?? {};
+  const essQ = useClientsEssentials(rows.map((r) => r.clientId));
+  const essentials = essQ.data ?? {};
   const [protoFor, setProtoFor] = React.useState<{ name: string; proto: ClientProtocol } | null>(null);
+  const cycleQ = useClientCycleStatus(rows.map((r) => r.clientId));
+  const cycles = cycleQ.data ?? {};
+  const [cycleFor, setCycleFor] = React.useState<CyclePopupInfo>(null);
+  // The client's latest session voice notes (30 Sep 2026): hear what was said after her last workout.
+  const latestVoiceQ = useClientsLatestVoiceNotes(rows.map((r) => r.clientId), visible);
+  const latestVoice = latestVoiceQ.data ?? {};
+  const [voiceFor, setVoiceFor] = React.useState<LatestVoiceInfo>(null);
   // Add-only mode: already-shared clients are locked (visible for context, not
   // editable); only NEW clients count toward the button.
   const lockedIds = React.useMemo(
@@ -1428,6 +1503,9 @@ function TomorrowPlanSheet({ visible, onClose, onSend, sending, existing, addOnl
                 : r.slotTime ? <Mono style={{ fontSize: 8.5, color: C.muted3, marginTop: 1 }}>ROSTER {fmt12h(r.slotTime)}</Mono> : null}
             </View>
           </Pressable>
+          {latestVoice[r.clientId] ? <LatestVoiceChip latest={latestVoice[r.clientId]} onPress={() => setVoiceFor({ name: r.name, latest: latestVoice[r.clientId] })} /> : null}
+          {cycles[r.clientId] ? <CycleChip cycle={cycles[r.clientId]} onPress={() => setCycleFor({ name: r.name, cycle: cycles[r.clientId] })} /> : null}
+          {essentials[r.clientId] ? <EssentialsBadge status={essentials[r.clientId]} compact /> : null}
           {protocols[r.clientId] ? <ProtocolChip onPress={() => setProtoFor({ name: r.name, proto: protocols[r.clientId] })} /> : null}
           {on ? (
             <Pressable onPress={() => { if (locked) { shakeLocked(r.clientId); return; } setModFor(modFor === r.clientId ? null : r.clientId); setTimeFor(null); }} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 999, backgroundColor: hexA(PINK, locked ? 0.06 : 0.12), borderWidth: 1, borderColor: hexA(PINK, locked ? 0.2 : 0.4), opacity: locked ? 0.7 : 1 }}>
@@ -1521,6 +1599,8 @@ function TomorrowPlanSheet({ visible, onClose, onSend, sending, existing, addOnl
         </View>
       </View>
       <ProtocolPopup info={protoFor} onClose={() => setProtoFor(null)} />
+      <CyclePopup info={cycleFor} onClose={() => setCycleFor(null)} />
+      <LatestVoicePopup info={voiceFor} onClose={() => setVoiceFor(null)} />
     </Modal>
   );
 }
@@ -1660,22 +1740,31 @@ export function ManagerChat() {
   // manager- or HOD-sent — merged into that trainer's section on the card.
   // (The HOD adds sessions for doctors/therapists who live in MANAGER teams,
   // so their plan_adds arrive in this thread from outside the team.)
+  // Since 1 Oct 2026 also a trainer's OWN Essentials Auction grab: the
+  // grab_essentials_session RPC posts a plan_add as the trainer with
+  // payload.source = 'essentials_auction', so the booking sits in their section.
   const addsByDate = React.useMemo(() => {
     const by = new Map<string, Map<string, Map<string, TomorrowPlanEntry>>>();
     const mgrId = teamQ.data?.managerId;
     if (!mgrId) return by;
     msgs.forEach((m) => {
-      if (m.kind !== 'plan_add' || (m.senderId !== mgrId && (!hodId || m.senderId !== hodId))) return;
+      if (m.kind !== 'plan_add') return;
       const p = m.payload ?? {};
+      const auction = p.source === 'essentials_auction' && !!p.trainer_id && m.senderId === p.trainer_id;
+      if (!auction && m.senderId !== mgrId && (!hodId || m.senderId !== hodId)) return;
       if (!p.date || !p.client_id || !p.trainer_id || !p.time) return;
       if (!by.has(p.date)) by.set(p.date, new Map());
       const byTr = by.get(p.date)!;
       if (!byTr.has(p.trainer_id)) byTr.set(p.trainer_id, new Map());
-      byTr.get(p.trainer_id)!.set(p.client_id, { client_id: p.client_id, name: p.name ?? 'Client', time: p.time, modality: p.modality ?? null, schedule_id: p.schedule_id ?? null, roster: p.schedule_id ? 'created' : 'conflict' });
+      byTr.get(p.trainer_id)!.set(p.client_id, { client_id: p.client_id, name: p.name ?? 'Client', time: p.time, modality: p.modality ?? null, schedule_id: p.schedule_id ?? null, roster: p.schedule_id ? 'created' : 'conflict', ...(auction ? { auction: true } : {}) });
     });
     return by;
   }, [msgs, teamQ.data?.managerId, hodId]);
   const [addFor, setAddFor] = React.useState<{ date: string; trainerId: string; trainerName: string; scheduledIds: string[]; scoreId: string } | null>(null);
+  // The add RPC's clash reply for the open Add Session modal (Force create warning), and
+  // a busy flag covering the RPC itself (sendM.isPending only covers the chat message).
+  const [addClash, setAddClash] = React.useState<AddClash | null>(null);
+  const [addBusy, setAddBusy] = React.useState(false);
   // Request status: APPROVED when a manager plan_time_edit references the
   // request id; REJECTED when a manager decision message does; else PENDING.
   const reqStatus = React.useMemo(() => {
@@ -1870,31 +1959,57 @@ export function ManagerChat() {
     } catch (e: any) { Alert.alert('Reschedule message not sent', e?.message ?? 'The roster was updated, but the chat message failed. Check your connection and try again.'); }
   };
   // Manager adds a session into a member's day: roster row first, then the message.
-  const saveAdd = async (clientId: string, clientName: string, time: string, modality: string) => {
-    if (!team || !addFor || sendM.isPending) return;
+  // A client clash (another trainer's active session at that exact time) comes back as
+  // result 'conflict' naming who holds it; the modal then shows a warning with Force
+  // create, which re-runs this with force = true: the RPC cancels that booking (with a
+  // remark on it) and creates ours. A logged clash is never cancelled (force_blocked).
+  const saveAdd = async (clientId: string, clientName: string, time: string, modality: string, force = false) => {
+    if (!team || !addFor || sendM.isPending || addBusy) return;
+    setAddBusy(true);
     let scheduleId: string | null = null;
+    let replaced: AddClash['conflict'] = null;
     try {
-      const { data, error } = await supabase.rpc('plan_manager_add_session', {
-        p_score: addFor.scoreId, p_trainer: addFor.trainerId, p_client: clientId,
-        p_date: addFor.date, p_time: time, p_modality: modality,
-      });
-      if (error) { Alert.alert('Add failed', error.message); return; }
-      if ((data as any)?.result === 'conflict') { Alert.alert('Not added', `${clientName} already has a session at that exact time.`); return; }
-      if ((data as any)?.result === 'exists') { Alert.alert('Already scheduled', `${clientName} already has a session with this member that day. Use RESCHEDULE on the plan card to change it.`); return; }
-      scheduleId = (data as any)?.schedule_id ?? null;
-      qc.invalidateQueries({ queryKey: ['mgr-plan-sched'] });
-      qc.invalidateQueries({ queryKey: ['trainer-roster'] });
-      qc.invalidateQueries({ queryKey: ['doctor-roster'] });
-    } catch (err: any) { Alert.alert('Add failed', String(err?.message ?? err)); return; }
-    try {
-      await sendM.mutateAsync({
-        scoreId: addFor.scoreId, kind: 'plan_add',
-        payload: { date: addFor.date, client_id: clientId, name: clientName, trainer_id: addFor.trainerId, time, modality, schedule_id: scheduleId },
-        body: `Manager added ${clientName} at ${fmt12h(time)}${modality ? ` · ${modality}` : ''} to ${addFor.trainerName.split(' ')[0]}'s plan (${istDayLabel(addFor.date)})`,
-      });
-      setAddFor(null);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-    } catch { /* rollback visible */ }
+      try {
+        // p_force is sent only when forcing, so an app talking to a database that does not
+        // have the argument yet (PGRST202) keeps adding normally; only the force path reports it.
+        const { data, error } = await supabase.rpc('plan_manager_add_session', {
+          p_score: addFor.scoreId, p_trainer: addFor.trainerId, p_client: clientId,
+          p_date: addFor.date, p_time: time, p_modality: modality, ...(force ? { p_force: true } : {}),
+        });
+        if (error) { Alert.alert('Add failed', error.message); return; }
+        const res = data as any;
+        if (res?.result === 'conflict') {
+          if (res.force_blocked === 'logged') {
+            setAddClash(null);
+            Alert.alert("Can't force this one", `${res.conflict?.trainer_name ?? 'Another trainer'} has already logged ${clientName}'s session at ${fmt12h(time)}. A logged session is never cancelled. Pick another time.`);
+            return;
+          }
+          setAddClash({ clientId, clientName, time, modality, conflict: res.conflict ?? null });
+          return;
+        }
+        if (res?.result === 'exists') { Alert.alert('Already scheduled', `${clientName} already has a session with this member that day. Use RESCHEDULE on the plan card to change it.`); return; }
+        scheduleId = res?.schedule_id ?? null;
+        replaced = res?.forced ? (res.cancelled ?? null) : null;
+        setAddClash(null);
+        qc.invalidateQueries({ queryKey: ['mgr-plan-sched'] });
+        qc.invalidateQueries({ queryKey: ['trainer-roster'] });
+        qc.invalidateQueries({ queryKey: ['doctor-roster'] });
+        if (replaced) qc.invalidateQueries({ queryKey: ['crm-month-roster'] }); // the cancelled booking may sit on a CRM roster view
+      } catch (err: any) { Alert.alert('Add failed', String(err?.message ?? err)); return; }
+      try {
+        const first = addFor.trainerName.split(' ')[0];
+        await sendM.mutateAsync({
+          scoreId: addFor.scoreId, kind: 'plan_add',
+          payload: {
+            date: addFor.date, client_id: clientId, name: clientName, trainer_id: addFor.trainerId, time, modality, schedule_id: scheduleId,
+            ...(replaced ? { forced: true, replaced_schedule_id: replaced.schedule_id ?? null, replaced_trainer_id: replaced.trainer_id ?? null, replaced_trainer_name: replaced.trainer_name ?? null } : {}),
+          },
+          body: `Manager added ${clientName} at ${fmt12h(time)}${modality ? ` · ${modality}` : ''} to ${first}'s plan (${istDayLabel(addFor.date)})${replaced ? ` · replaced ${replaced.trainer_name ?? 'another trainer'}'s booking at that time` : ''}`,
+        });
+        setAddFor(null);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      } catch { /* rollback visible */ }
+    } finally { setAddBusy(false); }
   };
   // Physio HOD paths (SECURITY DEFINER RPCs post the team messages themselves).
   const hodActRequest = async (m: ManagerChatMessage, approve: boolean) => {
@@ -2202,7 +2317,7 @@ export function ManagerChat() {
                 <View style={{ borderRadius: 15, overflow: 'hidden', minWidth: 230, backgroundColor: 'rgba(26,20,15,0.92)', borderWidth: 1, borderColor: hexA(PINK, 0.45) }}>
                   <View style={{ height: 2.5, backgroundColor: hexA(PINK, 0.6) }} />
                   <View style={{ padding: 11, gap: 5 }}>
-                    <Mono style={{ fontSize: 9, letterSpacing: 1, color: PINK_SOFT }}>SESSION ADDED BY MANAGER</Mono>
+                    <Mono style={{ fontSize: 9, letterSpacing: 1, color: m.payload?.source === 'essentials_auction' ? C.gold : PINK_SOFT }}>{m.payload?.source === 'essentials_auction' ? 'WON IN THE ESSENTIALS AUCTION' : 'SESSION ADDED BY MANAGER'}</Mono>
                     <Body style={{ fontSize: 14, fontFamily: F.bodySemi, color: '#fff' }}>{m.payload?.name ?? 'Client'}</Body>
                     <Mono style={{ fontSize: 10, color: C.muted2 }}>
                       {m.payload?.date ? istDayLabel(m.payload.date) : ''} · {m.payload?.time ? fmt12h(m.payload.time) : ''}{m.payload?.modality ? `  ·  ${m.payload.modality}` : ''} · for {(team.members.find((mm) => mm.id === m.payload?.trainer_id)?.name ?? 'a member').split(' ')[0]}
@@ -2535,10 +2650,13 @@ export function ManagerChat() {
           return null;
         })()}
         date={addFor?.date ?? ''}
-        busy={sendM.isPending}
+        busy={sendM.isPending || addBusy}
         scheduledIds={addFor?.scheduledIds ?? []}
-        onClose={() => setAddFor(null)}
-        onSave={saveAdd}
+        clash={addClash}
+        onClose={() => { setAddFor(null); setAddClash(null); }}
+        onSave={(cId, cName, tm, md) => { void saveAdd(cId, cName, tm, md, false); }}
+        onForce={() => { if (addClash) void saveAdd(addClash.clientId, addClash.clientName, addClash.time, addClash.modality, true); }}
+        onDismissClash={() => setAddClash(null)}
       />
 
       {/* Physio HOD: missed-session remark on a doctor's session */}

@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from './supabase';
+import { computeEssentials, EssentialsStatus } from './essentials';
 import { C } from '../theme';
 
 /* ============ CRM Roster Management — mirrors useCRMRosterManagement +
@@ -25,6 +26,8 @@ export type RosterSession = {
   id: string; clientId: string; clientName: string; trainerId: string | null; trainerName: string;
   when: string; modality: string | null; status: string; notes: string | null;
   cancelled: boolean; completed: boolean; hasRescheduleReq: boolean;
+  /** Essentials 30-day pass status of the client (30 Sep 2026); null for every other subscription. */
+  essentials: EssentialsStatus | null;
 };
 
 /* ---------- Month sessions (book-scoped, like the web with assignedOnly) ---------- */
@@ -49,7 +52,7 @@ export function useMonthRoster(crmId: string | null, monthOffset: number, traine
 
       let q = supabase
         .from('session_schedule')
-        .select('*, clients:client_id!inner(id, first_name, last_name, status), profiles:trainer_id(id, first_name, last_name)')
+        .select('*, clients:client_id!inner(id, first_name, last_name, status, subscription_type, essentials_extensions), profiles:trainer_id(id, first_name, last_name)')
         .in('client_id', ids)
         .eq('clients.status', 'active')
         .gte('scheduled_datetime', monthStart.toISOString())
@@ -64,6 +67,7 @@ export function useMonthRoster(crmId: string | null, monthOffset: number, traine
         monthLabel,
         sessions: ((data ?? []) as any[]).map((r) => ({
           id: r.id, clientId: r.client_id, clientName: fullName(r.clients),
+          essentials: computeEssentials(r.clients?.subscription_type, r.clients?.essentials_extensions),
           trainerId: r.trainer_id ?? null, trainerName: r.profiles ? fullName(r.profiles) : 'Unknown Trainer',
           when: r.scheduled_datetime, modality: r.modality ?? null, status: r.status ?? 'scheduled',
           notes: r.notes ?? null, cancelled: r.status === 'cancelled',

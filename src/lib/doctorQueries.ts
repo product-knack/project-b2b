@@ -1,5 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { parseVoiceNotes, type SessionVoiceNote } from './sessionVoiceTypes';
 import { supabase } from './supabase';
+import type { SessionTiming } from './sessionTiming';
 import { invokeWithTimeout, uploadWithTimeout } from './withTimeout';
 import { useAuth } from '../auth';
 import { THERAPY_MODALITIES, therapyModalityLabel, ROSTER_FRESH_START_MS } from './therapistQueries';
@@ -28,8 +30,12 @@ export const DOCTOR_SESSION_TYPES = [
 ] as const;
 export const DOCTOR_ROSTER_CREATE_MODALITIES = ['rehabilitation', 'recovery'] as const;
 /* RehabSessionsSection uses this NARROWER list (web parity). */
+// 'recovery' and 'therapy' are what submitPhysioSession writes for those two
+// categories; both were missing here, so client detail > Rehab Sessions never
+// listed a recovery (or therapy) log (fixed 2026-10-07, user report; web list
+// fixed the same day).
 export const REHAB_SESSION_TYPES = [
-  'physiotherapy', 'rehabilitation', 'massage_therapy', 'red_light_therapy',
+  'physiotherapy', 'rehabilitation', 'recovery', 'therapy', 'massage_therapy', 'red_light_therapy',
   'cold_bath_therapy', 'pneumatic_therapy', 'cupping_therapy', 'dry_needling', 'cryotherapy',
 ] as const;
 export const RECOVERY_MODALITIES = [
@@ -98,6 +104,9 @@ export const istMonthBoundsUTC = (d: Date) => {
 // and must never unlock therapy logging (web spec v2 §1.2).
 export type DoctorIdentity = {
   isPhysio: boolean; isNutritionist: boolean; isHeadDoctor: boolean;
+  /** The doctors' manager (web isPhysioHOD): the head doctor id, or `physio_hod` in role_specialization.
+   *  Only this profile logs sessions from the Sessions page and the client detail page (user rule 29 Sep 2026). */
+  isPhysioHod: boolean;
   /** Consultant doctor (web isConsultantDoctor): role doctor AND "consultant" in the tag, in role_specialization[] or in the free-text specializations. */
   isConsultant: boolean;
   specialization: string | null;
@@ -110,12 +119,12 @@ export type DoctorIdentity = {
 export const consultantTagMatch = (tag: string | null, spec: string[], free: string | null) =>
   (tag ?? '').toLowerCase() === 'consultant' || spec.some((t) => (t ?? '').toLowerCase() === 'consultant') || (free ?? '').toLowerCase().includes('consultant');
 type IdentityRow = Omit<DoctorIdentity, 'isConsultant'> & { consultantTag: boolean };
-/** `enabled` lets non-doctor callers (the drawer) skip the profile read. Key v3: the select grew on 22 Sep 2026. */
+/** `enabled` lets non-doctor callers (the drawer) skip the profile read. Key v3: the select grew on 22 Sep 2026; v4: isPhysioHod (29 Sep 2026). */
 export function useDoctorIdentity(enabled = true): { data: DoctorIdentity; isLoading: boolean; isPending: boolean; isPaused: boolean; isError: boolean; refetch: () => void } {
   const { session, dbRole } = useAuth();
   const uid = session?.user?.id ?? null;
   const q = useQuery({
-    queryKey: ['doctor-identity-v3', uid],
+    queryKey: ['doctor-identity-v4', uid],
     enabled: !!uid && enabled,
     staleTime: 600_000,
     queryFn: async (): Promise<IdentityRow> => {
@@ -128,7 +137,8 @@ export function useDoctorIdentity(enabled = true): { data: DoctorIdentity; isLoa
       const lastName = String((data as any)?.last_name ?? '').trim();
       return {
         isPhysio: tag === 'physiotherapist', isNutritionist: tag === 'nutritionist',
-        isHeadDoctor: uid === HEAD_DOCTOR_ID, specialization: tag, specializations: free,
+        isHeadDoctor: uid === HEAD_DOCTOR_ID, isPhysioHod: uid === HEAD_DOCTOR_ID || spec.includes('physio_hod'),
+        specialization: tag, specializations: free,
         consultantTag: consultantTagMatch(tag, spec, free),
         firstName, lastName, fullName: [firstName, lastName].filter(Boolean).join(' ').trim(), email: (data as any)?.email ?? null,
         therapyModalities: THERAPY_MODALITIES.filter((m) => spec.includes(m.value)),
@@ -138,7 +148,7 @@ export function useDoctorIdentity(enabled = true): { data: DoctorIdentity; isLoa
   const row = q.data;
   const data: DoctorIdentity = row
     ? (({ consultantTag, ...rest }) => ({ ...rest, isConsultant: dbRole === 'doctor' && consultantTag }))(row)
-    : { isPhysio: false, isNutritionist: false, isHeadDoctor: uid === HEAD_DOCTOR_ID, isConsultant: false, specialization: null, specializations: null, firstName: '', lastName: '', fullName: '', email: null, therapyModalities: [] };
+    : { isPhysio: false, isNutritionist: false, isHeadDoctor: uid === HEAD_DOCTOR_ID, isPhysioHod: uid === HEAD_DOCTOR_ID, isConsultant: false, specialization: null, specializations: null, firstName: '', lastName: '', fullName: '', email: null, therapyModalities: [] };
   return { data, isLoading: q.isLoading, isPending: q.isPending, isPaused: q.fetchStatus === 'paused', isError: q.isError, refetch: () => { q.refetch(); } };
 }
 
@@ -247,6 +257,8 @@ export type DoctorDaySession = {
   id: string; clientName: string; clientId: string; time: string; location: string | null;
   focus: string | null; attended: boolean | null; remarks: string | null; date: string;
   cancelled: boolean | null; isUnique: boolean | null; sessionName: string | null; hasPhysioExercises: boolean;
+  /** Voice notes on the session (7 Oct 2026) and the id the append RPC takes (the workout link, else the row id). */
+  voiceNotes: SessionVoiceNote[]; voiceSessionId: string;
 };
 export function useDoctorDaySessions(date: Date) {
   const { session } = useAuth();
@@ -258,7 +270,7 @@ export function useDoctorDaySessions(date: Date) {
     queryFn: async (): Promise<DoctorDaySession[]> => {
       const { data, error } = await supabase
         .from('training_sessions')
-        .select('id, scheduled_at, session_type, location, cancelled, notes, attendance_marked, client_id, unique, session_name, workout_session_id, clients (id, first_name, last_name)')
+        .select('id, scheduled_at, session_type, location, cancelled, notes, attendance_marked, client_id, unique, session_name, workout_session_id, voice_notes, clients (id, first_name, last_name)')
         .eq('trainer_id', uid)
         .in('session_type', DOCTOR_SESSION_TYPES as any);
       if (error) throw new Error(error.message);
@@ -279,6 +291,8 @@ export function useDoctorDaySessions(date: Date) {
           isUnique: s.unique ?? null,
           sessionName: s.session_name ?? null,
           hasPhysioExercises: !!s.workout_session_id,
+          voiceNotes: parseVoiceNotes(s.voice_notes),
+          voiceSessionId: s.workout_session_id || s.id,
         }));
     },
   });
@@ -413,6 +427,8 @@ export type PhysioSubmitInput = {
   doctorId: string;
   clientId: string;
   clientName: string;
+  /** Session timer (13 Oct 2026): stored on the inserted row; duration_minutes keeps its default. */
+  sessionTiming?: SessionTiming | null;
   category: 'rehab' | 'recovery' | 'therapy' | '';
   cancelled: boolean;
   // therapy (web spec v2 §2.2): sub-modality enum value + optional free notes
@@ -510,6 +526,7 @@ export async function submitPhysioSession(i: PhysioSubmitInput): Promise<{ sessi
         client_id: i.clientId, trainer_id: i.doctorId, scheduled_at: now, duration_minutes: 60,
         status: 'completed', session_type: 'neural_check', session_name: 'Neural Check', notes: 'Neural Check',
         attendance_marked: true, cancelled: false, location: '',
+        session_timing: i.sessionTiming ?? null,
       }] as any).select('id').single();
       if (sessionError) throw new Error(sessionError.message);
       const sessionId = (sessionData as any).id as string;
@@ -541,6 +558,8 @@ export async function submitPhysioSession(i: PhysioSubmitInput): Promise<{ sessi
     status: i.cancelled ? 'cancelled' : 'completed', session_type: sessionType,
     session_name: i.category === 'therapy' ? therapyModalityLabel(i.therapyType) : `${i.category === 'rehab' ? 'Rehab' : 'Recovery'} Session`,
     notes: buildStructuredNotes(i), attendance_marked: !i.cancelled, cancelled: i.cancelled, location: '',
+    // Session timer (13 Oct 2026): the measured timing; duration_minutes keeps the sheet's default (user decision).
+    session_timing: i.sessionTiming ?? null,
   }] as any).select('id').single();
   if (error) throw new Error(error.message);
   const sessionId = (sessionData as any).id as string;
@@ -1255,7 +1274,7 @@ export function useRehabSessions(clientId: string | null) {
     queryFn: async () => {
       const { data: sessions, error } = await supabase
         .from('training_sessions')
-        .select('id, session_type, scheduled_at, notes, notes_ai_analysis, rehab_ai_analysis, trainer_id, status, profiles!trainer_id(first_name, last_name)')
+        .select('id, session_type, scheduled_at, notes, notes_ai_analysis, rehab_ai_analysis, trainer_id, status, workout_session_id, voice_notes, profiles!trainer_id(first_name, last_name)')
         .eq('client_id', clientId)
         .in('session_type', REHAB_SESSION_TYPES as any)
         .order('scheduled_at', { ascending: false });

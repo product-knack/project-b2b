@@ -209,6 +209,7 @@ export function Drawer() {
     if (it.route === 'workout-analyst') return caps.data.workoutAnalyst;
     if (it.route === 'plans-analyst') return caps.data.workoutComplianceAnalyst;
     if (it.route === 'academy-senior-analyst') return caps.data.seniorAnalyst;
+    if (it.route === 'essentials-auction') return role !== 'doctor' || !!doctorIdent.data?.isPhysio; // rehab sessions of the auction go to physios
     if (it.route === 'doctor-rehab-recommendation') return caps.data.isPhysioHod;
     if (it.route === 'doctor-reimbursement-review') return caps.data.isPhysioHod; // doctors' manager reviews reimbursements
     // Doctor HOD-only surfaces — the web hardcodes the Head Doctor uuid (doc §0).

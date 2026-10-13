@@ -9,7 +9,8 @@ import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import { useAuth } from '../auth';
 import { DEV_TRAINER_ID, supabase } from '../lib/supabase';
 import { useAckSessions, istTimeParts, useSubmitLeaveRequest } from '../lib/trainerQueries';
-import { Serif, Mono, Body, GradientButton, ProgressBar, IconChip } from './primitives';
+import { useMyManagerTeam } from '../lib/managerChatQueries';
+import { Serif, Mono, Body, GradientButton, ProgressBar, IconChip, AvatarPhoto } from './primitives';
 import { apprItems, bloodRows } from '../data';
 
 function SheetShell({
@@ -212,7 +213,13 @@ export function AckSheet() {
 
 /* ---------- Emergency leave (REAL — web EmergencyLeaveDialog contract) ----------
    Inserts into leave_request as the signed-in staff member (any role, doctors
-   included) and push-notifies CRMs via notify-leave-request. */
+   included) and push-notifies CRMs via notify-leave-request.
+   Team managers (8 Oct 2026): the current manager of a manager_score team can
+   add the leave for one of its members instead (LEAVE FOR: Team member). Same
+   row shape with trainer_id = the member and the CRM push in the member's name;
+   the server policy "Team managers can add leave for current team members"
+   (helper is_current_team_manager_of) is the authority, the app only offers
+   the list of the manager's current team. */
 const todayYmd = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -221,53 +228,135 @@ const plusDaysYmd = (n: number) => {
   const d = new Date(Date.now() + n * 864e5);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
+const initialOf = (name: string) => (name.trim()[0] ?? '?').toUpperCase();
+/* RLS refuses a member row when the caller is not that member's current manager
+   (or the policy has not been run on the server yet). */
+const friendlyLeaveError = (msg: string, forMember: boolean) =>
+  forMember && /row-level security|42501/i.test(msg)
+    ? 'The server did not accept this leave. You can only add leave for members of your current team.'
+    : msg;
+type LeaveFor = 'me' | 'member';
 export function LeaveSheet() {
   const { sheet, closeSheet } = useStore();
   const { session } = useAuth();
   const leaveM = useSubmitLeaveRequest();
+  const open = sheet === 'leave';
+  const uid = session?.user?.id ?? null;
+  // Fetched only while the sheet is open (this sheet is mounted app-wide).
+  const teamQ = useMyManagerTeam(open);
+  const team = teamQ.data ?? null;
+  const teamMembers = React.useMemo(
+    () => (team?.isManager ? team.members.filter((m) => m.id !== uid) : []),
+    [team, uid],
+  );
+  const canPickMember = teamMembers.length > 0;
+  const [leaveFor, setLeaveFor] = React.useState<LeaveFor>('me');
+  const [memberId, setMemberId] = React.useState<string | null>(null);
   const [startDate, setStartDate] = React.useState(todayYmd());
   const [startTime, setStartTime] = React.useState('09:00');
   const [endDate, setEndDate] = React.useState(todayYmd());
   const [endTime, setEndTime] = React.useState('18:00');
   const [reason, setReason] = React.useState('');
   React.useEffect(() => {
-    if (sheet === 'leave') {
+    if (open) {
       setStartDate(todayYmd()); setStartTime('09:00'); setEndDate(todayYmd()); setEndTime('18:00');
-      setReason(''); leaveM.reset();
+      setReason(''); setLeaveFor('me'); setMemberId(null); leaveM.reset();
     }
-  }, [sheet]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  const forMember = leaveFor === 'member';
+  const member = forMember ? (teamMembers.find((m) => m.id === memberId) ?? null) : null;
   const dateOk = (v: string) => /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(v.trim());
   const timeOk = (v: string) => /^([01]\d|2[0-3]):[0-5]\d$/.test(v.trim());
   const valid = dateOk(startDate) && dateOk(endDate) && timeOk(startTime) && timeOk(endTime)
-    && `${endDate}T${endTime}` >= `${startDate}T${startTime}` && reason.trim().length >= 3;
+    && `${endDate}T${endTime}` >= `${startDate}T${startTime}` && reason.trim().length >= 3
+    && (!forMember || !!member);
   const safeClose = () => { Keyboard.dismiss(); setTimeout(closeSheet, 80); };
   const submit = async () => {
-    if (!session?.user?.id || !valid || leaveM.isPending) return;
+    if (!uid || !valid || leaveM.isPending) return;
     try {
-      // Requester name for the CRM push — fetched live so any role works.
-      const { data: p } = await supabase.from('profiles').select('first_name, last_name').eq('id', session.user.id).maybeSingle();
-      const name = `${p?.first_name ?? ''} ${p?.last_name ?? ''}`.replace(/\s+/g, ' ').trim();
+      let requesterId = uid;
+      let name = '';
+      if (forMember && member) {
+        // The row and the CRM push carry the member, exactly as if they added it.
+        requesterId = member.id;
+        name = member.name;
+      } else {
+        // Requester name for the CRM push — fetched live so any role works.
+        const { data: p } = await supabase.from('profiles').select('first_name, last_name').eq('id', uid).maybeSingle();
+        name = `${p?.first_name ?? ''} ${p?.last_name ?? ''}`.replace(/\s+/g, ' ').trim();
+      }
       await leaveM.mutateAsync({
-        requesterId: session.user.id, requesterName: name,
+        requesterId, requesterName: name,
         startDate: startDate.trim(), startTime: startTime.trim(),
         endDate: endDate.trim(), endTime: endTime.trim(), reason,
       });
       safeClose();
-      setTimeout(() => Alert.alert('Leave request submitted', 'The CRM team has been notified.'), 200);
+      const who = forMember && member ? member.name : null;
+      setTimeout(() => Alert.alert(
+        who ? 'Leave added' : 'Leave request submitted',
+        who ? `${who}'s leave is recorded. The CRM team has been notified.` : 'The CRM team has been notified.',
+      ), 200);
     } catch { /* error surfaced below */ }
   };
   const fieldInput = { flex: 1, color: '#fff', fontFamily: F.body, fontSize: 13.5, padding: 0 } as const;
+  const errText = leaveM.isError ? friendlyLeaveError((leaveM.error as Error).message, forMember) : null;
+  const buttonLabel = leaveM.isPending ? 'Submitting…'
+    : forMember ? (member ? `Add Leave for ${member.name.split(' ')[0]}` : 'Pick a team member')
+    : 'Submit Leave Request';
   return (
-    <SheetShell visible={sheet === 'leave'} onClose={safeClose} maxHeightPct={90}>
+    <SheetShell visible={open} onClose={safeClose} maxHeightPct={90}>
       <ScrollView keyboardShouldPersistTaps="handled">
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 18 }}>
           <IconChip icon="alert" color={C.red} iconSize={21} />
           <View style={{ flex: 1 }}>
             <Serif style={{ fontSize: 20 }}>Emergency Leave</Serif>
-            <Body style={{ fontSize: 12.5, color: C.muted, marginTop: 1 }}>Submit a leave request</Body>
+            <Body style={{ fontSize: 12.5, color: C.muted, marginTop: 1 }}>{forMember ? 'Add a leave for one of your team members' : 'Submit a leave request'}</Body>
           </View>
-          <Pressable onPress={safeClose} style={styles.closeBtn}><Icon name="close" size={15} color="#B8B2AC" strokeWidth={2.3} /></Pressable>
+          <Pressable onPress={safeClose} hitSlop={10} style={styles.closeBtn}><Icon name="close" size={15} color="#B8B2AC" strokeWidth={2.3} /></Pressable>
         </View>
+        {canPickMember ? (
+          <View style={{ marginBottom: 14 }}>
+            <Mono style={{ fontSize: 10, letterSpacing: 1.2, color: C.mono2, marginBottom: 8 }}>LEAVE FOR</Mono>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              {([['me', 'Myself', 'user'], ['member', 'Team member', 'users']] as const).map(([k, label, icon]) => {
+                const on = leaveFor === k;
+                return (
+                  <Pressable key={k} onPress={() => { setLeaveFor(k); if (k === 'me') setMemberId(null); leaveM.reset(); }} hitSlop={10}
+                    accessibilityRole="button" accessibilityState={{ selected: on }}
+                    style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 11, borderRadius: 12, borderWidth: 1, borderColor: on ? hexA(C.red, 0.55) : 'rgba(255,255,255,0.1)', backgroundColor: on ? hexA(C.red, 0.12) : 'rgba(255,255,255,0.03)' }}>
+                    <Icon name={icon} size={14} color={on ? C.red : C.muted2} strokeWidth={2.2} />
+                    <Text style={{ fontFamily: F.bodySemi, fontSize: 12.5, color: on ? '#fff' : C.muted }}>{label}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            {forMember ? (
+              <View style={{ marginTop: 10, gap: 6 }}>
+                <Mono style={{ fontSize: 10, letterSpacing: 1.2, color: member ? C.mono2 : C.red, marginBottom: 2 }}>
+                  {team?.teamName ? `TEAM ${team.teamName.trim().toUpperCase()} · PICK ONE` : 'PICK A TEAM MEMBER'}
+                </Mono>
+                {teamMembers.map((m) => {
+                  const on = m.id === memberId;
+                  return (
+                    <Pressable key={m.id} onPress={() => { setMemberId(m.id); leaveM.reset(); }} hitSlop={6}
+                      accessibilityRole="button" accessibilityState={{ selected: on }}
+                      style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 9, paddingHorizontal: 11, borderRadius: 12, borderWidth: 1, borderColor: on ? hexA(C.red, 0.55) : 'rgba(255,255,255,0.07)', backgroundColor: on ? hexA(C.red, 0.1) : 'rgba(255,255,255,0.03)' }}>
+                      <AvatarPhoto url={m.avatarUrl ?? null} initial={initialOf(m.name)} size={30} />
+                      <View style={{ flex: 1 }}>
+                        <Body numberOfLines={1} style={{ fontSize: 13, fontFamily: F.bodySemi, color: '#fff' }}>{m.name}</Body>
+                        {m.role ? <Mono style={{ fontSize: 8.5, letterSpacing: 0.8, color: C.muted3 }}>{m.role.toUpperCase()}</Mono> : null}
+                      </View>
+                      <View style={{ width: 18, height: 18, borderRadius: 9, borderWidth: 1.5, borderColor: on ? C.red : 'rgba(255,255,255,0.22)', alignItems: 'center', justifyContent: 'center' }}>
+                        {on ? <View style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: C.red }} /> : null}
+                      </View>
+                    </Pressable>
+                  );
+                })}
+                <Body style={{ fontSize: 10.5, color: C.muted3, marginTop: 4, lineHeight: 15 }}>Recorded exactly as if the member added it: one leave in their name, and the CRM team is notified.</Body>
+              </View>
+            ) : null}
+          </View>
+        ) : null}
         <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
           <View style={{ flex: 1 }}>
             <Mono style={{ fontSize: 10, letterSpacing: 1.2, color: dateOk(startDate) ? C.mono2 : C.red, marginBottom: 7 }}>START DATE</Mono>
@@ -302,8 +391,8 @@ export function LeaveSheet() {
         <View style={[styles.field, { minHeight: 76, alignItems: 'flex-start', paddingTop: 13 }]}>
           <TextInput value={reason} onChangeText={setReason} placeholder="Enter reason for emergency leave…" placeholderTextColor={C.muted3} multiline style={[fieldInput, { minHeight: 50, textAlignVertical: 'top' }]} />
         </View>
-        {leaveM.isError ? <Body style={{ fontSize: 12, color: C.red, marginTop: 10 }}>{(leaveM.error as Error).message}</Body> : null}
-        <GradientButton label={leaveM.isPending ? 'Submitting…' : 'Submit Leave Request'} onPress={submit} style={{ marginTop: 18, opacity: valid && !leaveM.isPending ? 1 : 0.55 }} />
+        {errText ? <Body style={{ fontSize: 12, color: C.red, marginTop: 10 }}>{errText}</Body> : null}
+        <GradientButton label={buttonLabel} onPress={submit} style={{ marginTop: 18, opacity: valid && !leaveM.isPending ? 1 : 0.55 }} />
       </ScrollView>
     </SheetShell>
   );

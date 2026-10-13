@@ -9,7 +9,13 @@ import { ConsultantDashboard } from './consultantDashboard';
 import { useAuth } from '../auth';
 import { ClientThreadsUnreadBanner } from '../components/clientThreadsCard';
 import { ManagerTeamChatCard } from './managerChat';
+import { EssentialsAuctionHomeCard } from '../components/essentialsAuctionCard';
+import { AuctionResultsCards } from '../components/auctionResultsCards';
 import { useStore } from '../store';
+import { TRAINER_MODALITIES, DOCTOR_MODALITIES } from '../lib/managerChatQueries';
+
+/** A doctor's roster modalities: physio first, then every trainer workout modality. */
+const DOCTOR_ROSTER_MODALITIES = [...DOCTOR_MODALITIES, ...TRAINER_MODALITIES.filter((m) => !DOCTOR_MODALITIES.includes(m))];
 import {
   HEAD_DOCTOR_ID, ALLOWED_DOCTOR_IDS, useDoctorIdentity, usePhysioMetrics, useSeniorDashboard,
   useDoctorSessionDetails, usePendingProtocols, useApproveProtocol, useRejectProtocol,
@@ -23,7 +29,7 @@ import {
 
 export { HEAD_DOCTOR_ID };
 export { DoctorSessionsPage as DoctorSessions } from './doctorSessions';
-import { LeaderboardPreview, DistanceSheet, MapPing, approxTravel } from './trainer';
+import { LeaderboardPreview, DistanceSheet, MapPing, approxTravel, AddOwnSessionSheet } from './trainer';
 import { PhysioSessionSheet } from './doctorSessions';
 import { FeatureTour, DOCTOR_TOUR, TourLauncher } from '../components/featureTour';
 import * as Location from 'expo-location';
@@ -262,12 +268,21 @@ const MODALITY_ICON = (m: string | null): IconName => {
 /* Shared by the doctor dashboard and the therapist dashboard (16 Sep 2026):
    `accent` recolours the card, `onLog` swaps the physio log sheet for the
    caller's own (therapists log through AddTherapySessionSheet). */
+/** A roster slot booked with a trainer workout modality (Strength, Yoga, Boxing, ...). */
+const isWorkoutModality = (m: string | null | undefined): boolean => {
+  const t = (m ?? '').trim().toLowerCase();
+  if (!t) return false;
+  return t === 'strength training' || TRAINER_MODALITIES.some((x) => x.toLowerCase() === t);
+};
+
 export function DoctorTodayRoster({ accent = C.orange, onLog }: { accent?: string; onLog?: (c: { clientId: string; clientName: string }) => void } = {}) {
+  const { openWorkout } = useStore();
   const accentGrad = (accent === C.orange ? ORANGE_GRAD : [accent, hexA(accent, 0.7)]) as any;
   const { session } = useAuth();
   const uid = session?.user?.id ?? '';
   const rosterQ = useDoctorTodayRoster();
-  const [logFor, setLogFor] = React.useState<{ clientId: string; clientName: string } | null>(null);
+  const [logFor, setLogFor] = React.useState<{ clientId: string; clientName: string; scheduleId?: string | null } | null>(null);
+  const [addOpen, setAddOpen] = React.useState(false); // doctor: add today's / tomorrow's own session
   const [distFor, setDistFor] = React.useState<DoctorRosterRow | null>(null);
   // Cancel = the trainer's shared two-step flow (Cancel / Paid Cancellation, remark, photo).
   const [cancelFor, setCancelFor] = React.useState<DoctorRosterRow | null>(null);
@@ -336,6 +351,17 @@ export function DoctorTodayRoster({ accent = C.orange, onLog }: { accent?: strin
                   ))}
                 </View>
               </View>
+            ) : null}
+            {/* Doctor: add an own session (physio or a workout), then log it from its card */}
+            {!onLog && uid ? (
+              <Pressable
+                onPress={() => setAddOpen(true)}
+                accessibilityRole="button"
+                style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 10, borderRadius: 12, borderWidth: 1.5, borderStyle: 'dashed', borderColor: hexA(accent, 0.45), backgroundColor: hexA(accent, pressed ? 0.12 : 0.06) })}
+              >
+                <Icon name="plus" size={14} color={accent} strokeWidth={2.4} />
+                <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: accent }}>Add Session</Text>
+              </Pressable>
             ) : null}
           </View>
         </Card>
@@ -430,10 +456,22 @@ export function DoctorTodayRoster({ accent = C.orange, onLog }: { accent?: strin
                   {/* Actions */}
                   {!isCancelled && !isCompleted ? (
                     <View style={{ flexDirection: 'row', gap: 8 }}>
-                      <Pressable onPress={() => { const c = { clientId: r.client_id ?? '', clientName: r.client_name }; if (onLog) onLog(c); else setLogFor(c); }} style={{ flex: 1.5, borderRadius: 12, overflow: 'hidden' }}>
+                      <Pressable
+                        onPress={() => {
+                          const c = { clientId: r.client_id ?? '', clientName: r.client_name, scheduleId: r.id ?? null };
+                          if (onLog) { onLog(c); return; }
+                          // Doctor: a workout-modality slot opens the trainer's Add Workout form with
+                          // that modality, linked to this roster slot (trainer dashboard parity);
+                          // physio / rehab / recovery slots keep the physio sheet.
+                          const mod = r.modality ?? r.session_type;
+                          if (r.client_id && isWorkoutModality(mod)) openWorkout(r.client_id, r.client_name, mod as string, r.id);
+                          else setLogFor(c);
+                        }}
+                        style={{ flex: 1.5, borderRadius: 12, overflow: 'hidden' }}
+                      >
                         <LinearGradient colors={isNext ? accentGrad : [hexA(C.green, 0.2), hexA(C.green, 0.1)]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 11, borderRadius: 12, borderWidth: isNext ? 0 : 1, borderColor: hexA(C.green, 0.45) }}>
-                          <Icon name="plus" size={13} color={isNext ? '#fff' : C.green} strokeWidth={2.3} />
-                          <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: isNext ? '#fff' : C.green }}>Log Session</Text>
+                          <Icon name={!onLog && isWorkoutModality(r.modality ?? r.session_type) ? 'dumbbell' : 'plus'} size={13} color={isNext ? '#fff' : C.green} strokeWidth={2.3} />
+                          <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: isNext ? '#fff' : C.green }}>{!onLog && isWorkoutModality(r.modality ?? r.session_type) ? 'Add Workout' : 'Log Session'}</Text>
                         </LinearGradient>
                       </Pressable>
                       <Pressable onPress={() => setCancelFor(r)} style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 11, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.03)', borderWidth: 1, borderColor: hexA(C.red, 0.35) }}>
@@ -449,8 +487,11 @@ export function DoctorTodayRoster({ accent = C.orange, onLog }: { accent?: strin
         );
       })}
 
+      {/* Add Session (doctor) → the trainer's own-session sheet with physio + workout modalities */}
+      {!onLog && uid ? <AddOwnSessionSheet visible={addOpen} onClose={() => setAddOpen(false)} trainerId={uid} modalities={DOCTOR_ROSTER_MODALITIES} /> : null}
+
       {/* Log Session → the physio session sheet, prefilled with this client */}
-      {!onLog ? <PhysioSessionSheet visible={!!logFor} onClose={() => setLogFor(null)} clientId={logFor?.clientId} clientName={logFor?.clientName} /> : null}
+      {!onLog ? <PhysioSessionSheet visible={!!logFor} onClose={() => setLogFor(null)} clientId={logFor?.clientId} clientName={logFor?.clientName} scheduleId={logFor?.scheduleId ?? null} /> : null}
 
       {/* Live-routed distance sheet */}
       {distFor ? <DistanceSheet row={{ client_id: distFor.client_id, client_name: distFor.client_name }} visible onClose={() => setDistFor(null)} /> : null}
@@ -522,6 +563,10 @@ function PhysioDoctorDashboard() {
       {/* Team Messenger — doctors can be manager_score team members too.
           Renders nothing when this doctor isn't in a current team. */}
       <ManagerTeamChatCard />
+      {/* Essentials Auction — physiotherapists only: rehab sessions of tomorrow's
+         Essentials clients, while the window is open (1 Oct 2026). */}
+      {identity.data.isPhysio ? <AuctionResultsCards /> : null}
+      {identity.data.isPhysio ? <EssentialsAuctionHomeCard /> : null}
       {/* Emergency Leave — same global sheet the trainer dashboard uses; the
           leave_request row simply carries the doctor's own profile id. */}
       <Pressable onPress={() => openSheet('leave')} style={{ flexDirection: 'row', alignItems: 'center', gap: 11, padding: 12, borderRadius: 15, backgroundColor: hexA(C.red, 0.07), borderWidth: 1, borderColor: hexA(C.red, 0.3) }}>

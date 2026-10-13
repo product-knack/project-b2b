@@ -11,7 +11,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { C, F, hexA, ORANGE_GRAD } from '../theme';
 import { Icon, TrophyIcon, IconName } from '../icons';
-import { useStore, homeRouteFor, Role } from '../store';
+import { useStore, useStoreActions, homeRouteFor, Role } from '../store';
+import { navTargetRef } from '../lib/qhpNavigationQueries';
 import {
   Serif, Body, Mono, Card, StatCard, QuickAction, IconChip, GradientButton, ProgressBar, Pill, Avatar, AvatarPhoto, CountUp,
 } from '../components/primitives';
@@ -20,13 +21,24 @@ import { Page, GreetingHeader, TitleBlock, BackLink, MiniStat, Badge, SessionCar
 import { AccountSwitch } from '../components/AccountSwitch';
 import { QhpReviewAlert, HeldReportsAlert } from '../components/qhpAlerts';
 import { OddsWordmark } from '../components/oddsAi';
-import { BloodReportSheet, QhpReportSheet } from './reportDetail';
+import { BloodReportSheet, QhpReportSheet, ConsultAiSheet } from './reportDetail';
+import { useClientCycleStatus, ClientCycle } from '../lib/cycleQueries';
+import { CycleChip, CyclePopup, CyclePopupInfo, cycleColor } from '../components/cycleLabel';
+import { EssentialsBadge } from '../components/essentialsBadge';
+import { ClientHealthSummaryCard, ListenGateSheet } from '../components/clientHealthSummaryCard';
+import { useClientHealthSummary } from '../lib/clientHealthSummaryQueries';
+import { listenGate, gateDue } from '../lib/clientHealthSummary';
+import { VoiceNotesComposer, SessionVoicePlaylistPlayer, SessionVoiceSheet, SessionVoiceSheetInfo, LatestVoiceInline } from '../components/SessionVoice';
+import { useClientsLatestVoiceNotes } from '../lib/sessionVoiceQueries';
+import { PendingVoiceTake, discardTake } from '../lib/sessionVoiceQueries';
+import { cycleStatusLine, nextPeriodLine } from '../lib/cycleStatus';
+import { ReplayMask } from '../components/ReplayShield';
 import { useAuth } from '../auth';
 import { supabase, DEV_TRAINER_ID } from '../lib/supabase';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { QhpAssessmentForm, CoachPresenceModal, fetchHasPriorCompletedQHP } from './qhpAssessmentForm';
 import { useAddOwnSession, useTodayRoster, useTrainerStats, useTrainerProfile, useTrainerMonthSessions, useTrainerLeaderboard, useManagerLeaderboard, useManagerTeam, useManagerTeamLeaves, useManagerTeamIncidents, useManagerTeamRetention, useManagerTeamLateLogs, useManagerTeamRoster, useManagerTeamPlanOverview, useManagerTeamAcks, useManagerTeamAppAdoption, useTrainerSessionBreakdown, useTrainerReferralBreakdown, useFirstSessionAlert, istTimeParts, istDayLabel, istDate, useCancelScheduledSession, useRequestReschedule, useAddMissedRemark, lbMonthBounds, lbMonthLabel, LbBounds, RosterRow, ManagerTeamMember, MgrMonthFilter, usePlanExpiryMap, PlanExpiry, useTrainerAckSummary, useRequestRoster, useRosterDistance, SESSION_MODALITIES, useMyMonthSessionBreakdown, usePilatesRunRate } from '../lib/trainerQueries';
-import { PrevSet, useMyClients, useClientDetail, useClientSessions, useClientPlans, useClientGoals, useSaveWeeklyGoals, useDeleteWeeklyGoal, useZone2Week, useLogZone2Session, useWeeklyHealthSummary, PLAN_VALID_DAYS, useClientReports, useClientBioAge, useClientProgression, useCreateWorkoutSession, useModalityGate, useWorkoutTemplates, useSaveWorkoutTemplate, useDeleteWorkoutTemplate, useClientHealthCheck, useSaveHealthData, useExerciseDb, useSessionExercises, uuidv4, HealthDataInput, useWeeklyProgressionAll, ackWeeklyReport, WeeklyProgressionRow, useApprovedPlansForLogging, usePartnerInfo, usePreviousExerciseData, checkDuplicateWorkoutToday, PlanExerciseRow, useClientDailyStats, useSaveClientHomeLocation, PILATES_REFORMER_EXERCISES, usePlanEditValidation, normalizePlanModality, PLAN_EDIT_MAX_WORKOUTS } from '../lib/clientQueries';
+import { PrevSet, useMyClients, useClientDetail, useClientSessions, useClientPlans, useClientGoals, useSaveWeeklyGoals, useDeleteWeeklyGoal, useZone2Week, useLogZone2Session, useWeeklyHealthSummary, PLAN_VALID_DAYS, useClientReports, useClientConsultAi, ClientConsultAi, useClientBioAge, useClientProgression, useCreateWorkoutSession, useModalityGate, useWorkoutTemplates, useSaveWorkoutTemplate, useDeleteWorkoutTemplate, useClientHealthCheck, useSaveHealthData, useExerciseDb, useSessionExercises, uuidv4, HealthDataInput, useWeeklyProgressionAll, ackWeeklyReport, WeeklyProgressionRow, useApprovedPlansForLogging, usePartnerInfo, usePreviousExerciseData, checkDuplicateWorkoutToday, PlanExerciseRow, useClientDailyStats, useSaveClientHomeLocation, PILATES_REFORMER_EXERCISES, usePlanEditValidation, normalizePlanModality, PLAN_EDIT_MAX_WORKOUTS } from '../lib/clientQueries';
 import * as Location from 'expo-location';
 import KvStorage from 'expo-sqlite/kv-store';
 import { enqueueOutbox, getIsOnline, useIsOnline, useOutbox, retryOutboxItem, removeOutboxItem, drainOutbox, submitItem, updateOutboxItem, getOutboxItem, WorkoutLogOutboxPayload, OutboxItem, useSyncedNotices, dismissSyncedNotice } from '../lib/offline';
@@ -35,10 +47,17 @@ import { ClientThreadsCard } from '../components/clientThreadsCard';
 import { ManagerTeamChatCard } from './managerChat';
 import { istToday, useMyManagerTeam, TRAINER_MODALITIES } from '../lib/managerChatQueries';
 import { useKeyboardHeight } from '../lib/useKeyboardHeight';
+import { localToday, fetchScheduledSleepHours } from '../lib/clientQueries';
+import { startTimer, finishTimer, clearTimer, SessionTiming } from '../lib/sessionTiming';
 import { useQhpAssessments, useQhpPermissions, useQhpConnectAlerts, useMarkQhpConnected, useQhpAssessors, useQhpClients, useScheduleQhp, useRequestQhpReschedule, useClientMedicalHistory, useClientHealthReports, HealthReportItem, useParqLinks, useGenerateParqLink, qhpFormatDuration, qhpUrgency, QHP_TARGET_MINS } from '../lib/qhpQueries';
 import { PdfPreview } from '../components/PdfPreview';
 import { QhpVoiceMemoButton, QhpVoiceMemoPlayer, QhpVoiceMemoDialog } from '../components/QhpVoiceMemo';
 import { QhpRefreshPendingCard } from '../components/qhpRefreshPending';
+import { EssentialsAuctionHomeCard } from '../components/essentialsAuctionCard';
+import { AuctionResultsCards } from '../components/auctionResultsCards';
+import { DailyQuizModal } from '../components/dailyQuizModal';
+import { MyQuizScoreCard, QuizColumnCell } from '../components/quizCards';
+import { useTrainerQuiz, useQuizScoresByTrainer, quizMonthKey } from '../lib/trainerQuizQueries';
 import { useMyCapabilities } from '../lib/capabilities';
 import { fmtSlotLong } from '../lib/opsLeadQueries';
 import { QhpReports } from './qhpReports';
@@ -567,7 +586,9 @@ export function DistanceSheet({ row, visible, onClose }: { row: { client_id: str
    A trainer in a team gets their roster from the day plan; a trainer in no team
    had only the CRM request flow. This adds today/tomorrow directly. The rules
    live in the trainer_add_own_session RPC — this sheet just mirrors them. */
-function AddOwnSessionSheet({ visible, onClose, trainerId, initialDay = 0 }: { visible: boolean; onClose: () => void; trainerId: string; initialDay?: 0 | 1 }) {
+/* Also used by the doctor's Today's Roster (29 Sep 2026) with physio + workout modalities:
+   the RPC has no role check, only "your actively assigned client, today or tomorrow". */
+export function AddOwnSessionSheet({ visible, onClose, trainerId, initialDay = 0, modalities = TRAINER_MODALITIES }: { visible: boolean; onClose: () => void; trainerId: string; initialDay?: 0 | 1; modalities?: string[] }) {
   const insets = useSafeAreaInsets();
   const kbH = useKeyboardHeight();
   const clientsQ = useMyClients(trainerId);
@@ -672,7 +693,7 @@ function AddOwnSessionSheet({ visible, onClose, trainerId, initialDay = 0 }: { v
             <View style={{ gap: 7 }}>
               <Mono style={{ fontSize: 9, letterSpacing: 0.8, color: C.muted3 }}>MODALITY</Mono>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}>
-                {TRAINER_MODALITIES.map((m) => {
+                {modalities.map((m) => {
                   const on = modality === m;
                   return (
                     <Pressable key={m} onPress={() => setModality(m)} accessibilityRole="button" accessibilityState={{ selected: on }}
@@ -1005,7 +1026,7 @@ export const approxTravel = (a: { lat: number; lng: number }, bLat: number, bLng
   return { km, min: Math.max(1, Math.round((km / 22) * 60)) };
 };
 
-function RosterCard({ row, trainerName, highlight, onAddWorkout, plans, devPos }: { row: RosterRow; trainerName: string; highlight?: boolean; onAddWorkout: () => void; plans?: PlanExpiry[]; devPos?: { lat: number; lng: number } | null }) {
+function RosterCard({ row, trainerName, highlight, onAddWorkout, plans, devPos, cycle, onCycle, onVoice }: { row: RosterRow; trainerName: string; highlight?: boolean; onAddWorkout: () => void; plans?: PlanExpiry[]; devPos?: { lat: number; lng: number } | null; cycle?: ClientCycle | null; onCycle?: () => void; onVoice?: () => void }) {
   const cancelM = useCancelScheduledSession();
   const missedM = useAddMissedRemark();
   const [modal, setModal] = React.useState<null | 'cancel' | 'missed'>(null);
@@ -1166,6 +1187,8 @@ function RosterCard({ row, trainerName, highlight, onAddWorkout, plans, devPos }
           </View>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 5 }}>
             {chip(prime.label, prime.color, true)}
+            {row.essentials ? <EssentialsBadge status={row.essentials} compact /> : null}
+            {cycle && onCycle ? <CycleChip cycle={cycle} onPress={onCycle} /> : null}
             {/* Acknowledge status — only meaningful once the session is logged */}
             {logged && row.acknowledged != null ? (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 3, paddingHorizontal: 9, borderRadius: 999, backgroundColor: hexA(row.acknowledged ? C.green : C.gold, 0.12), borderWidth: 1, borderColor: hexA(row.acknowledged ? C.green : C.gold, 0.38) }}>
@@ -1176,6 +1199,14 @@ function RosterCard({ row, trainerName, highlight, onAddWorkout, plans, devPos }
               </View>
             ) : null}
             {row.modality ? chip(row.modality, C.ink3) : null}
+            {/* Voice notes on the logged session: listen, and record more (30 Sep 2026) */}
+            {logged && onVoice ? (
+              <Pressable onPress={onVoice} hitSlop={8} accessibilityRole="button" accessibilityLabel="Voice notes for this session"
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 3, paddingHorizontal: 9, borderRadius: 999, backgroundColor: hexA(C.purple, row.voice_notes.length ? 0.16 : 0.1), borderWidth: 1, borderColor: hexA(C.purple, 0.45) }}>
+                <Icon name="mic" size={10} color={C.purple} strokeWidth={2.4} />
+                <Text style={{ fontFamily: F.bodySemi, fontSize: 10, color: C.purple }}>{row.voice_notes.length ? `${row.voice_notes.length} voice note${row.voice_notes.length === 1 ? '' : 's'}` : 'Voice note'}</Text>
+              </Pressable>
+            ) : null}
             {!isCancelled && !logged && row.status === 'confirmed' ? chip('Confirmed', C.green) : null}
             {isApproved ? chip('Resched approved', C.green, true) : null}
             {isRejected ? chip('Resched rejected', C.red, true) : null}
@@ -1380,7 +1411,7 @@ export function LeaderboardPreview({ title, sub, accent, unit, rows, onPress, li
   sub: string;
   accent: string;
   unit: string;
-  rows: { rank: number; name: string; value: string | number; color: string }[];
+  rows: { rank: number; name: string; value: string | number; color: string; extra?: string }[]; // extra: a second tiny figure, e.g. "QUIZ 12"
   onPress: () => void;
   live?: boolean;
   variant?: 'podium' | 'list';
@@ -1467,6 +1498,7 @@ export function LeaderboardPreview({ title, sub, accent, unit, rows, onPress, li
                         : <Text style={{ fontFamily: F.bodyBold, fontSize: champ ? 15 : 12.5, color: r.color }}>{r.value}</Text>}
                       <Mono style={{ fontSize: 6.5, letterSpacing: 0.8, color: C.muted3 }}>{unit}</Mono>
                     </View>
+                    {r.extra ? <Mono style={{ fontSize: 7.5, letterSpacing: 0.6, color: C.orange, marginTop: 1 }}>{r.extra}</Mono> : null}
                     <LinearGradient
                       colors={[hexA(r.color, champ ? 0.55 : 0.42), hexA(r.color, 0.04)]}
                       start={{ x: 0.5, y: 0 }}
@@ -1669,6 +1701,22 @@ export function Dashboard() {
   const [devPos, setDevPos] = React.useState<{ lat: number; lng: number } | null>(null);
   const [tourOpen, setTourOpen] = React.useState(false);
   const [monthCardOpen, setMonthCardOpen] = React.useState(false);
+  // Daily Quiz (23 Sep 2026): trainers only, on the signed-in uid (RLS ties the
+  // row to auth.uid(), so never the dev trainer). The popup opens once the state
+  // query has settled and says a question is due, never while the tour is up;
+  // the dashboard only mounts after LocationGate, so that gate is already done.
+  const quizUid = session?.user?.id ?? null;
+  const isTrainerRole = dbRoleForThreads === 'trainer';
+  const quiz = useTrainerQuiz({ uid: quizUid, enabled: isTrainerRole });
+  const [quizOpen, setQuizOpen] = React.useState(false);
+  // Continue on an error / not-due / empty-bank popup must not reopen it on the
+  // next render; the guard clears when the server stops calling the quiz due.
+  const quizDoneRef = React.useRef(false);
+  React.useEffect(() => { if (!quiz.shouldShowQuiz) quizDoneRef.current = false; }, [quiz.shouldShowQuiz]);
+  React.useEffect(() => {
+    if (isTrainerRole && !tourOpen && !quiz.isStateLoading && quiz.shouldShowQuiz && !quizDoneRef.current) setQuizOpen(true);
+  }, [isTrainerRole, tourOpen, quiz.isStateLoading, quiz.shouldShowQuiz]);
+  const onQuizComplete = () => { quizDoneRef.current = true; setQuizOpen(false); };
   const monthBreakQ = useMyMonthSessionBreakdown(trainerId, monthCardOpen);
   React.useEffect(() => {
     let alive = true;
@@ -1750,6 +1798,12 @@ export function Dashboard() {
   const attentionRows = isTodayView ? rosterRows.filter((r) => r.is_open_past || istDate(new Date(r.scheduled_datetime)) !== todayIst) : [];
   const todayRows = isTodayView ? rosterRows.filter((r) => !r.is_open_past && istDate(new Date(r.scheduled_datetime)) === todayIst) : rosterRows;
   const missedNeedingRemark = attentionRows.filter((r) => r.is_open_past).length;
+  // Cycle phase label (25 Sep 2026) on today's roster, logged and not-yet-logged cards.
+  const cycleQ = useClientCycleStatus(isTodayView ? rosterRows.map((r) => r.client_id ?? '') : [], isTodayView);
+  const cycles = cycleQ.data ?? {};
+  const [cycleFor, setCycleFor] = React.useState<CyclePopupInfo>(null);
+  const [voiceFor, setVoiceFor] = React.useState<SessionVoiceSheetInfo>(null);
+  const cycleOf = (r: RosterRow) => (isTodayView && r.client_id ? cycles[r.client_id] ?? null : null);
   const rosterDone = rosterRows.filter((r) => !!r.workout_session_id).length;
   const rosterActive = rosterRows.filter((r) => (r.status ?? '').toLowerCase() !== 'cancelled').length;
   const nextRow = isTodayView
@@ -1774,13 +1828,17 @@ export function Dashboard() {
   // Live leaderboard mapped to the row shape used below.
   const medalColors = [C.gold, '#B8BCC4', '#C08A52'];
   const liveLeaders = leaderboardQ.data?.map((e, i) => ({
+    trainerId: e.trainerId as string | undefined,
     name: e.trainerName,
     ref: e.referralCount,
     sess: e.sessionCount + e.qhpCount, // web parity: "Sess" = sessions + QHP combined
     medal: i < 3 ? ic.crown : undefined,
     medalColor: i < 3 ? medalColors[i] : undefined,
   }));
-  const leaderRows = leaderboardQ.isError || !liveLeaders ? leaders : liveLeaders;
+  const leaderRows: { trainerId?: string; name: string; ref: number; sess: number; medal?: string; medalColor?: string }[] = leaderboardQ.isError || !liveLeaders ? leaders : liveLeaders;
+  // Daily quiz points for this month, shown under each podium trainer (no separate quiz
+  // leaderboard any more). Same query key as My Quiz Score, so it is one request.
+  const quizThisMonth = useQuizScoresByTrainer([quizMonthKey(new Date())], isTrainerRole);
   const istHour = Number(new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour12: false, hour: '2-digit' }));
   const greeting = istHour < 12 ? 'Good morning' : istHour < 17 ? 'Good afternoon' : 'Good evening';
   const sectionLabel = (text: string) => (
@@ -1883,6 +1941,12 @@ export function Dashboard() {
           </Pressable>
         );
       })()}
+
+      {/* Essentials Auction — only while the window is open and tomorrow has lots
+         (1 Oct 2026); tap opens the auction page. Renders nothing otherwise. */}
+      {/* Essentials Auction won / lost cards (10 Oct 2026): 4 hours after the 4 PM decision */}
+      <AuctionResultsCards />
+      <EssentialsAuctionHomeCard />
 
       {/* My Crew — team chat per manager_score competition row, directly after
          the Sessions This Month card. Renders nothing without a current team. */}
@@ -2144,6 +2208,10 @@ export function Dashboard() {
           propose a slot into the client's thread with the CRM tagged. */}
       <QhpRefreshPendingCard trainerId={trainerId} />
 
+      {/* My Quiz Score — the trainer's own line of this month's quiz board (rank, points,
+          accuracy, streak), counted from 25 Sep 2026 like the board itself; trainers only. */}
+      {isTrainerRole ? <MyQuizScoreCard uid={quizUid} /> : null}
+
       <View style={{ flexDirection: 'row', gap: 11 }}>
         {/* Today's sessions — circular progress against today's schedule; opens the roster. */}
         <Card onPress={() => set({ rosterOpen: true })} colors={['rgba(46,28,18,0.42)', 'rgba(18,14,14,0.5)']} radius={17} style={{ flex: 1, overflow: 'hidden' }}>
@@ -2283,6 +2351,9 @@ export function Dashboard() {
                     trainerName={displayName}
                     devPos={devPos}
                     plans={plansFor(r.client_id)}
+                    cycle={cycleOf(r)}
+                    onCycle={() => { const c = cycleOf(r); if (c) setCycleFor({ name: r.client_name, cycle: c }); }}
+                    onVoice={r.workout_session_id && r.client_id ? () => setVoiceFor({ workoutSessionId: r.workout_session_id!, clientId: r.client_id!, clientName: r.client_name, notes: r.voice_notes }) : undefined}
                     onAddWorkout={() => { if (r.client_id) openWorkout(r.client_id, r.client_name, r.modality ?? r.session_type ?? 'strength', r.id); }}
                   />
                 ))}
@@ -2300,6 +2371,9 @@ export function Dashboard() {
                     devPos={devPos}
                     highlight={nextRow?.id === r.id}
                     plans={plansFor(r.client_id)}
+                    cycle={cycleOf(r)}
+                    onCycle={() => { const c = cycleOf(r); if (c) setCycleFor({ name: r.client_name, cycle: c }); }}
+                    onVoice={r.workout_session_id && r.client_id ? () => setVoiceFor({ workoutSessionId: r.workout_session_id!, clientId: r.client_id!, clientName: r.client_name, notes: r.voice_notes }) : undefined}
                     onAddWorkout={() => { if (r.client_id) openWorkout(r.client_id, r.client_name, r.modality ?? r.session_type ?? 'strength', r.id); }}
                   />
                 ))}
@@ -2334,8 +2408,15 @@ export function Dashboard() {
         accent={C.gold}
         unit="SESS"
         onPress={() => go('trainer-leaderboard')}
-        rows={leaderRows.slice(0, 3).map((l, i) => ({ rank: i + 1, name: l.name, value: l.sess, color: l.medalColor || C.orange }))}
+        rows={leaderRows.slice(0, 3).map((l, i) => {
+          // Daily quiz points ride along under each podium trainer (no separate quiz board).
+          const qz = isTrainerRole && l.trainerId ? quizThisMonth.data?.[l.trainerId] : undefined;
+          return { rank: i + 1, name: l.name, value: l.sess, color: l.medalColor || C.orange, extra: qz ? `QUIZ ${qz.points}` : undefined };
+        })}
       />
+
+      {/* Daily Quiz popup: mandatory, Continue is the only way out. */}
+      <DailyQuizModal visible={quizOpen} uid={quizUid} onComplete={onQuizComplete} />
 
       {/* Total QHPs breakdown popup */}
       <Modal visible={!!qhpBreakdown} transparent animationType="slide" onRequestClose={() => setQhpBreakdown(null)}>
@@ -2590,6 +2671,8 @@ export function Dashboard() {
         </Pressable>
       </Modal>
 
+      <CyclePopup info={cycleFor} onClose={() => setCycleFor(null)} />
+      <SessionVoiceSheet info={voiceFor} userId={trainerId} onClose={() => setVoiceFor(null)} />
     </Page>
   );
 }
@@ -2671,9 +2754,18 @@ export function TrainerLeaderboardContent() {
   const [periodId, setPeriodId] = React.useState('this');
   const sel = lbPeriods.find((p) => p.id === periodId) ?? lbPeriods[0];
   const leaderboardQ = useTrainerLeaderboard(sel.bounds);
+  // QUIZ column (23 Sep 2026): the daily quiz has no leaderboard of its own; each row shows
+  // the trainer's quiz points and accuracy for the same period. Month keys come from the
+  // period's IST month starts; "3 Months" adds the three months up.
+  const quizMonths = React.useMemo(() => {
+    const key = (offset: number) => `${lbMonthBounds(offset).start.slice(0, 7)}-01`;
+    return periodId === '3m' ? [key(0), key(1), key(2)] : [key(periodId === 'last' ? 1 : periodId === 'prev' ? 2 : 0)];
+  }, [periodId]);
+  const quizQ = useQuizScoresByTrainer(quizMonths);
+  const quizPeriodLabel = periodId === 'this' ? 'this month' : periodId === '3m' ? 'the last 3 months' : sel.label;
   const medalColors = [C.gold, '#B8BCC4', '#C08A52'];
-  const rows = (leaderboardQ.data && leaderboardQ.data.length
-    ? leaderboardQ.data.map((e, i) => ({ name: e.trainerName, ref: e.referralCount, sess: e.sessionCount + e.qhpCount /* web parity: sessions + QHP */, medal: i < 3 ? ic.crown : undefined, medalColor: i < 3 ? medalColors[i] : undefined }))
+  const rows: { trainerId?: string; name: string; ref: number; sess: number; medal?: string; medalColor?: string }[] = (leaderboardQ.data && leaderboardQ.data.length
+    ? leaderboardQ.data.map((e, i) => ({ trainerId: e.trainerId, name: e.trainerName, ref: e.referralCount, sess: e.sessionCount + e.qhpCount /* web parity: sessions + QHP */, medal: i < 3 ? ic.crown : undefined, medalColor: i < 3 ? medalColors[i] : undefined }))
     : (leaderboardQ.isError ? leaders : []));
   const podium = [rows[1], rows[0], rows[2]].filter(Boolean);
   const podiumHeights = [86, 112, 70];
@@ -2742,7 +2834,10 @@ export function TrainerLeaderboardContent() {
       </Card>
 
       {/* Full standings */}
-      <Mono style={{ fontSize: 12, letterSpacing: 2.1 }}>FULL STANDINGS</Mono>
+      <View style={{ gap: 3 }}>
+        <Mono style={{ fontSize: 12, letterSpacing: 2.1 }}>FULL STANDINGS</Mono>
+        <Mono style={{ fontSize: 8.5, letterSpacing: 0.5, color: C.muted3 }}>QUIZ = DAILY QUIZ POINTS AND ACCURACY · COUNTED FROM 25 SEP 2026 · HOLD FOR DETAILS</Mono>
+      </View>
       {rows.map((l, i) => {
         const rank = i + 1;
         const top3 = rank <= 3;
@@ -2766,6 +2861,8 @@ export function TrainerLeaderboardContent() {
               <Mono style={{ fontSize: 8.5, letterSpacing: 1, color: C.faint }}>SESS</Mono>
               <CountUp value={l.sess} style={{ fontFamily: F.bodyBold, fontSize: 14, color: C.blue, marginTop: 1 }} />
             </View>
+            {/* QUIZ: daily quiz points (accuracy under it) for the same period; "-" = no answers. */}
+            <QuizColumnCell score={l.trainerId ? quizQ.data?.[l.trainerId] : null} periodLabel={quizPeriodLabel} />
           </RiseIn>
         );
       })}
@@ -2907,7 +3004,9 @@ export function Clients() {
                 <View style={{ flex: 1 }}>
                   <Serif style={{ fontSize: 18 }} numberOfLines={1}>{c.full_name}</Serif>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 5, flexWrap: 'wrap' }}>
-                    {c.subscription_type ? (
+                    {c.essentials ? (
+                      <EssentialsBadge status={c.essentials} />
+                    ) : c.subscription_type ? (
                       <View style={{ paddingVertical: 3, paddingHorizontal: 9, borderRadius: 999, backgroundColor: hexA(C.orange, 0.1), borderWidth: 1, borderColor: hexA(C.orange, 0.24) }}>
                         <Text style={{ fontSize: 10.5, fontFamily: F.bodySemi, color: '#F0A875' }}>{c.subscription_type}</Text>
                       </View>
@@ -3916,6 +4015,11 @@ export function ClientDetail() {
   const plansQ = useClientPlans(clientId);
   const goalsQ = useClientGoals(clientId);
   const reportsQ = useClientReports(clientId);
+  const consultQ = useClientConsultAi(clientId);
+  // Cycle phase (25 Sep 2026): eligible women under 50 with a period log only.
+  const cycleQ = useClientCycleStatus(clientId ? [clientId] : []);
+  const cycle = clientId ? cycleQ.data?.[clientId] ?? null : null;
+  const [cycleOpen, setCycleOpen] = React.useState(false);
   const bioQ = useClientBioAge(clientId);
   const progQ = useClientProgression(clientId);
   const dailyQ = useClientDailyStats(clientId);
@@ -4014,7 +4118,8 @@ export function ClientDetail() {
   // Analytics: which tab of which client is being viewed (fires on open + every switch).
   React.useEffect(() => { trackClientTab('client', clientTab, { id: selectedClientId, name: selectedClientName }); }, [clientTab]);
   const [cmpRange, setCmpRange] = React.useState('1W');
-  const [reportsTab, setReportsTab] = React.useState<'qhp' | 'blood' | 'medical'>('qhp');
+  const [reportsTab, setReportsTab] = React.useState<'qhp' | 'blood' | 'medical' | 'consult'>('qhp');
+  const [consultDetail, setConsultDetail] = React.useState<ClientConsultAi | null>(null);
   const [bloodDetail, setBloodDetail] = React.useState<any | null>(null);
   const [qhpDetail, setQhpDetail] = React.useState<{ row: any; label: string } | null>(null);
   // Classify reports into the three buckets once, so sub-tabs can show counts
@@ -4058,11 +4163,12 @@ export function ClientDetail() {
   React.useEffect(() => {
     if (!reportsQ.data || reportsAutoPicked.current) return;
     reportsAutoPicked.current = true;
-    if (reportBuckets[reportsTab].length === 0) {
+    if (reportsTab !== 'consult' && reportBuckets[reportsTab].length === 0) {
       const first = (['blood', 'medical', 'qhp'] as const).find((k) => reportBuckets[k].length > 0);
       if (first) setReportsTab(first);
     }
   }, [reportsQ.data, reportBuckets]);
+  const consultRows = consultQ.data ?? [];
   const [bioRange, setBioRange] = React.useState('3M');
   const [ageSeries, setAgeSeries] = React.useState<'axion' | 'maq'>('axion');
   const [loadRange, setLoadRange] = React.useState('M');
@@ -4092,6 +4198,83 @@ export function ClientDetail() {
   const [selWeek, setSelWeek] = React.useState(0);
   const [selDay, setSelDay] = React.useState(0);
 
+  /* Trends: add / edit a client's sleep, nutrition and steps (24 Sep 2026, iOS parity).
+     - The selected day defaults to the latest non-future day of the selected week (today
+       for this week, Sunday for a past week), seeded once per (client, week) so a
+       background refetch never resets the trainer's own pick.
+     - Tapping a day square scrolls the page to the day summary (90 px headroom).
+     - Days within the last 7 (today and the 6 before, local) get an Add / Edit health data
+       button; the sheet writes through submitHealthData with logDate = that day. */
+  const trendScrollRef = React.useRef<ScrollView>(null);
+  const trendOffsetRef = React.useRef(0);
+  const daySummaryRef = React.useRef<View>(null);
+  const seededTrendWeekRef = React.useRef<string | null>(null);
+  // The weekly summary query is declared further down; its latest data is mirrored here.
+  const weeklyQDataRef = React.useRef<{ weekStart: string; days: { isFuture: boolean }[] }[] | undefined>(undefined);
+  React.useEffect(() => {
+    const wk = weeklyQDataRef.current?.[selWeek];
+    if (!wk || !clientId) return;
+    const key = `${clientId}:${wk.weekStart}`;
+    if (seededTrendWeekRef.current === key) return;
+    seededTrendWeekRef.current = key;
+    let idx = 6;
+    while (idx > 0 && wk.days[idx]?.isFuture) idx -= 1;
+    setSelDay(idx);
+  }); // no deps on purpose: runs after each render, guarded by the (client, week) key
+  const scrollToDaySummary = React.useCallback(() => {
+    // Let the selection render first, then measure both in window coordinates.
+    setTimeout(() => {
+      const sv: any = trendScrollRef.current;
+      const node: any = daySummaryRef.current;
+      const host: any = sv?.measureInWindow ? sv : sv?.getNativeScrollRef?.();
+      if (!host?.measureInWindow || !node?.measureInWindow) return;
+      try {
+        host.measureInWindow((_x: number, svY: number) => {
+          node.measureInWindow((_x2: number, y: number) => {
+            sv.scrollTo({ y: Math.max(0, trendOffsetRef.current + (y - svY) - 90), animated: true });
+          });
+        });
+      } catch { /* unmounted mid-measure */ }
+    }, 60);
+  }, []);
+  const ymdMinusDays = (ymd: string, n: number) => {
+    const [y, m, d] = ymd.split('-').map(Number);
+    return new Date(Date.UTC(y, m - 1, d - n)).toISOString().slice(0, 10);
+  };
+  const saveHdM = useSaveHealthData();
+  const hdKb = useKeyboardHeight();
+  const [hd, setHd] = React.useState<{ ymd: string; sub: string; edit: boolean } | null>(null);
+  const [hdSleep, setHdSleep] = React.useState('');
+  const [hdRating, setHdRating] = React.useState<number | null>(null);
+  const [hdSteps, setHdSteps] = React.useState('');
+  const hdBusyRef = React.useRef(false);
+  const [hdSaving, setHdSaving] = React.useState(false); // covers the schedule lookup AND the writes
+  const closeHd = React.useCallback(() => { Keyboard.dismiss(); setTimeout(() => setHd(null), 80); }, []);
+  const saveHd = async () => {
+    if (!hd || !clientId || hdBusyRef.current) return;
+    const sleepT = hdSleep.trim().replace(',', '.');
+    const stepsT = hdSteps.trim();
+    const sleep = sleepT ? Number(sleepT) : null;
+    const steps = stepsT ? Number(stepsT) : null;
+    if (sleep != null && (!Number.isFinite(sleep) || sleep < 0 || sleep > 24)) { Alert.alert('Check the sleep', 'Sleep must be between 0 and 24 hours.'); return; }
+    if (hdRating != null && (hdRating < 1 || hdRating > 10)) { Alert.alert('Check the nutrition', 'Nutrition is a 1 to 10 rating.'); return; }
+    if (steps != null && (!Number.isInteger(steps) || steps < 0 || steps > 200000)) { Alert.alert('Check the steps', 'Steps must be a count, like 8500.'); return; }
+    if (sleep == null && hdRating == null && steps == null) { Alert.alert('Nothing to save', 'Fill at least one value.'); return; }
+    hdBusyRef.current = true;
+    setHdSaving(true);
+    try {
+      const scheduledHours = await withTimeout(fetchScheduledSleepHours(clientId, hd.ymd), NET_MS, 'Sleep schedule');
+      await withTimeout(saveHdM.mutateAsync({
+        clientId, trainerId: myTrainerId ?? '', hoursSlept: sleep, scheduledHours,
+        nutritionRating: hdRating, stepsCount: steps, logDate: hd.ymd,
+      }), NET_MS, 'Save health data');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      closeHd();
+    } catch (e: any) {
+      Alert.alert("Couldn't save health data", e?.message ?? 'Try again.');
+    } finally { hdBusyRef.current = false; setHdSaving(false); }
+  };
+
   // 7-slot arrays (Mon..Sun), built LIVE from useWeeklyHealthSummary (web
   // WeeklyHealthSummary parity: workout_analysis counts, nutrition_tracker,
   // daily_health_metrics sleep with daily_sleep_logs fallback, daily_goals
@@ -4108,6 +4291,7 @@ export function ClientDetail() {
     z2cTarget: number | null; z2cDone: number;
   };
   const weeklyQ = useWeeklyHealthSummary(clientId);
+  weeklyQDataRef.current = weeklyQ.data;
   const trendWeeks: TW[] = React.useMemo(() => (weeklyQ.data ?? []).map((w) => ({
     range: w.label,
     label: w.subLabel,
@@ -4128,6 +4312,7 @@ export function ClientDetail() {
   })), [weeklyQ.data]);
   const [openClientSession, setOpenClientSession] = React.useState<number | null>(null);
   const [openClientAi, setOpenClientAi] = React.useState<number | null>(null);
+  const [openClientVoice, setOpenClientVoice] = React.useState<number | null>(null); // one voice player open at a time
   const [openPlan, setOpenPlan] = React.useState<string | null>(null);
   const [openExercise, setOpenExercise] = React.useState<string | null>(null);
   // Sessions tab pagination — 10 at a time, reset when switching clients.
@@ -4136,6 +4321,7 @@ export function ClientDetail() {
   // and always land on the requested tab — default Progression, never a stale tab.
   React.useEffect(() => {
     setClientTab((clientInitialTab as any) || 'progression');
+    setSelWeek(0); // Trends opens on this week; the day is seeded to its latest day
     setSessionsShown(10);
     setOpenClientSession(null);
     setOpenClientAi(null);
@@ -4193,7 +4379,7 @@ export function ClientDetail() {
     }
   };
   return (
-    <Page gap={16} pt={6}>
+    <Page gap={16} pt={6} ref={trendScrollRef} scrollOffsetRef={trendOffsetRef}>
       <View style={{ flexDirection: 'row', gap: 10 }}>
         <Pressable onPress={() => go('clients')} style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 12, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)' }}>
           <Icon name="arrowLeft" size={15} color={C.ink2} strokeWidth={2.2} />
@@ -4278,6 +4464,7 @@ export function ClientDetail() {
                       <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: statusCol }} />
                       <Text style={{ fontSize: 10.5, fontFamily: F.bodySemi, color: statusCol }}>{isActive ? 'Active' : (client?.status ?? 'Inactive')}</Text>
                     </View>
+                    {detailQ.data?.essentials ? <EssentialsBadge status={detailQ.data.essentials} /> : null}
                   </View>
                 </View>
               </View>
@@ -4328,10 +4515,32 @@ export function ClientDetail() {
                   ) : null}
                 </View>
               ) : null}
+
+              {/* Cycle phase row: tap for next period, how she feels and training advice */}
+              {cycle ? (
+                <ReplayMask>
+                  <Pressable
+                    onPress={() => setCycleOpen(true)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Cycle: ${cycleStatusLine(cycle.status)}. Open details`}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 14, backgroundColor: hexA(cycleColor(cycle.status), 0.07), borderWidth: 1, borderColor: hexA(cycleColor(cycle.status), 0.3) }}
+                  >
+                    <CycleChip cycle={cycle} onPress={() => setCycleOpen(true)} />
+                    <View style={{ flex: 1 }}>
+                      <Body style={{ fontSize: 12.5, fontFamily: F.bodySemi, color: '#fff' }} numberOfLines={1}>{cycleStatusLine(cycle.status)}</Body>
+                      {nextPeriodLine(cycle.status) ? <Body style={{ fontSize: 11, color: C.muted2, marginTop: 1 }} numberOfLines={1}>Next period: {nextPeriodLine(cycle.status)}</Body> : null}
+                    </View>
+                    <Icon name="chevRight" size={13} color={C.muted2} strokeWidth={2.2} />
+                  </Pressable>
+                </ReplayMask>
+              ) : null}
             </>
           );
         })()}
       </Card>
+
+      {/* Listen before the session (9 Oct 2026): the spoken weekly + health context summaries */}
+      <ClientHealthSummaryCard clientId={clientId} />
 
       {/* Session handoff popup — auto-opens once per trainer+client per IST day */}
       <SessionHandoffPopup clientId={clientId} />
@@ -4408,7 +4617,7 @@ export function ClientDetail() {
                   <Text style={{ fontFamily: F.body, fontSize: 9.5, color: 'rgba(255,255,255,0.8)', marginTop: 1 }}>{w.label}</Text>
                 </LinearGradient>
               ) : (
-                <Pressable key={w.range} onPress={() => { setSelWeek(wi); setSelDay(0); }} style={{ paddingVertical: 9, paddingHorizontal: 16, borderRadius: 12, alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)' }}>
+                <Pressable key={w.range} onPress={() => setSelWeek(wi)} style={{ paddingVertical: 9, paddingHorizontal: 16, borderRadius: 12, alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)' }}>
                   <Text style={{ fontFamily: F.bodySemi, fontSize: 12.5, color: C.muted }}>{w.range}</Text>
                   <Text style={{ fontFamily: F.body, fontSize: 9.5, color: C.muted3, marginTop: 1 }}>{w.label}</Text>
                 </Pressable>
@@ -4463,7 +4672,7 @@ export function ClientDetail() {
                         const col = st === 'done' ? C.green : st === 'missed' ? C.red : null;
                         const sel = selDay === i;
                         return (
-                          <Pressable key={i} onPress={() => setSelDay(i)} style={cellW}>
+                          <Pressable key={i} onPress={() => { setSelDay(i); scrollToDaySummary(); }} hitSlop={6} style={cellW}>
                             <View style={{ width: 24, height: 24, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: col ? hexA(col, 0.16) : 'rgba(255,255,255,0.04)', borderWidth: sel ? 2 : 1, borderColor: sel ? C.orange : col ? hexA(col, 0.45) : 'rgba(255,255,255,0.08)' }}>
                               {col ? (
                                 <Icon path={st === 'done' ? 'M20 6 9 17l-5-5' : 'M6 6l12 12M18 6 6 18'} size={11} color={col} strokeWidth={2.8} />
@@ -4516,8 +4725,22 @@ export function ClientDetail() {
                       <ProgressBar pct={val === null ? 0 : Math.min(100, (val / goal) * 100)} height={5} fill={col} />
                     </View>
                   );
+                  // Add / edit health data: only the last 7 days (today and the 6 before), never the future.
+                  const rawDay = weeklyQ.data?.[selWeek]?.days[selDay];
+                  const dayYmd = rawDay?.date ?? null;
+                  const todayYmd = localToday();
+                  const canEditHealth = !!dayYmd && dayYmd <= todayYmd && dayYmd >= ymdMinusDays(todayYmd, 6);
+                  const hasAllHealth = stepsV != null && nutV != null && sleepV != null;
+                  const openHealthSheet = () => {
+                    if (!dayYmd) return;
+                    setHdSleep(rawDay?.sleepHours != null ? String(rawDay.sleepHours) : '');
+                    setHdRating(rawDay?.nutrition ?? null);
+                    setHdSteps(rawDay?.steps != null ? String(Math.round(rawDay.steps)) : ''); // raw count, not the "8.2k" shown in the bars
+                    saveHdM.reset();
+                    setHd({ ymd: dayYmd, sub: `${dayNames[selDay]} · ${w.dates[selDay]}`, edit: hasAllHealth });
+                  };
                   return (
-                    <View style={{ padding: 14, borderRadius: 15, backgroundColor: hexA(wc === C.muted2 ? '#888888' : wc, 0.06), borderWidth: 1, borderColor: hexA(wc === C.muted2 ? '#888888' : wc, 0.22), gap: 12 }}>
+                    <View ref={daySummaryRef} collapsable={false} style={{ padding: 14, borderRadius: 15, backgroundColor: hexA(wc === C.muted2 ? '#888888' : wc, 0.06), borderWidth: 1, borderColor: hexA(wc === C.muted2 ? '#888888' : wc, 0.22), gap: 12 }}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                         <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: hexA(wc === C.muted2 ? '#888888' : wc, 0.15), borderWidth: 1.5, borderColor: hexA(wc === C.muted2 ? '#888888' : wc, 0.45), alignItems: 'center', justifyContent: 'center' }}>
                           {st ? (
@@ -4538,6 +4761,13 @@ export function ClientDetail() {
                       {metric('STEPS', stepsV, w.stepsGoalK, 'k', C.blue)}
                       {metric('NUTRITION', nutV, w.nutritionGoal, '', C.gold)}
                       {metric('SLEEP', sleepV, w.sleepGoal, 'h', C.purple)}
+                      {canEditHealth ? (
+                        <Pressable onPress={openHealthSheet} hitSlop={6} accessibilityRole="button" accessibilityLabel={hasAllHealth ? 'Edit health data' : 'Add health data'}
+                          style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 11, borderRadius: 12, borderWidth: 1.2, borderStyle: 'dashed', borderColor: hexA(C.orange, 0.6), backgroundColor: hexA(C.orange, pressed ? 0.12 : 0.06) })}>
+                          <Icon name={hasAllHealth ? 'clipboard' : 'plus'} size={14} color={C.orange} strokeWidth={2.3} />
+                          <Text style={{ fontFamily: F.bodyBold, fontSize: 13, color: C.orange }}>{hasAllHealth ? 'Edit health data' : 'Add health data'}</Text>
+                        </Pressable>
+                      ) : null}
                       {w.z2cTarget != null ? (
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 2 }}>
                           <Mono style={{ flex: 1, fontSize: 9, letterSpacing: 0.8, color: C.muted3 }}>ZONE 2 CARDIO</Mono>
@@ -4568,10 +4798,12 @@ export function ClientDetail() {
                               <>
                                 {meals.map((m: any, mi: number) => (
                                   <View key={m?.id ?? mi} style={{ padding: 10, borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.03)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)', gap: 5 }}>
-                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                                      <Body style={{ flex: 1, fontSize: 12.5, fontFamily: F.bodySemi, color: '#fff' }} numberOfLines={2}>{m?.meal_name || 'Meal'}</Body>
+                                    {/* Full meal description, never truncated (user request 25 Sep 2026): the
+                                        client types it in the B2C app and the trainer needs all of it. */}
+                                    <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
+                                      <Body style={{ flex: 1, fontSize: 12.5, lineHeight: 18, fontFamily: F.bodySemi, color: '#fff' }}>{m?.meal_name || 'Meal'}</Body>
                                       {m?.timestamp ? (
-                                        <Mono style={{ fontSize: 8.5, color: C.muted3 }}>{istTimeParts(m.timestamp).time} {istTimeParts(m.timestamp).ampm}</Mono>
+                                        <Mono style={{ fontSize: 8.5, color: C.muted3, marginTop: 3 }}>{istTimeParts(m.timestamp).time} {istTimeParts(m.timestamp).ampm}</Mono>
                                       ) : null}
                                     </View>
                                     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 5 }}>
@@ -4617,6 +4849,57 @@ export function ClientDetail() {
               </Card>
             );
           })()}
+
+          {/* Add / edit health data sheet (one Modal; backdrop is a sibling; keyboard-aware) */}
+          <Modal visible={!!hd} transparent animationType="slide" onRequestClose={() => { if (!hdSaving) closeHd(); }}>
+            <View style={{ flex: 1, justifyContent: 'flex-end' }}>
+              <Pressable onPress={() => { if (!hdSaving) closeHd(); }} accessibilityRole="button" accessibilityLabel="Close" importantForAccessibility="no-hide-descendants"
+                style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.62)' }} />
+              <View accessibilityViewIsModal style={{ maxHeight: hdKb > 0 ? '95%' : '88%', backgroundColor: C.sheetBg, borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: hexA(C.orange, 0.2), paddingHorizontal: 18, paddingTop: 14, paddingBottom: 16 + hdKb }}>
+                <View style={{ width: 40, height: 4, borderRadius: 99, backgroundColor: 'rgba(255,255,255,0.2)', alignSelf: 'center', marginBottom: 12 }} />
+                <Serif style={{ fontSize: 19 }}>{hd?.edit ? 'Edit health data' : 'Add health data'}</Serif>
+                <Body style={{ fontSize: 12, color: C.muted2, marginTop: 3, marginBottom: 12 }}>{hd?.sub} · saved values can be corrected here.</Body>
+                <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={{ flexShrink: 1 }} contentContainerStyle={{ gap: 14, paddingBottom: 6 }}>
+                  <View style={{ gap: 6 }}>
+                    <Mono style={{ fontSize: 9, letterSpacing: 0.8, color: C.muted3 }}>SLEEP (HOURS)</Mono>
+                    <TextInput value={hdSleep} onChangeText={setHdSleep} placeholder="e.g. 7.5" placeholderTextColor={C.muted3} keyboardType="decimal-pad" accessibilityLabel="Sleep hours"
+                      style={{ fontFamily: F.body, fontSize: 14, color: '#fff', paddingVertical: 11, paddingHorizontal: 12, borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }} />
+                  </View>
+                  <View style={{ gap: 6 }}>
+                    <Mono style={{ fontSize: 9, letterSpacing: 0.8, color: C.muted3 }}>NUTRITION (1-10)</Mono>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                      {Array.from({ length: 10 }, (_, k) => k + 1).map((n) => {
+                        const on = hdRating === n;
+                        return (
+                          <Pressable key={n} onPress={() => setHdRating(on ? null : n)} hitSlop={4} accessibilityRole="button" accessibilityState={{ selected: on }}
+                            style={{ width: 44, paddingVertical: 9, borderRadius: 10, alignItems: 'center', backgroundColor: on ? hexA(C.gold, 0.18) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: on ? hexA(C.gold, 0.55) : 'rgba(255,255,255,0.09)' }}>
+                            <Text style={{ fontFamily: on ? F.bodyBold : F.bodySemi, fontSize: 13, color: on ? C.gold : C.ink }}>{n}</Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </View>
+                  <View style={{ gap: 6 }}>
+                    <Mono style={{ fontSize: 9, letterSpacing: 0.8, color: C.muted3 }}>STEPS (COUNT)</Mono>
+                    <TextInput value={hdSteps} onChangeText={(t) => setHdSteps(t.replace(/[^0-9]/g, ''))} placeholder="e.g. 8500" placeholderTextColor={C.muted3} keyboardType="number-pad" accessibilityLabel="Steps count"
+                      style={{ fontFamily: F.body, fontSize: 14, color: '#fff', paddingVertical: 11, paddingHorizontal: 12, borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }} />
+                  </View>
+                </ScrollView>
+                <View style={{ flexDirection: 'row', gap: 10, paddingTop: 12 }}>
+                  <Pressable onPress={() => { if (!hdSaving) closeHd(); }} disabled={hdSaving} accessibilityRole="button"
+                    style={{ flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', opacity: hdSaving ? 0.5 : 1 }}>
+                    <Text style={{ fontFamily: F.bodySemi, fontSize: 13, color: C.muted }}>Cancel</Text>
+                  </Pressable>
+                  <Pressable onPress={saveHd} disabled={hdSaving} accessibilityRole="button" accessibilityLabel="Save health data"
+                    style={{ flex: 1.4, borderRadius: 12, overflow: 'hidden', opacity: hdSaving ? 0.6 : 1 }}>
+                    <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ minHeight: 46, alignItems: 'center', justifyContent: 'center' }}>
+                      {hdSaving ? <ActivityIndicator size="small" color="#fff" /> : <Text style={{ fontFamily: F.bodyBold, fontSize: 13.5, color: '#fff' }}>Save</Text>}
+                    </LinearGradient>
+                  </Pressable>
+                </View>
+              </View>
+            </View>
+          </Modal>
         </>
         )
       ) : clientTab === 'progression' ? (
@@ -4771,10 +5054,10 @@ export function ClientDetail() {
             <Serif style={{ fontSize: 19 }}>Reports</Serif>
           </View>
           {/* Sub-tabs with live counts */}
-          <View style={{ flexDirection: 'row', gap: 7 }}>
-            {([['qhp', 'QHP', C.gold], ['blood', 'Blood', C.blue], ['medical', 'Medical', C.purple]] as const).map(([id, label, col]) => {
+          <View style={{ flexDirection: 'row', gap: 6 }}>
+            {([['qhp', 'QHP', C.gold], ['blood', 'Blood', C.blue], ['medical', 'Medical', C.purple], ['consult', 'Doctor', C.green]] as const).map(([id, label, col]) => {
               const active = reportsTab === id;
-              const n = reportBuckets[id].length;
+              const n = id === 'consult' ? consultRows.length : reportBuckets[id].length;
               return (
                 <Pressable
                   key={id}
@@ -4791,7 +5074,62 @@ export function ClientDetail() {
               );
             })}
           </View>
-          {reportsQ.isLoading ? (
+          {reportsTab === 'consult' ? (
+            /* Doctor consultation AI summaries (get_client_consult_ai_summaries, 25 Sep 2026) */
+            consultQ.isLoading ? (
+              <View style={{ alignItems: 'center', gap: 8, paddingVertical: 26 }}>
+                <ActivityIndicator color={C.green} />
+                <Body style={{ color: C.muted3, fontSize: 12.5 }}>Loading consultations…</Body>
+              </View>
+            ) : consultQ.isError ? (
+              <View style={{ alignItems: 'center', gap: 10, paddingVertical: 20 }}>
+                <Body style={{ color: C.red, textAlign: 'center' }}>Couldn't load doctor consultations.</Body>
+                <Pressable onPress={() => consultQ.refetch()} hitSlop={10} style={{ paddingVertical: 7, paddingHorizontal: 14, borderRadius: 999, borderWidth: 1, borderColor: hexA(C.green, 0.4) }}>
+                  <Text style={{ fontFamily: F.bodyBold, fontSize: 12, color: C.green }}>Try again</Text>
+                </Pressable>
+              </View>
+            ) : consultRows.length === 0 ? (
+              <View style={{ alignItems: 'center', gap: 10, paddingVertical: 30, paddingHorizontal: 20, borderRadius: 16, borderWidth: 1.5, borderStyle: 'dashed', borderColor: 'rgba(255,255,255,0.09)' }}>
+                <View style={{ width: 42, height: 42, borderRadius: 14, backgroundColor: hexA(C.green, 0.1), alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon name="sparkle" size={19} color={C.green} strokeWidth={1.8} />
+                </View>
+                <Body style={{ color: C.muted3, fontSize: 12.5, textAlign: 'center', lineHeight: 18 }}>No doctor consultation summaries yet. They appear here once the doctor's call has its AI summary.</Body>
+              </View>
+            ) : (
+              consultRows.map((r) => {
+                const flags = r.ai_notes?.red_flags?.length ?? 0;
+                return (
+                  <Pressable
+                    key={r.id}
+                    onPress={() => setConsultDetail(r)}
+                    style={{ borderRadius: 16, backgroundColor: 'rgba(0,0,0,0.25)', borderWidth: 1, borderColor: hexA(C.green, 0.22), overflow: 'hidden' }}
+                  >
+                    <View style={{ height: 3, backgroundColor: hexA(C.green, 0.5) }} />
+                    <View style={{ padding: 13, gap: 10 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                        <View style={{ width: 42, height: 42, borderRadius: 12, backgroundColor: hexA(C.green, 0.13), borderWidth: 1, borderColor: hexA(C.green, 0.28), alignItems: 'center', justifyContent: 'center' }}>
+                          <Icon name="sparkle" size={19} color={C.green} strokeWidth={1.9} />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Body numberOfLines={2} style={{ fontSize: 14, fontFamily: F.bodySemi, color: '#fff', lineHeight: 18 }}>{r.doctor_name ? `Consultation with ${r.doctor_name}` : 'Doctor consultation'}</Body>
+                          <Mono style={{ fontSize: 10, color: C.muted3, marginTop: 3 }}>{istDayLabel(r.consultation_date)} · {String(r.start_time).slice(0, 5)}</Mono>
+                        </View>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 5, paddingHorizontal: 10, borderRadius: 999, backgroundColor: hexA(C.green, 0.13), borderWidth: 1, borderColor: hexA(C.green, 0.35) }}>
+                          <Text style={{ fontFamily: F.bodyBold, fontSize: 10.5, color: C.green }}>VIEW</Text>
+                          <Icon name="chevRight" size={13} color={C.green} strokeWidth={2.4} />
+                        </View>
+                      </View>
+                      {r.ai_notes?.short_summary ? <Body numberOfLines={3} style={{ fontSize: 12.5, lineHeight: 18, color: C.ink3 }}>{r.ai_notes.short_summary}</Body> : null}
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                        <Badge text="AI summary" color={C.green} />
+                        {flags > 0 ? <Badge text={`${flags} red flag${flags === 1 ? '' : 's'}`} color={C.red} /> : null}
+                      </View>
+                    </View>
+                  </Pressable>
+                );
+              })
+            )
+          ) : reportsQ.isLoading ? (
             <View style={{ alignItems: 'center', gap: 8, paddingVertical: 26 }}>
               <ActivityIndicator color={C.blue} />
               <Body style={{ color: C.muted3, fontSize: 12.5 }}>Loading reports…</Body>
@@ -4799,10 +5137,11 @@ export function ClientDetail() {
           ) : reportsQ.isError ? (
             <Body style={{ color: C.red, textAlign: 'center', paddingVertical: 20 }}>Couldn't load reports.</Body>
           ) : null}
-          {!reportsQ.isLoading && !reportsQ.isError ? (() => {
-            const accent = reportsTab === 'qhp' ? C.gold : reportsTab === 'blood' ? C.blue : C.purple;
-            const icon = reportsTab === 'qhp' ? ('heart' as const) : reportsTab === 'blood' ? ('activity' as const) : ('clipboard' as const);
-            const items = reportBuckets[reportsTab];
+          {reportsTab !== 'consult' && !reportsQ.isLoading && !reportsQ.isError ? (() => {
+            const tab = reportsTab as 'qhp' | 'blood' | 'medical';
+            const accent = tab === 'qhp' ? C.gold : tab === 'blood' ? C.blue : C.purple;
+            const icon = tab === 'qhp' ? ('heart' as const) : tab === 'blood' ? ('activity' as const) : ('clipboard' as const);
+            const items = reportBuckets[tab];
 
             if (items.length === 0) {
               return (
@@ -5020,8 +5359,10 @@ export function ClientDetail() {
               const catColor = s.category === 'rehab' ? C.purple : C.blue;
               const viewOpen = openClientSession === i;
               const aiOpen = openClientAi === i;
+              const voiceOpen = openClientVoice === i;
+              const voiceNotes = Array.isArray(s.voice_notes) ? s.voice_notes : [];
               return (
-                <View key={s.id ?? i} style={{ borderRadius: 16, backgroundColor: 'rgba(0,0,0,0.22)', borderWidth: 1, borderColor: viewOpen || aiOpen ? hexA(C.orange, 0.28) : 'rgba(255,255,255,0.07)', overflow: 'hidden' }}>
+                <View key={s.id ?? i} style={{ borderRadius: 16, backgroundColor: 'rgba(0,0,0,0.22)', borderWidth: 1, borderColor: viewOpen || aiOpen || voiceOpen ? hexA(C.orange, 0.28) : 'rgba(255,255,255,0.07)', overflow: 'hidden' }}>
                   <View style={{ padding: 14, gap: 10 }}>
                     <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 9 }}>
                       <View style={{ flex: 1 }}>
@@ -5056,7 +5397,18 @@ export function ClientDetail() {
                           <Text style={{ fontFamily: F.bodySemi, fontSize: 13, color: C.blue }}>AI</Text>
                         </Pressable>
                       ) : null}
+                      {voiceNotes.length ? (
+                        <Pressable
+                          onPress={() => setOpenClientVoice(voiceOpen ? null : i)}
+                          accessibilityRole="button" accessibilityLabel={`Play ${voiceNotes.length} voice notes`}
+                          style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 11, borderRadius: 12, borderWidth: 1, borderColor: hexA(C.purple, 0.35), backgroundColor: voiceOpen ? hexA(C.purple, 0.14) : hexA(C.purple, 0.06) }}
+                        >
+                          <Icon name="mic" size={14} color={C.purple} strokeWidth={2.2} />
+                          <Text style={{ fontFamily: F.bodySemi, fontSize: 13, color: C.purple }}>Play{voiceNotes.length > 1 ? ` · ${voiceNotes.length}` : ''}</Text>
+                        </Pressable>
+                      ) : null}
                     </View>
+                    {voiceOpen && voiceNotes.length ? <SessionVoicePlaylistPlayer notes={voiceNotes} /> : null}
                   </View>
                   {viewOpen ? (
                     <ScrollView nestedScrollEnabled showsVerticalScrollIndicator style={{ maxHeight: 400, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)' }} contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: 14, gap: 9, paddingTop: 12 }}>
@@ -5287,6 +5639,8 @@ export function ClientDetail() {
         onClose={() => setBloodDetail(null)}
       />
       <QhpReportSheet report={qhpDetail?.row ?? null} label={qhpDetail?.label} onClose={() => setQhpDetail(null)} />
+      <ConsultAiSheet consult={consultDetail} onClose={() => setConsultDetail(null)} />
+      <CyclePopup info={cycleOpen && cycle ? { name: clientName, cycle } : null} onClose={() => setCycleOpen(false)} />
     </Page>
   );
 }
@@ -5986,6 +6340,7 @@ const ExerciseCard = React.memo(function ExerciseCard(props: ExerciseCardProps) 
   );
 });
 
+const HYDRATION = '#38BDF8'; // the hydration card's accent (5 Oct 2026)
 export function Workout() {
   const { modality, set, selectedClientId, selectedClientName, workoutScheduleId, editingOutboxId, back, canGoBack, go } = useStore();
   const insets = useSafeAreaInsets();
@@ -6002,6 +6357,10 @@ export function Workout() {
   const [tplSaveMode, setTplSaveMode] = React.useState(false);
   const [tplName, setTplName] = React.useState('');
   const healthQ = useClientHealthCheck(selectedClientId);
+  // Cycle phase on the health check-in popup (25 Sep 2026); eligible women only, else nothing.
+  const cycleQ = useClientCycleStatus(selectedClientId ? [selectedClientId] : []);
+  const cycle = selectedClientId ? cycleQ.data?.[selectedClientId] ?? null : null;
+  const [cycleOpen, setCycleOpen] = React.useState(false);
   const saveHealthM = useSaveHealthData();
   const health = healthQ.data;
   // Zone 2 cardio (web SleepNutritionPromptDialog block): if this week's goal has a
@@ -6016,7 +6375,7 @@ export function Workout() {
   // Health data entered while offline — satisfies the gate locally and syncs
   // inside the same outbox item as the workout log.
   const [offlineHealth, setOfflineHealth] = React.useState<HealthDataInput | null>(null);
-  const serverGateOk = !!health && !(health.sleepMissing || health.nutritionMissing || health.stepsMissing);
+  const serverGateOk = !!health && !(health.sleepMissing || health.nutritionMissing || health.stepsMissing || health.hydrationMissing);
   // Offline with nothing cached: the gate STILL applies — sleep/nutrition/steps
   // must be entered before the log can be saved (no offline loophole).
   const healthUnknown = !health && !isOnline;
@@ -6025,6 +6384,33 @@ export function Workout() {
   const healthLoading = healthQ.isLoading && healthQ.fetchStatus === 'fetching';
 
   const [healthOpen, setHealthOpen] = React.useState(false);
+  // The client's last session voice notes, shown at the end of the health check-in popup (5 Oct 2026).
+  const latestVoiceQ = useClientsLatestVoiceNotes(selectedClientId ? [selectedClientId] : [], healthOpen);
+  const latestVoice = selectedClientId ? latestVoiceQ.data?.[selectedClientId] ?? null : null;
+  // Listen gate (user, 9 Oct 2026): a session logged from Today's Roster first
+  // needs the client's spoken summaries heard: this week's training every day,
+  // the health context whenever a new report rebuilt it. Roster-opened logs
+  // only, online only, never while editing a queued log; fails open when the
+  // row cannot be read (no summary = nothing to require).
+  const { session: authSession, dbRole: authRole } = useAuth();
+  const listenEligible = !!workoutScheduleId && !editingOutboxId && isOnline;
+  const summaryQ = useClientHealthSummary(selectedClientId, listenEligible);
+  const [listenDone, setListenDone] = React.useState(false);
+  React.useEffect(() => { setListenDone(false); }, [selectedClientId, workoutScheduleId]);
+  const listenRequired = listenEligible && !listenDone && !!summaryQ.data && gateDue(listenGate(summaryQ.data, authSession?.user?.id ?? null));
+  // Session timer (13 Oct 2026): a log whose health data is already complete starts its
+  // timer on entry (gate 'skipped'); when the check-in sheet has to open, its Save starts
+  // it instead (gate 'saved'). An existing start for the same client and IST day is kept,
+  // so backing out and returning never restarts it. Editing a queued log has no timer.
+  const timerEntryRef = React.useRef<string | null>(null);
+  const lastTimingRef = React.useRef<SessionTiming | null>(null);
+  React.useEffect(() => {
+    if (!selectedClientId || editingOutboxId || !healthQ.isSuccess) return;
+    const key = `${selectedClientId}:${workoutScheduleId ?? ''}`;
+    if (timerEntryRef.current === key) return;
+    timerEntryRef.current = key;
+    if (serverGateOk) startTimer(selectedClientId, workoutScheduleId ?? null, 'skipped').catch(() => {});
+  }, [selectedClientId, workoutScheduleId, editingOutboxId, healthQ.isSuccess, serverGateOk]);
   // Same Android new-arch rule as the pair picker: dismiss the keyboard and let
   // it settle BEFORE unmounting a Modal that holds a focused TextInput.
   const closeHealthSheet = React.useCallback(() => {
@@ -6042,6 +6428,7 @@ export function Workout() {
   const [hSleep, setHSleep] = React.useState('');
   const [hRating, setHRating] = React.useState<number | null>(null);
   const [hSteps, setHSteps] = React.useState('');
+  const [hHydration, setHHydration] = React.useState(''); // litres, 5 Oct 2026
   const saveHealth = async () => {
     const payload: HealthDataInput = {
       clientId: selectedClientId as string,
@@ -6050,26 +6437,37 @@ export function Workout() {
       scheduledHours: health?.scheduledHours ?? 8,
       nutritionRating: hRating,
       stepsCount: hSteps.trim() ? Number(hSteps) : null,
+      hydrationLitres: hHydration.trim() ? Number(hHydration) : null,
+      // The check-in belongs to the WORKOUT day (today), stamped now at entry time so an
+      // offline item that drains tomorrow still lands on today (iOS parity, 24 Sep 2026).
+      logDate: localToday(),
     };
+    // The check-in Save is the session's start (session timer, 13 Oct 2026).
+    const startNow = () => { if (selectedClientId) startTimer(selectedClientId, workoutScheduleId ?? null, 'saved').catch(() => {}); };
     if (!getIsOnline()) {
       // Same required fields as online; the data rides along in the outbox
       // payload and syncs right before the workout log.
       setOfflineHealth(payload);
       closeHealthSheet();
+      startNow();
       return;
     }
     try {
       await saveHealthM.mutateAsync(payload);
       closeHealthSheet();
+      startNow();
     } catch (e: any) {
       if (/network request failed|network error|failed to fetch|fetch failed|timeout/i.test(String(e?.message))) {
         setOfflineHealth(payload);
         closeHealthSheet();
+        startNow();
       }
       /* other errors shown in dialog */
     }
   };
-  const healthValid = hSleep.trim() !== '' && hRating != null && hSteps.trim() !== '';
+  // Hydration is required like the other three once the column is live (health?.hydrationSupported !== false).
+  const hydrationAsked = health?.hydrationSupported !== false;
+  const healthValid = hSleep.trim() !== '' && hRating != null && hSteps.trim() !== '' && (!hydrationAsked || hHydration.trim() !== '');
   const [sessionName, setSessionName] = React.useState('');
   const [exercises, setExercisesRaw] = React.useState<WExercise[]>([]);
   // Every write flushes the debounced SetInput edits FIRST, so a template load,
@@ -6088,6 +6486,9 @@ export function Workout() {
   const exDbQ = useExerciseDb(modality || 'strength');
   const [remark, setRemark] = React.useState('');
   const [rpe, setRpe] = React.useState<number | null>(null);
+  // Voice notes (30 Sep 2026): durable local takes, queued behind the log on submit.
+  const [voiceTakes, setVoiceTakes] = React.useState<PendingVoiceTake[]>([]);
+  const [voiceRecording, setVoiceRecording] = React.useState(false);
   const [done, setDone] = React.useState(false);
   const [savedOffline, setSavedOffline] = React.useState(false);
   // Local-first pipeline result: 'synced' only after the REAL DB insert succeeded;
@@ -6178,9 +6579,9 @@ export function Workout() {
   // same rule — A's exercises can never overwrite B's saved work again.
   const draftKeyFor = (cid: string) => `workout-draft:${trainerId}:${cid}`;
   const snapshotFormTo = (cid: string) => {
-    const meaningful = exercises.some((e) => e.name.trim()) || sessionName.trim() || remark.trim();
+    const meaningful = exercises.some((e) => e.name.trim()) || sessionName.trim() || remark.trim() || voiceTakes.length > 0;
     if (!meaningful || !trainerId) return;
-    KvStorage.setItem(draftKeyFor(cid), JSON.stringify({ sessionName, exercises, remark, rpe, modality, customModalityName })).catch(() => {});
+    KvStorage.setItem(draftKeyFor(cid), JSON.stringify({ sessionName, exercises, remark, rpe, modality, customModalityName, voiceTakes })).catch(() => {});
   };
   /* Restore `cid`'s own draft if it has real content; otherwise carry the given
      selection over with values cleared. Marks the draft-restore effect as
@@ -6479,12 +6880,13 @@ export function Workout() {
       if (!raw) return;
       try {
         const d = JSON.parse(raw);
-        if (!d || (!d.exercises?.length && !d.sessionName && !d.remark)) return;
+        if (!d || (!d.exercises?.length && !d.sessionName && !d.remark && !d.voiceTakes?.length)) return;
         if (d.modality && d.modality !== modality) { prevModalityRef.current = d.modality; set({ modality: d.modality }); }
         setSessionName(d.sessionName ?? '');
         setExercises(Array.isArray(d.exercises) ? d.exercises : []);
         setRemark(d.remark ?? '');
         if (d.rpe != null) setRpe(d.rpe);
+        if (Array.isArray(d.voiceTakes)) setVoiceTakes(d.voiceTakes.filter((t: any) => t && typeof t.uri === 'string'));
         if (d.customModalityName) setCustomModalityName(d.customModalityName);
       } catch { /* corrupt draft — ignore */ }
     }).catch(() => {});
@@ -6492,7 +6894,7 @@ export function Workout() {
   // Newest form state, kept in a ref so a flush can serialise it WITHOUT this
   // render having to stringify anything (assignment only — no work per keystroke).
   const draftStateRef = React.useRef<any>(null);
-  draftStateRef.current = { sessionName, exercises, remark, rpe, modality, customModalityName };
+  draftStateRef.current = { sessionName, exercises, remark, rpe, modality, customModalityName, voiceTakes };
   const draftKeyRef = React.useRef<string | null>(null);
   draftKeyRef.current = draftKey;
   const draftDirtyRef = React.useRef(false);
@@ -6503,7 +6905,7 @@ export function Workout() {
   }, []);
   React.useEffect(() => {
     if (!draftKey || done || editingOutboxId) return; // edits live in the outbox item, not the draft
-    const meaningful = exercises.some((e) => e.name.trim()) || sessionName.trim() || remark.trim();
+    const meaningful = exercises.some((e) => e.name.trim()) || sessionName.trim() || remark.trim() || voiceTakes.length > 0;
     if (!meaningful) return; // never overwrite a good draft with an empty form
     // SQLite draft (expo-sqlite kv-store), TRULY debounced: the cleanup only cancels
     // the pending timer — it must NOT write, or every keystroke would pay a full
@@ -6539,7 +6941,7 @@ export function Workout() {
   const incompleteExercises = isActivityModality ? [] : exercises.filter((e) => exHasData(e) && e.sets.some((s) => setIncomplete(e, s)));
   const allExercisesComplete = incompleteExercises.length === 0;
   const customNameMissing = isCustomModality && !customModalityName.trim();
-  const canSubmit = !!selectedClientId && !!trainerId && hasValidContent && allExercisesComplete && rpe != null && !customNameMissing && !saving && !gateBlocking && !healthLoading && !gateBlocked;
+  const canSubmit = !!selectedClientId && !!trainerId && hasValidContent && allExercisesComplete && rpe != null && !customNameMissing && !saving && !gateBlocking && !healthLoading && !gateBlocked && !voiceRecording && !listenRequired;
 
   // Post-save timers ("Saved ✓" → back, or → partner's leg) live in a ref so a
   // back tap inside the window, or an unmount, cancels them: an orphaned goBack()
@@ -6564,17 +6966,20 @@ export function Workout() {
   // the trainer fills the three fields and lands right back on the unlocked form.
   const autoOpened = React.useRef(false);
   React.useEffect(() => {
-    if (gateBlocking && !autoOpened.current) {
+    // The listen gate goes first; the health sheet opens once it is cleared.
+    if (gateBlocking && !listenRequired && !autoOpened.current) {
       autoOpened.current = true;
       setHSleep(health?.sleepHours != null ? String(health.sleepHours) : '');
       setHRating(health?.nutritionRating ?? null);
       setHSteps(health?.stepsCount != null ? String(health.stepsCount) : '');
+      setHHydration(health?.hydrationLitres != null ? String(health.hydrationLitres) : '');
       setHealthOpen(true);
     }
-  }, [gateBlocking]);
+  }, [gateBlocking, listenRequired]);
 
   const missingHint = gateBlocked
     ? `Approved ${modLabel} plan required — limit of 3 plan-less sessions reached`
+    : listenRequired ? "Listen to the client's summaries first"
     : !gateBlocking && !saving && !done
     ? (!hasValidContent ? (isActivityModality ? 'Mark at least one activity as completed' : 'Add an exercise with reps or load to submit')
       : !allExercisesComplete ? `Fill ${incompleteExercises[0].measurement === 'duration' ? 'duration' : 'reps'} for every set — “${incompleteExercises[0].name}” is incomplete (load is optional for bodyweight)`
@@ -6603,6 +7008,9 @@ export function Workout() {
         setPartnerPlan({ groupId: partnerPlan.groupId, next: null });
         setPartnerAsked(true);
         set({ selectedClientId: next.id, selectedClientName: next.name, workoutScheduleId: null });
+        // The partner's leg shares the first leg's start; its end is its own submit.
+        const firstLeg = lastTimingRef.current;
+        startTimer(next.id, null, firstLeg?.gate ?? 'skipped', firstLeg?.started_at).catch(() => {});
         setDone(false); setSavedOffline(false); setSyncError(null);
         aerobicsPopulatedRef.current = null;
         activityPopulatedRef.current = null;
@@ -6647,11 +7055,13 @@ export function Workout() {
       // never reach the outbox (offline) or the server (online).
       const submitExercises = exercisesRef.current.filter(exHasData);
       let itemId: string;
+      let notesSessionId: string | null = null; // the workout_session_id the voice notes attach to
       if (editingOutboxId) {
         // Edit-in-place: the queued item keeps its id, session id and ORIGINAL
         // sessionDate/createdAt — only the editable fields change.
         const existing = getOutboxItem(editingOutboxId);
         const base = (existing?.payload ?? {}) as WorkoutLogOutboxPayload;
+        notesSessionId = base.sessionId ?? null;
         const updated = await updateOutboxItem(editingOutboxId, {
           label,
           payload: { ...base, sessionName: sessionName.trim() || modLabel, modality: effectiveModality, exercises: submitExercises, remark, rpe, clientName },
@@ -6667,6 +7077,9 @@ export function Workout() {
       } else {
         // Original device timestamp + pre-generated id: a late sync keeps THIS
         // moment as the log time, and retries can never duplicate the session.
+        // The session timer ends here; the json rides in the payload as captured.
+        const timed = await finishTimer(selectedClientId as string, authRole ?? 'trainer');
+        lastTimingRef.current = timed?.timing ?? null;
         const payload = {
           trainerId,
           clientId: selectedClientId as string,
@@ -6681,12 +7094,36 @@ export function Workout() {
           sessionId: uuidv4(),
           sessionDate: new Date().toISOString().slice(0, 10),
           health: offlineHealth,
+          sessionTiming: timed?.timing ?? null,
         };
         const item = await enqueueOutbox('workout-log', label, payload, { autoDrain: false });
         itemId = item.id;
+        notesSessionId = payload.sessionId;
+      }
+      // Voice notes ride behind the log as their own queue items (same on-disk order,
+      // so a drain always lands the session before its notes).
+      const noteItemIds: string[] = [];
+      if (notesSessionId) {
+        for (const t of voiceTakes) {
+          const it = await enqueueOutbox('session-voice-note', `${clientName} · voice note`, {
+            workoutSessionId: notesSessionId, clientId: selectedClientId as string, userId: trainerId,
+            uri: t.uri, durationMs: t.durationMs, source: 'workout_form',
+          }, { autoDrain: false });
+          noteItemIds.push(it.id);
+        }
       }
       // From here the log is durable on-device. Now try the real sync.
       const res = await submitItem(itemId);
+      if (res.status === 'failed') {
+        // The log was rejected: its notes must not sit in the queue waiting for a
+        // session that will never exist. The takes stay in the form with the log.
+        for (const id of noteItemIds) await removeOutboxItem(id);
+      } else {
+        for (const id of noteItemIds) await submitItem(id); // synced, or queued for the next drain
+        setVoiceTakes([]); // the files now belong to the queue items
+      }
+      // Synced or queued: the log is durable with its timing, so the start is spent.
+      if (res.status !== 'failed' && selectedClientId) clearTimer(selectedClientId).catch(() => {});
       if (res.status === 'synced') {
         setSavedOffline(false);
         finishAfterSave(false);
@@ -6861,11 +7298,13 @@ export function Workout() {
               {health || offlineHealth ? (
                 <View style={{ flexDirection: 'row', gap: 7 }}>
                   {[
-                    { icon: 'sparkle' as const, col: C.gold, text: `${health?.sleepHours ?? offlineHealth?.hoursSlept ?? '—'}h sleep` },
-                    { icon: 'heart' as const, col: C.green, text: `${health?.nutritionRating ?? offlineHealth?.nutritionRating ?? '—'}/10 diet` },
-                    { icon: 'activity' as const, col: C.blue, text: `${health?.stepsCount ?? offlineHealth?.stepsCount ?? '—'} steps` },
+                    { id: 'sleep', icon: 'sparkle' as const, col: C.gold, text: `${health?.sleepHours ?? offlineHealth?.hoursSlept ?? '—'}h sleep` },
+                    { id: 'diet', icon: 'heart' as const, col: C.green, text: `${health?.nutritionRating ?? offlineHealth?.nutritionRating ?? '—'}/10 diet` },
+                    { id: 'steps', icon: 'activity' as const, col: C.blue, text: `${health?.stepsCount ?? offlineHealth?.stepsCount ?? '—'} steps` },
+                    // Steps and water share the icon, so the key is the chip's own id (duplicate-key warning, 13 Oct 2026).
+                    ...(hydrationAsked ? [{ id: 'water', icon: 'activity' as const, col: HYDRATION, text: `${health?.hydrationLitres ?? offlineHealth?.hydrationLitres ?? '—'} L water` }] : []),
                   ].map((c) => (
-                    <View key={c.icon} style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 8, borderRadius: 11, backgroundColor: hexA(c.col, 0.07), borderWidth: 1, borderColor: hexA(c.col, 0.2) }}>
+                    <View key={c.id} style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 8, borderRadius: 11, backgroundColor: hexA(c.col, 0.07), borderWidth: 1, borderColor: hexA(c.col, 0.2) }}>
                       <Icon name={c.icon} size={12} color={c.col} strokeWidth={2} />
                       <Text numberOfLines={1} style={{ fontFamily: F.bodySemi, fontSize: 11.5, color: c.col }}>{c.text}</Text>
                     </View>
@@ -7070,6 +7509,7 @@ export function Workout() {
                 setHSleep(health?.sleepHours != null ? String(health.sleepHours) : '');
                 setHRating(health?.nutritionRating ?? null);
                 setHSteps(health?.stepsCount != null ? String(health.stepsCount) : '');
+                setHHydration(health?.hydrationLitres != null ? String(health.hydrationLitres) : '');
                 setHealthOpen(true);
               }}
               style={{ width: '100%', marginTop: 4 }}
@@ -7173,6 +7613,24 @@ export function Workout() {
             );
           })()}
           <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginVertical: 2 }} />
+          {/* Voice notes (30 Sep 2026): spoken notes about this session, saved with the
+              log (queued behind it), playable as one audio on the client's Sessions list. */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <View style={{ flex: 1 }}>
+              <Mono style={{ fontSize: 10, letterSpacing: 1.2, color: C.mono2 }}>VOICE NOTES</Mono>
+              <Body style={{ fontSize: 11, color: C.muted3, marginTop: 2 }}>Speak your notes about this session (optional)</Body>
+            </View>
+            {voiceTakes.length ? <Badge text={`${voiceTakes.length} recorded`} color={C.purple} /> : null}
+          </View>
+          <VoiceNotesComposer
+            takes={voiceTakes}
+            onAdd={(t) => setVoiceTakes((x) => [...x, t])}
+            onRemove={(uri) => { discardTake(uri); setVoiceTakes((x) => x.filter((t) => t.uri !== uri)); }}
+            onRecordingChange={setVoiceRecording}
+            disabled={saving}
+            hint="Up to 5 notes, 5 minutes each. Saved with the session; you can add more from Today's Roster."
+          />
+          <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginVertical: 2 }} />
           <Mono style={{ fontSize: 10, letterSpacing: 1.2, color: C.mono2 }}>SESSION REMARKS</Mono>
           <TextInput
             value={remark}
@@ -7238,7 +7696,7 @@ export function Workout() {
           (frozen screen), and interrupting the health/templates/picker forms is
           bad UX anyway. partnerAsked stays false, so the prompt simply appears
           the moment the other modal closes. */}
-      <Modal visible={partnerPromptVisible && coupleReady && !healthOpen && !templatesOpen && !pairPickerOpen && !dupOpen} transparent animationType="fade" onRequestClose={() => setPartnerAsked(true)}>
+      <Modal visible={partnerPromptVisible && coupleReady && !healthOpen && !templatesOpen && !pairPickerOpen && !dupOpen && !listenRequired} transparent animationType="fade" onRequestClose={() => setPartnerAsked(true)}>
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', alignItems: 'center', justifyContent: 'center', padding: 22 }}>
           <View style={{ width: '100%', maxWidth: 350, backgroundColor: '#12100E', borderWidth: 1, borderColor: hexA(C.purple, 0.3), borderRadius: 20, padding: 20, gap: 13 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
@@ -7358,6 +7816,15 @@ export function Workout() {
       </Modal>
 
       {/* Health data dialog */}
+      {/* Listen gate (9 Oct 2026): the due summaries are heard before the health check-in and the log. One Modal at a time. */}
+      <ListenGateSheet
+        visible={listenRequired && !healthOpen && !templatesOpen && !pairPickerOpen && !dupOpen}
+        clientId={selectedClientId}
+        clientName={clientName}
+        onContinue={() => setListenDone(true)}
+        onLeave={() => goBackRef.current()}
+      />
+
       <Modal visible={healthOpen} transparent animationType="slide" onRequestClose={closeHealthSheet}>
         <Pressable onPress={() => !saveHealthM.isPending && closeHealthSheet()} accessibilityRole="button" accessibilityLabel="Close" style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' }}>
           <Pressable onPress={() => {}} accessible={false} accessibilityViewIsModal style={{ maxHeight: Math.min(winH * 0.9, winH - kbH - insets.top - 12), backgroundColor: '#0E0A09', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 14, paddingBottom: (kbH > 0 ? 12 : insets.bottom + 18), marginBottom: kbH }}>
@@ -7379,6 +7846,21 @@ export function Workout() {
                 <Icon name="close" size={14} color="#B8B2AC" strokeWidth={2.3} />
               </Pressable>
             </View>
+
+            {cycle ? (
+              <ReplayMask style={{ marginBottom: 12 }}>
+                <Pressable
+                  onPress={() => setCycleOpen(true)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Cycle: ${cycleStatusLine(cycle.status)}. Open details`}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 14, backgroundColor: hexA(cycleColor(cycle.status), 0.07), borderWidth: 1, borderColor: hexA(cycleColor(cycle.status), 0.3) }}
+                >
+                  <CycleChip cycle={cycle} onPress={() => setCycleOpen(true)} />
+                  <Body style={{ flex: 1, fontSize: 12.5, fontFamily: F.bodySemi, color: '#fff' }} numberOfLines={2}>{cycleStatusLine(cycle.status)}</Body>
+                  <Icon name="chevRight" size={13} color={C.muted2} strokeWidth={2.2} />
+                </Pressable>
+              </ReplayMask>
+            ) : null}
 
             <ScrollView ref={healthScrollRef} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 13, paddingBottom: 24 }}>
               {/* Sleep */}
@@ -7455,6 +7937,36 @@ export function Workout() {
                 </View>
               </View>
 
+              {/* Hydration (5 Oct 2026): litres of water, saved to nutrition_tracker.hydration_inputs */}
+              {hydrationAsked ? (
+                <View style={{ padding: 15, borderRadius: 18, backgroundColor: hexA(HYDRATION, 0.05), borderWidth: 1, borderColor: hexA(HYDRATION, 0.2), gap: 12 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
+                    <View style={{ width: 30, height: 30, borderRadius: 10, backgroundColor: hexA(HYDRATION, 0.13), alignItems: 'center', justifyContent: 'center' }}>
+                      <Icon name="activity" path="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11Z" size={15} color={HYDRATION} strokeWidth={2} />
+                    </View>
+                    <Body style={{ flex: 1, fontSize: 14.5, fontFamily: F.bodySemi, color: '#fff' }}>Hydration</Body>
+                    <Mono style={{ fontSize: 10, color: C.muted3 }}>YESTERDAY</Mono>
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', borderRadius: 13, borderWidth: 1, borderColor: hHydration ? hexA(HYDRATION, 0.4) : 'rgba(255,255,255,0.12)', backgroundColor: 'rgba(0,0,0,0.25)', paddingHorizontal: 14 }}>
+                    <TextInput value={hHydration} onChangeText={(t) => setHHydration(t.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1').slice(0, 4))} onFocus={() => setTimeout(() => healthScrollRef.current?.scrollToEnd({ animated: true }), 120)} keyboardType="decimal-pad" placeholder="e.g. 2.5" placeholderTextColor={C.muted3} style={{ flex: 1, paddingVertical: 12, fontFamily: F.bodySemi, fontSize: 16, color: '#fff' }} />
+                    <Mono style={{ fontSize: 12, color: C.muted2 }}>LITRES</Mono>
+                  </View>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}>
+                    {[['1 L', '1'], ['1.5 L', '1.5'], ['2 L', '2'], ['2.5 L', '2.5'], ['3 L', '3'], ['4 L', '4']].map(([label, v]) => {
+                      const active = hHydration === v;
+                      return (
+                        <Pressable key={v} onPress={() => setHHydration(v)} style={{ paddingVertical: 6, paddingHorizontal: 12, borderRadius: 999, backgroundColor: active ? hexA(HYDRATION, 0.16) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: active ? hexA(HYDRATION, 0.5) : 'rgba(255,255,255,0.1)' }}>
+                          <Text style={{ fontFamily: active ? F.bodyBold : F.body, fontSize: 12.5, color: active ? HYDRATION : C.muted }}>{label}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </View>
+              ) : null}
+
+              {/* Last session voice notes (5 Oct 2026): what the previous trainer said, with date, time and name. */}
+              <LatestVoiceInline latest={latestVoice} loading={latestVoiceQ.isFetching && !latestVoiceQ.data} />
+
               {saveHealthM.isError ? (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12, borderRadius: 12, backgroundColor: hexA(C.red, 0.08), borderWidth: 1, borderColor: hexA(C.red, 0.28) }}>
                   <Icon name="alert" size={14} color={C.red} strokeWidth={2.2} />
@@ -7468,10 +7980,12 @@ export function Workout() {
                   <Text style={{ fontFamily: F.bodyBold, fontSize: 15, color: '#fff' }}>{saveHealthM.isPending ? 'Saving…' : 'Save Health Data'}</Text>
                 </LinearGradient>
               </Pressable>
-              {!healthValid ? <Body style={{ fontSize: 11, color: C.muted3, textAlign: 'center' }}>Enter sleep, nutrition rating, and steps to continue.</Body> : null}
+              {!healthValid ? <Body style={{ fontSize: 11, color: C.muted3, textAlign: 'center' }}>Enter sleep, nutrition rating, steps and hydration to continue.</Body> : null}
             </ScrollView>
           </Pressable>
         </Pressable>
+        {/* Cycle details: mounted inside this sheet's Modal tree (never a sibling Modal). */}
+        <CyclePopup info={cycleOpen && cycle ? { name: clientName, cycle } : null} onClose={() => setCycleOpen(false)} />
       </Modal>
 
       {/* Exercise picker */}
@@ -7821,7 +8335,8 @@ function TemplateBuilderSheet({ trainerId, visible, onClose, onSaved }: { traine
     patchSection(pickerFor, (xs) => xs.some((x) => sameEx(x.name, nm)) ? xs : [...xs, { name: nm, measurement, sets: [{ reps: '', load: '', duration: '', note: '' }], notes: '' }]);
   };
 
-  const hasContent = sections.some((s) => s.exercises.some((e) => e.name.trim() && e.sets.some((st) => st.reps.trim() || st.load.trim() || st.duration.trim())));
+  // Values are optional in a template (25 Sep 2026): one named exercise is enough.
+  const hasContent = sections.some((s) => s.exercises.some((e) => e.name.trim()));
   const canSave = !!name.trim() && hasContent && !saveM.isPending;
   const save = async () => {
     if (!canSave) return;
@@ -8243,6 +8758,17 @@ function QhpAssessor() {
   const { session } = useAuth();
   const isTestAccount = session?.user?.email?.startsWith('rn-test-trainer');
   const trainerId = !session ? '' : isTestAccount ? DEV_TRAINER_ID : session.user.id;
+  const navActions = useStoreActions();
+  // Start navigation (14 Oct 2026): only when the client's pin exists; the screen reads the handoff on mount.
+  const startNavigation = (q: import('../lib/qhpQueries').QhpRow) => {
+    if (!q.client_id || q.home_lat == null || q.home_lng == null) return;
+    navTargetRef.current = {
+      assessmentId: q.id, clientId: q.client_id, clientName: q.client_name ?? 'Client',
+      address: q.location || q.lead_address || null, phone: q.client_phone ?? null,
+      lat: q.home_lat, lng: q.home_lng, pinCapturedAt: q.home_captured_at, pinMethod: q.home_method,
+    };
+    navActions.go('qhp-navigate');
+  };
 
   const listsQ = useQhpAssessments(trainerId);
   const permsQ = useQhpPermissions(trainerId);
@@ -8541,7 +9067,17 @@ function QhpAssessor() {
                       </Pressable>
                     </View>
                   ) : null}
+                  {/* Start navigation: only when the client's home pin exists (14 Oct 2026) */}
+                  {q.client_id && q.home_lat != null && q.home_lng != null ? (
+                    <Pressable onPress={() => startNavigation(q)} hitSlop={6} accessibilityRole="button" accessibilityLabel={`Start navigation to ${q.client_name ?? 'the client'}`}
+                      style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 11, borderRadius: 13, marginTop: 2, backgroundColor: hexA(C.orange, pressed ? 0.26 : 0.14), borderWidth: 1, borderColor: hexA(C.orange, 0.5) })}>
+                      <Icon name="map" size={14} color={C.orange} strokeWidth={2.2} />
+                      <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: C.orange }}>Start navigation</Text>
+                    </Pressable>
+                  ) : null}
                 </View>
+
+                <QhpNotesBox ops={q.ops_notes} notes={q.notes} />
 
                 {q.reschedule_status === 'pending' ? <Badge text="Reschedule pending review" color={C.gold} /> : null}
                 {q.reschedule_status === 'rejected' ? <Badge text="Reschedule rejected" color={C.red} /> : null}
@@ -8661,6 +9197,7 @@ function QhpAssessor() {
                 <Body style={{ fontSize: 11.5, color: C.muted2, lineHeight: 17 }}>
                   {[qhpDate(q.assessment_date), qhpTime(q.assessment_time), q.location ? `📍 ${q.location}` : null].filter(Boolean).join('  ·  ')}
                 </Body>
+                <QhpNotesBox ops={q.ops_notes} notes={q.notes} />
                 {q.has_ai ? (
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 10, backgroundColor: hexA(C.blue, 0.08), borderWidth: 1, borderColor: hexA(C.blue, 0.22), alignSelf: 'flex-start' }}>
                     <Icon name="sparkle" size={11} color={C.blue} fill={C.blue} strokeWidth={0} />
@@ -9147,6 +9684,36 @@ function QhpAssessor() {
 }
 
 /* ---------- Schedule QHP — live bottom-sheet (web CoachAssessmentSchedulingForm contract) ---------- */
+/* Assessor-facing notes on a QHP card. `ops` is coach_assessment.qhp_pref_notes (the
+   Ops booking note copied at scheduling); `notes` is the scheduler's own note, shown
+   only when it says something the Ops note does not (the schedule sheet prefills the
+   Ops note into it). Web MyAssessmentsTab shows "Notes from Ops" the same way. */
+function QhpNotesBox({ ops, notes }: { ops?: string | null; notes?: string | null }) {
+  const o = ops?.trim() || '';
+  const n = notes?.trim() || '';
+  const other = n && n !== o ? n : '';
+  if (!o && !other) return null;
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 9, paddingVertical: 10, paddingHorizontal: 11, borderRadius: 11, backgroundColor: hexA(C.gold, 0.07), borderWidth: 1, borderColor: hexA(C.gold, 0.28) }}>
+      <View style={{ marginTop: 1 }}><Icon name="file" size={13} color={C.gold} strokeWidth={2} /></View>
+      <View style={{ flex: 1, gap: 7 }}>
+        {o ? (
+          <View>
+            <Mono style={{ fontSize: 8.5, letterSpacing: 0.8, color: C.gold }}>NOTES FROM OPS</Mono>
+            <Body style={{ fontSize: 12, color: C.ink2, lineHeight: 17, marginTop: 3 }}>{o}</Body>
+          </View>
+        ) : null}
+        {other ? (
+          <View>
+            <Mono style={{ fontSize: 8.5, letterSpacing: 0.8, color: C.muted2 }}>NOTES</Mono>
+            <Body style={{ fontSize: 12, color: C.ink3, lineHeight: 17, marginTop: 3 }}>{other}</Body>
+          </View>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
 function ScheduleQhpSheet({ visible, onClose, scheduledBy, prefill }: { visible: boolean; onClose: () => void; scheduledBy: string; prefill?: { clientId: string; clientName: string; date?: string | null; time?: string | null; location?: string | null; notes?: string | null; altDate?: string | null; altTime?: string | null; slaDeadlineIso?: string | null; clearHold?: boolean } }) {
   const insets = useSafeAreaInsets();
   const assessorsQ = useQhpAssessors();
@@ -9260,6 +9827,8 @@ function ScheduleQhpSheet({ visible, onClose, scheduledBy, prefill }: { visible:
         time: `${String(h24).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`,
         location: loc,
         notes,
+        // The Ops note as Ops wrote it, not the editable Notes box (web parity).
+        opsNotes: prefill?.notes ?? null,
         slaDeadlineIso: prefill?.slaDeadlineIso ?? null,
         delayReason: slaBreached ? delayReason.trim() : null,
         clearHoldForClient: prefill?.clearHold ?? false,

@@ -1,7 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../auth';
 import { supabase } from './supabase';
+import { computeEssentials, EssentialsStatus } from './essentials';
 import { invokeWithTimeout, uploadWithTimeout, withTimeout, NET_MS } from './withTimeout';
+import { parseVoiceNotes, SessionVoiceNote } from './sessionVoiceTypes';
 import { serverNow, syncServerClock } from './managerChatQueries';
 import { ROSTER_FRESH_START_ISO } from './therapistQueries';
 
@@ -64,6 +66,10 @@ export type RosterRow = {
   is_open_past: boolean;
   /** Client ack on the logged training_sessions row: true/false once logged, null when not logged. */
   acknowledged: boolean | null;
+  /** Trainer voice notes on the logged training_sessions row (30 Sep 2026); [] until logged. */
+  voice_notes: SessionVoiceNote[];
+  /** Essentials 30-day pass status (30 Sep 2026); null for every other subscription. */
+  essentials: EssentialsStatus | null;
   /** clients.brb_location captured → the distance/map icon can be offered. */
   has_home_location: boolean;
   home_lat: number | null;
@@ -115,7 +121,7 @@ export type ManagerLeaderboard = {
 // Today's roster — composed exactly like the web TodayRosterCard:
 //   [ Open Past (overdue, no action) ] + [ Pending Reschedule Carry-Over ] + [ Today's day list ]
 const ROSTER_SELECT =
-  'id, scheduled_datetime, session_type, modality, status, client_id, workout_session_id, reschedule_request, reschedule_requested_at, reschedule_status, reschedule_proposed_date, reschedule_proposed_time, missed_remarks, paid_cancellation, admin_approval, clients:client_id(first_name, last_name, status, brb_location)';
+  'id, scheduled_datetime, session_type, modality, status, client_id, workout_session_id, reschedule_request, reschedule_requested_at, reschedule_status, reschedule_proposed_date, reschedule_proposed_time, missed_remarks, paid_cancellation, admin_approval, clients:client_id(first_name, last_name, status, brb_location, subscription_type, essentials_extensions)';
 /* Fresh start (1 Sept 2026 IST): unlogged sessions from BEFORE the cutoff stay in
    the DB but out of Today's Roster — the August backlog was never going to be
    remarked one by one. Same rule the doctor and therapist rosters already use;
@@ -141,6 +147,8 @@ const mapRosterRow = (s: any, isOpenPast: boolean): RosterRow => ({
   admin_approval: s.admin_approval ?? null,
   is_open_past: isOpenPast,
   acknowledged: null,
+  voice_notes: parseVoiceNotes(s.voice_notes),
+  essentials: computeEssentials(s.clients?.subscription_type, s.clients?.essentials_extensions),
   has_home_location: s.clients?.brb_location != null,
   home_lat: isFinite(Number(s.clients?.brb_location?.lat)) ? Number(s.clients.brb_location.lat) : null,
   home_lng: isFinite(Number(s.clients?.brb_location?.lng)) ? Number(s.clients.brb_location.lng) : null,
@@ -167,7 +175,18 @@ export function useTodayRoster(trainerId: string, dayOffset = 0) {
       const endOfToday = istDayEndUtcISO(targetDay);
       const noRows = Promise.resolve({ data: [], error: null } as any);
 
-      const [dayR, openPastR, carryR, loggedR] = await Promise.all([
+      // The day's LOGGED workouts. `voice_notes` arrived on 30 Sep 2026 (migration
+      // 20260930100000); until it is run live the select is retried without it, so
+      // the roster never blanks over a missing column.
+      const LOGGED_BASE = 'id, scheduled_at, session_type, status, workout_session_id, schedule_session_id, client_id, session_acknowledged_at';
+      const loggedQuery = (withVoice: boolean) => supabase.from('training_sessions')
+          .select(`${LOGGED_BASE}${withVoice ? ', voice_notes' : ''}, clients:client_id(first_name, last_name, status, brb_location, subscription_type, essentials_extensions)`)
+          .eq('trainer_id', trainerId)
+          .gte('scheduled_at', startOfToday).lte('scheduled_at', endOfToday)
+          .not('workout_session_id', 'is', null)
+          .neq('status', 'parked')
+          .order('scheduled_at', { ascending: true });
+      const [dayR, openPastR, carryR, loggedR0] = await Promise.all([
         // The day's list (keep cancelled / logged / pending — full activity).
         supabase.from('session_schedule').select(ROSTER_SELECT)
           .eq('trainer_id', trainerId)
@@ -191,15 +210,10 @@ export function useTodayRoster(trainerId: string, dayOffset = 0) {
           .not('reschedule_requested_at', 'is', null).is('reschedule_status', null)
           .order('scheduled_datetime', { ascending: true }),
         // The day's LOGGED workouts — completed training_sessions (may be ad-hoc with no schedule slot).
-        supabase.from('training_sessions')
-          .select('id, scheduled_at, session_type, status, workout_session_id, schedule_session_id, client_id, session_acknowledged_at, clients:client_id(first_name, last_name, status, brb_location)')
-          .eq('trainer_id', trainerId)
-          .gte('scheduled_at', startOfToday).lte('scheduled_at', endOfToday)
-          .not('workout_session_id', 'is', null)
-          .neq('status', 'parked')
-          .order('scheduled_at', { ascending: true }),
+        loggedQuery(true),
       ]);
       if (dayR.error) throw new Error(dayR.error.message);
+      const loggedR = loggedR0.error && (loggedR0.error as any).code === '42703' ? await loggedQuery(false) : loggedR0;
 
       const day = (dayR.data ?? []).filter(notInactiveClient).map((s) => mapRosterRow(s, false));
 
@@ -207,14 +221,18 @@ export function useTodayRoster(trainerId: string, dayOffset = 0) {
       // training_sessions rows, matched back by schedule id or workout id.
       const ackBySchedule = new Map<string, boolean>();
       const ackByWorkout = new Map<string, boolean>();
+      const voiceBySchedule = new Map<string, SessionVoiceNote[]>();
+      const voiceByWorkout = new Map<string, SessionVoiceNote[]>();
       (loggedR.data ?? []).forEach((t: any) => {
         const acked = !!t.session_acknowledged_at;
-        if (t.schedule_session_id) ackBySchedule.set(t.schedule_session_id, acked);
-        if (t.workout_session_id) ackByWorkout.set(t.workout_session_id, acked);
+        const notes = parseVoiceNotes(t.voice_notes);
+        if (t.schedule_session_id) { ackBySchedule.set(t.schedule_session_id, acked); voiceBySchedule.set(t.schedule_session_id, notes); }
+        if (t.workout_session_id) { ackByWorkout.set(t.workout_session_id, acked); voiceByWorkout.set(t.workout_session_id, notes); }
       });
       day.forEach((r) => {
         if (!r.workout_session_id) return; // not logged → ack not applicable
         r.acknowledged = ackBySchedule.get(r.id) ?? ackByWorkout.get(r.workout_session_id) ?? null;
+        r.voice_notes = voiceBySchedule.get(r.id) ?? voiceByWorkout.get(r.workout_session_id) ?? [];
       });
 
       // Merge today's logged workouts that aren't already represented by a schedule row.
@@ -236,6 +254,7 @@ export function useTodayRoster(trainerId: string, dayOffset = 0) {
             reschedule_requested_at: null,
             reschedule_status: null,
             missed_remarks: null,
+            voice_notes: t.voice_notes,
             clients: t.clients,
           }, false);
           row.acknowledged = !!t.session_acknowledged_at;
@@ -1009,7 +1028,7 @@ export function useAddOwnSession() {
       return data;
     },
     onSuccess: () => {
-      ['trainer-roster', 'trainer-month-sessions-v2', 'mgr-plan-sched', 'crm-month-roster'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+      ['trainer-roster', 'trainer-month-sessions-v2', 'mgr-plan-sched', 'crm-month-roster', 'doctor-today-roster'].forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
     },
   });
 }

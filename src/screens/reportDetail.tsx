@@ -5,6 +5,8 @@ import { C, F, hexA } from '../theme';
 import { Icon } from '../icons';
 import { Serif, Body, Mono } from '../components/primitives';
 import { Badge } from './common';
+import type { ClientConsultAi } from '../lib/clientQueries';
+import { type ConsultAINotes, fmtLongDate, timeLabel, istStamp } from '../lib/consultantQueries';
 
 /* ============================================================================
    Report detail sheets — ported from the old web app.
@@ -942,6 +944,78 @@ export function QhpReportSheet({ report, label, onClose }: {
         </>
       )}
       <PhotoViewer uri={photo} onClose={() => setPhoto(null)} />
+    </SheetShell>
+  );
+}
+
+/* ============ Doctor consultation AI summary (trainer client Reports, 25 Sep 2026) ============
+   doctor_consultation_details.ai_notes, read through get_client_consult_ai_summaries.
+   Same sections and order as the consultant's AI summary (consultantUi AiNotesView),
+   drawn on the dark report surface. Read-only. */
+function DotList({ items, color }: { items: string[]; color: string }) {
+  return (
+    <View style={{ gap: 8 }}>
+      {items.map((t, i) => (
+        <View key={i} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 9 }}>
+          <View style={{ marginTop: 7, width: 6, height: 6, borderRadius: 3, backgroundColor: color }} />
+          <Body style={{ flex: 1, fontSize: 13, lineHeight: 19, color: C.ink2 }}>{t}</Body>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+export function ConsultAiSheet({ consult, onClose }: { consult: ClientConsultAi | null; onClose: () => void }) {
+  const n: ConsultAINotes = consult?.ai_notes ?? {};
+  const points = arr(n.summary_points);
+  const flags = arr(n.red_flags);
+  const recs = arr(n.recommendations);
+  const tests = arr(n.tests_suggested);
+  const meds = Array.isArray(n.medications) ? n.medications.filter((m) => s(m?.name)) : [];
+  const when = consult ? [fmtLongDate(consult.consultation_date), `${timeLabel(consult.start_time)} to ${timeLabel(consult.end_time)}`].join('  ·  ') : '';
+  const stamp = istStamp(n.generated_at);
+  return (
+    <SheetShell
+      visible={!!consult}
+      onClose={onClose}
+      accent={C.green}
+      icon="sparkle"
+      title={consult?.doctor_name ? `Consultation with ${consult.doctor_name}` : 'Doctor consultation'}
+      subtitle={when.toUpperCase()}
+    >
+      {s(n.short_summary) ? (
+        <View style={{ padding: 14, borderRadius: 16, backgroundColor: hexA(C.green, 0.08), borderWidth: 1, borderColor: hexA(C.green, 0.25), borderLeftWidth: 3, borderLeftColor: C.green }}>
+          <Mono style={{ fontSize: 8.5, letterSpacing: 0.8, color: C.green, marginBottom: 6 }}>AI SUMMARY</Mono>
+          <Body style={{ fontSize: 14, lineHeight: 21, color: '#fff' }}>{s(n.short_summary)}</Body>
+        </View>
+      ) : null}
+      {points.length ? <SectionCard accent={C.blue} icon="list" title="Summary"><DotList items={points} color={C.blue} /></SectionCard> : null}
+      {s(n.clinical_impression) ? (
+        <SectionCard accent={C.purple} icon="heart" title="Clinical impression">
+          <Body style={{ fontSize: 13, lineHeight: 19, color: C.ink2 }}>{s(n.clinical_impression)}</Body>
+        </SectionCard>
+      ) : null}
+      {flags.length ? <SectionCard accent={C.red} icon="alert" title={`Red flags · ${flags.length}`}><DotList items={flags} color={C.red} /></SectionCard> : null}
+      {meds.length ? (
+        <SectionCard accent={C.gold} icon="clipboard" title="Medications discussed">
+          <View style={{ gap: 8 }}>
+            {meds.map((m, i) => (
+              <View key={i} style={{ padding: 11, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', gap: 4 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <Body style={{ fontSize: 13.5, fontFamily: F.bodySemi, color: '#fff' }}>{s(m.name)}</Body>
+                  {s(m.dosage_note) ? <Badge text={s(m.dosage_note)} color={C.gold} /> : null}
+                </View>
+                {s(m.reason) ? <Body style={{ fontSize: 12.5, lineHeight: 18, color: C.ink3 }}>{s(m.reason)}</Body> : null}
+              </View>
+            ))}
+          </View>
+        </SectionCard>
+      ) : null}
+      {recs.length ? <SectionCard accent={C.green} icon="checks" title="Recommendations"><DotList items={recs} color={C.green} /></SectionCard> : null}
+      {tests.length ? <SectionCard accent={C.blue} icon="activity" title="Tests suggested"><DotList items={tests} color={C.blue} /></SectionCard> : null}
+      <Body style={{ fontSize: 11, lineHeight: 16, color: C.muted3, textAlign: 'center' }}>
+        {`AI summary of the doctor's call${stamp ? `, written ${stamp}` : ''}. Read only; the prescription stays with the doctor and the CRM.`}
+      </Body>
     </SheetShell>
   );
 }

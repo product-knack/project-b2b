@@ -55,19 +55,20 @@ POST /rest/v1/rpc/plan_manager_add_session
   "p_client":   "<client uuid>",
   "p_date":     "YYYY-MM-DD",        // IST date
   "p_time":     "HH:mm",             // IST, from the grid
-  "p_modality": "Strength"
+  "p_modality": "Strength",
+  "p_force":    false                 // optional (default false); true ONLY from the Force create button, see the conflict bullet
 }
 ```
 Server-side guards (raise → show the message): caller must be the team's current manager, OR the physio HOD when the target member's role is `doctor` or `therapist`; the target must be a member of that team.
 
-Response: `{ "schedule_id": "<uuid|null>", "result": "created" | "adopted" | "exists" | "conflict", "replaced_prev": <int> }`
+Response: `{ "schedule_id": "<uuid|null>", "result": "created" | "adopted" | "exists" | "conflict", "replaced_prev": <int>, "conflict"?: { "schedule_id", "trainer_id", "trainer_name", "modality", "status", "logged": bool, "source": "crew" | "roster" }, "force_blocked"?: "logged", "forced"?: bool, "cancelled"?: <same object as conflict> }` (the optional keys since 23 Sep 2026, `odds-app/supabase/crew_add_session_force.sql`).
 
 What the deployed RPC does (context — never reimplement client-side):
 - **exists** — the member already has a crew-created session with that client that day → nothing written. Show: *"{Client} already has a session with this member that day. Use RESCHEDULE on the plan card to change it."* and STOP (no message).
 - **Replace** — stale non-crew UNLOGGED rows for that member+client+day are deleted first (`replaced_prev` counts them); the crew booking supersedes them.
 - **adopted** — an already-LOGGED session with that client today exists → it becomes the card entry (its `schedule_id` is returned); no duplicate row is created. Proceed like success.
 - **created** — a fresh `session_schedule` row: `status 'scheduled'`, notes `Created from Team Messenger day plan (added by manager)`, the picked IST datetime/modality.
-- **conflict** — unique violation on the exact datetime → show *"{Client} already has a session at that exact time."* and STOP (no message).
+- **conflict** — the client already has an ACTIVE session at that exact datetime with ANOTHER trainer (unique index on client + datetime); `conflict` names it. Since 23 Sep 2026 this is a warning, not a dead end: keep the modal open and show, over the form (never a second modal), *"Already booked at that time"* + *"{Client} already has a {modality} session at {h:mm AM/PM} with {Trainer}{ (from a crew plan)}."* + a red box *"FORCE CREATE WILL: Cancel that booking with a remark and schedule {Client} with {MemberFirst} at {time} ({modality}) instead. Both trainers see the change on their rosters."* with buttons **Go back** (return to the form, selections kept) and **Force create** (red). Force create re-sends the SAME call with `"p_force": true`: the RPC cancels the clashing row (`status 'cancelled'`, `canceled_by 'Trainer'`, `cancellation_remark 'Replaced by the team manager: crew session with {Member} at the same time (force add)'`) and creates the session; the reply is `created` with `forced: true` and `cancelled` = the clash object. Then post the `plan_add` message as usual, with `forced: true, replaced_schedule_id, replaced_trainer_id, replaced_trainer_name` added to the payload and the body suffixed *" · replaced {Trainer}'s booking at that time"*. If the reply is `conflict` with `force_blocked: "logged"` (the other trainer already logged that session) show *"Can't force this one. {Trainer} has already logged {Client}'s session at {time}. A logged session is never cancelled. Pick another time."* and STOP. Send `p_force` only on the force path so the call keeps working against a database without the argument.
 - Any thrown error → alert with the server message, STOP.
 
 ### Step 2 — the `plan_add` chat message
@@ -111,7 +112,7 @@ Nothing to build: a DB trigger on `manager_team_messages` INSERT already sends t
 2. HOD sees it on doctor/therapist sections (with Today/Tomorrow choice), and her adds work in manager-owned teams.
 3. Client picker shows only the member's actively-training, non-inactive clients; already-scheduled clients are locked with the reschedule guidance.
 4. Therapist target → modality is exactly "Therapy", pre-selected; other targets get the full union list.
-5. `exists` / `conflict` results show their messages and post NO chat message; `created`/`adopted` post exactly one `plan_add`.
+5. `exists` shows its message and posts NO chat message; `conflict` shows the Force create warning over the form (Go back keeps the picks; Force create re-calls with `p_force: true`, cancels the other trainer's unlogged booking and then posts the `plan_add` with the `forced` fields); `conflict` + `force_blocked: "logged"` shows the "Can't force this one" message and posts nothing; `created`/`adopted` post exactly one `plan_add`.
 6. Adding for a client whose member already logged a session that day returns `adopted` and the card shows that session as LOGGED — never a duplicate row.
 7. The added entry appears: in the team thread (bubble), on the member's section of the day card (for everyone), on the member's own MY DAY PLAN, and on the member's Today's Roster.
 8. HOD-sent adds merge into the card for ALL viewers (member included) — the merge accepts manager AND HOD senders.

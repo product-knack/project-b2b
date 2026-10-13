@@ -4,7 +4,9 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { C, F, hexA, ORANGE_GRAD } from '../theme';
 import { Icon } from '../icons';
 import { Serif, Body, Mono, Card, ProgressBar } from '../components/primitives';
-import { Page, TitleBlock, BackLink, Badge } from './common';
+import { Page, TitleBlock, BackLink, Badge, AnimChip } from './common';
+import { ClientMedicationsTab } from '../components/clientMedications';
+import { ClientHealthSummaryCard } from '../components/clientHealthSummaryCard';
 import { useStore } from '../store';
 import { ManagerTeamChatCard } from './managerChat';
 import { DoctorTodayRoster } from './doctor';
@@ -13,6 +15,12 @@ import {
   useTherapistId, useTherapistClients, useTherapistTodayRoster, useTherapySessions,
   useAddTherapySession, fmtTherapyAt, fmtTherapyTime, TherapistClient, THERAPY_MODALITIES,
 } from '../lib/therapistQueries';
+// Session voice notes (7 Oct 2026): the therapist records while logging and
+// listens on the client's session list, exactly like the trainer.
+import { useAuth } from '../auth';
+import { VoiceNotesComposer, SessionVoicePlaylistPlayer } from '../components/SessionVoice';
+import { discardTake, queueSessionVoiceNote, PendingVoiceTake } from '../lib/sessionVoiceQueries';
+import { startTimer, finishTimer, clearTimer } from '../lib/sessionTiming';
 
 /* ============ Therapist workspace — web /therapist parity ============
    Identity: PURPLE ("Therapy" chip is a purple outline everywhere). Sessions
@@ -51,20 +59,59 @@ function AddTherapySessionSheet({ open, clients, presetClient, onClose }: {
 }) {
   const addM = useAddTherapySession();
   const kb = useKeyboardHeight();
+  const { session } = useAuth();
+  const meId = session?.user?.id ?? '';
   const [clientId, setClientId] = React.useState<string | null>(null);
   const [therapyType, setTherapyType] = React.useState<string | null>(null);
   const [duration, setDuration] = React.useState(60);
   const [note, setNote] = React.useState('');
   const [pickerOpen, setPickerOpen] = React.useState(false);
+  // Voice notes recorded with the log; saved right after the session row lands.
+  const [voiceTakes, setVoiceTakes] = React.useState<PendingVoiceTake[]>([]);
+  const [voiceRecording, setVoiceRecording] = React.useState(false);
   React.useEffect(() => {
-    if (open) { setClientId(presetClient?.id ?? null); setTherapyType(null); setDuration(60); setNote(''); setPickerOpen(false); addM.reset(); }
+    if (open) {
+      setClientId(presetClient?.id ?? null); setTherapyType(null); setDuration(60); setNote(''); setPickerOpen(false); addM.reset();
+      setVoiceTakes((prev) => { prev.forEach((t) => discardTake(t.uri)); return []; });
+      setVoiceRecording(false);
+    }
   }, [open, presetClient?.id]);
   const selName = presetClient?.id === clientId ? presetClient?.name : clients.find((c) => c.clientId === clientId)?.name;
-  const canSave = !!clientId && !!therapyType && note.trim().length > 0 && duration > 0 && !addM.isPending;
-  const save = () => {
+  // Session timer (13 Oct 2026): the sheet has no health gate, so the timer starts when it
+  // opens for a client (preset, or the moment one is picked); the typed duration stays
+  // in duration_minutes and the measured timing goes into session_timing.
+  React.useEffect(() => {
+    if (open && clientId) startTimer(clientId, null, 'skipped').catch(() => {});
+  }, [open, clientId]);
+  const canSave = !!clientId && !!therapyType && note.trim().length > 0 && duration > 0 && !addM.isPending && !voiceRecording;
+  const save = async () => {
     if (!canSave || !clientId || !therapyType) return;
-    addM.mutate({ clientId, durationMinutes: duration, note, therapyType }, {
-      onSuccess: () => onClose(),
+    const takes = voiceTakes;
+    const clientName = selName ?? 'Client';
+    const timed = await finishTimer(clientId, 'therapist');
+    addM.mutate({ clientId, durationMinutes: duration, note, therapyType, sessionTiming: timed?.timing ?? null }, {
+      onSuccess: async (d) => {
+        clearTimer(clientId).catch(() => {});
+        // The session is saved. Voice notes ride behind it through the outbox
+        // (offline-safe); a note the server refuses never undoes the log.
+        const sid = d?.session_id;
+        if (takes.length && sid) {
+          let failed: string | null = null;
+          for (const t of takes) {
+            const r = await queueSessionVoiceNote(
+              { workoutSessionId: sid, clientId, userId: meId, uri: t.uri, durationMs: t.durationMs, source: 'workout_form' },
+              `${clientName} · voice note`,
+            );
+            if (r.status === 'failed') failed = r.error ?? 'The server rejected a voice note.';
+          }
+          setVoiceTakes([]);
+          if (failed) Alert.alert('Session saved, voice note not saved', failed);
+        } else if (takes.length) {
+          takes.forEach((t) => discardTake(t.uri));
+          setVoiceTakes([]);
+        }
+        onClose();
+      },
       onError: (e: any) => Alert.alert('Could not save session', e?.message ?? 'Please try again.'),
     });
   };
@@ -171,6 +218,22 @@ function AddTherapySessionSheet({ open, clients, presetClient, onClose }: {
               </View>
             </View>
 
+            {/* Voice notes (7 Oct 2026): same recorder as the trainer's Add Workout */}
+            <View style={{ gap: 6 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Mono style={{ flex: 1, fontSize: 8.5, letterSpacing: 0.8, color: C.muted3 }}>VOICE NOTES · OPTIONAL</Mono>
+                {voiceTakes.length ? <Badge text={`${voiceTakes.length} recorded`} color={ACC} /> : null}
+              </View>
+              <VoiceNotesComposer
+                takes={voiceTakes}
+                onAdd={(t) => setVoiceTakes((x) => [...x, t])}
+                onRemove={(uri) => { discardTake(uri); setVoiceTakes((x) => x.filter((t) => t.uri !== uri)); }}
+                onRecordingChange={setVoiceRecording}
+                disabled={addM.isPending}
+                hint="Up to 5 notes, 5 minutes each. Saved with the session and played on the client's session list."
+              />
+            </View>
+
             <Pressable onPress={save} disabled={!canSave} style={{ borderRadius: 14, overflow: 'hidden', opacity: canSave ? 1 : 0.5 }}>
               <LinearGradient colors={[hexA(ACC, 0.95), '#6D4AE0']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14 }}>
                 <Icon name="checks" size={15} color="#fff" strokeWidth={2.4} />
@@ -202,7 +265,7 @@ function ClientRow({ c, onPress }: { c: TherapistClient; onPress: () => void }) 
 
 /* ============ A. Dashboard ============ */
 export function TherapistDashboard() {
-  const { go, set } = useStore();
+  const { go, set, openSheet } = useStore();
   const meId = useTherapistId();
   const clientsQ = useTherapistClients(meId);
   const clients = clientsQ.data ?? [];
@@ -229,6 +292,21 @@ export function TherapistDashboard() {
 
       {/* My Crew — therapist sits in a competition team like any member */}
       <ManagerTeamChatCard />
+
+      {/* Emergency Leave (24 Sep 2026): the same app-wide sheet trainers and doctors use.
+          leave_request.trainer_id is simply the therapist's own profile id (RLS: insert own
+          row), and notify-leave-request pushes the CRM team. */}
+      <Pressable onPress={() => openSheet('leave')} accessibilityRole="button" accessibilityLabel="Emergency Leave"
+        style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 11, padding: 12, borderRadius: 15, backgroundColor: hexA(C.red, pressed ? 0.12 : 0.07), borderWidth: 1, borderColor: hexA(C.red, 0.3) })}>
+        <View style={{ width: 36, height: 36, borderRadius: 12, backgroundColor: hexA(C.red, 0.13), borderWidth: 1, borderColor: hexA(C.red, 0.35), alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name="alert" size={16} color={C.red} strokeWidth={2.1} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontFamily: F.bodyBold, fontSize: 13, color: '#fff' }}>Emergency Leave</Text>
+          <Body style={{ fontSize: 11, color: C.muted2, marginTop: 1 }}>Request time off. The CRM team gets notified.</Body>
+        </View>
+        <Icon name="chevRight" size={15} color={C.red} strokeWidth={2.3} />
+      </Pressable>
 
       {/* Today's Roster: the doctor's card, shared. Summary, NEXT badge, distance
           strip, Log Session (opens the therapy log sheet) and the same
@@ -283,6 +361,10 @@ export function TherapistClientDetail() {
   const me = (clientsQ.data ?? []).find((c) => c.clientId === selectedClientId) ?? null;
   const name = me?.name ?? selectedClientName ?? 'Client';
   const [addOpen, setAddOpen] = React.useState(false);
+  // Tabs (5 Oct 2026): the therapy sessions, and the client's medications from QHPs and doctor consultations.
+  const [tab, setTab] = React.useState<'sessions' | 'medications'>('sessions');
+  // Which session's voice notes are open (one player at a time).
+  const [voiceOpenId, setVoiceOpenId] = React.useState<string | null>(null);
   return (
     <Page gap={16}>
       <BackLink label="My Clients" onPress={() => (canGoBack ? back() : go('therapist-clients'))} />
@@ -305,6 +387,22 @@ export function TherapistClientDetail() {
         </Pressable>
       </Card>
 
+      {/* Listen before the session (9 Oct 2026): the spoken weekly + health context summaries */}
+      <ClientHealthSummaryCard clientId={selectedClientId} />
+
+      <View style={{ flexDirection: 'row', gap: 8 }}>
+        {([['sessions', 'Sessions', 'heart'], ['medications', 'Medications', 'clipboard']] as const).map(([id, label, icon]) => (
+          <AnimChip key={id} active={tab === id} onPress={() => setTab(id)} grow
+            style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 9, borderRadius: 12, backgroundColor: tab === id ? hexA(ACC, 0.18) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: tab === id ? hexA(ACC, 0.55) : 'rgba(255,255,255,0.1)' }}>
+            <Icon name={icon} size={13} color={tab === id ? '#fff' : C.muted2} strokeWidth={2.2} />
+            <Text style={{ fontFamily: F.bodySemi, fontSize: 12.5, color: tab === id ? '#fff' : C.muted2 }}>{label}</Text>
+          </AnimChip>
+        ))}
+      </View>
+
+      {tab === 'medications' ? <ClientMedicationsTab clientId={selectedClientId} accent={ACC} /> : null}
+
+      {tab === 'sessions' ? (<>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
         <Icon name="heart" size={13} color={ACC} strokeWidth={2.1} />
         <Mono style={{ flex: 1, fontSize: 9, letterSpacing: 1, color: C.mono2 }}>THERAPY SESSIONS</Mono>
@@ -324,8 +422,20 @@ export function TherapistClientDetail() {
           </View>
           <Body style={{ fontSize: 10.5, color: C.muted3 }}>By {s.therapistName}</Body>
           {s.note ? <Body style={{ fontSize: 12.5, color: C.ink, lineHeight: 18 }}>{s.note}</Body> : null}
+          {s.voiceNotes.length ? (
+            <Pressable
+              onPress={() => setVoiceOpenId((cur) => (cur === s.id ? null : s.id))}
+              accessibilityRole="button" accessibilityLabel={`Play ${s.voiceNotes.length} voice notes`}
+              style={{ alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 7, paddingHorizontal: 11, borderRadius: 999, borderWidth: 1, borderColor: hexA(ACC, 0.35), backgroundColor: hexA(ACC, voiceOpenId === s.id ? 0.16 : 0.07) }}
+            >
+              <Icon name="mic" size={12} color={ACC} strokeWidth={2.2} />
+              <Text style={{ fontFamily: F.bodySemi, fontSize: 11.5, color: ACC }}>Play{s.voiceNotes.length > 1 ? ` · ${s.voiceNotes.length}` : ''}</Text>
+            </Pressable>
+          ) : null}
+          {voiceOpenId === s.id && s.voiceNotes.length ? <SessionVoicePlaylistPlayer notes={s.voiceNotes} /> : null}
         </View>
       ))}
+      </>) : null}
 
       <AddTherapySessionSheet
         open={addOpen}

@@ -25,6 +25,8 @@ export type QhpRow = {
   assessment_time: string | null; // HH:MM:SS
   location: string | null;
   notes: string | null;
+  /** coach_assessment.qhp_pref_notes: the Ops booking note carried over at scheduling (web parity, 23 Sep 2026). */
+  ops_notes: string | null;
   created_at: string | null;
   completed: string | null;
   reschedule_status: string | null;
@@ -38,6 +40,11 @@ export type QhpRow = {
   client_created_at: string | null;
   /** clients.brb_location captured → hide the location-capture pin on QHP cards */
   home_captured: boolean;
+  /** The pin itself (14 Oct 2026): Start navigation shows only when both coordinates exist. */
+  home_lat: number | null;
+  home_lng: number | null;
+  home_captured_at: string | null;
+  home_method: string | null;
   mechanical_score: number | null;
   heartmath_missing: boolean; // Standardized Assessment present but heartMathReport empty/absent
   health_briefing: string | null;
@@ -137,6 +144,7 @@ export function useQhpAssessments(trainerId: string) {
         assessment_time: r.assessment_time ?? null,
         location: r.location ?? null,
         notes: r.notes ?? null,
+        ops_notes: r.qhp_pref_notes ?? null,
         created_at: r.created_at ?? null,
         completed: r.completed ?? null,
         reschedule_status: r.reschedule_status ?? null,
@@ -149,6 +157,10 @@ export function useQhpAssessments(trainerId: string) {
         lead_address: r.client_id ? leadAddress.get(r.client_id) ?? null : null,
         client_created_at: r.clients?.created_at ?? null,
         home_captured: r.clients?.brb_location != null,
+        home_lat: isFinite(Number(r.clients?.brb_location?.lat)) ? Number(r.clients.brb_location.lat) : null,
+        home_lng: isFinite(Number(r.clients?.brb_location?.lng)) ? Number(r.clients.brb_location.lng) : null,
+        home_captured_at: r.clients?.brb_location?.updated_at ?? r.clients?.brb_location?.captured_at ?? null,
+        home_method: r.clients?.brb_location?.method ?? null,
         mechanical_score: r.mechanical_score ?? null,
         heartmath_missing: isQhpCompleted(r) ? isHeartMathMissing(r) : false,
         health_briefing: r.health_briefing ?? null,
@@ -425,6 +437,10 @@ export function useScheduleQhp() {
       time: string;            // HH:MM:SS (24h)
       location: string;
       notes: string;
+      // Ops booking note (leads.qhp_pref_notes), web CoachAssessmentSchedulingForm
+      // `opsNotes` parity: stored on its own column so the manager editing `notes`
+      // can never wipe what Ops wrote for the assessor.
+      opsNotes?: string | null;
       // SLA fields (web CoachAssessmentSchedulingForm parity) — pass the SLA
       // deadline ISO when scheduling from Task Pending; delay reason required
       // when breached (≥10 chars, enforced by the form).
@@ -446,6 +462,7 @@ export function useScheduleQhp() {
         assessment_time: input.time,
         location: input.location.trim(),
         notes: input.notes.trim() || null,
+        qhp_pref_notes: input.opsNotes?.trim() || null,
         assessment_scheduled: true,
         scheduled_by: input.scheduledBy,
       };

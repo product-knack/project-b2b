@@ -2,10 +2,15 @@
 // logged location (trainer_location_logs, read via SERVICE ROLE so the table's
 // admin-only RLS stays intact) and a client's captured home (clients.brb_location).
 //
-// POST body: { client_id: string }
+// POST body: { client_id: string, origin?: {lat, lng}, assessment_id?: string, mode?: 'navigate' }
 // 200 → { ok: true, distanceKm, durationMin, locationAgeMin, clientLat, clientLng,
-//          clientName, clientAddress, mapImageBase64 }
+//          clientName, clientAddress, polyline, mapImageBase64 }
 // 200 → { ok: false, error: 'no_client_location' | 'no_trainer_location' | 'stale_location' | ... }
+//
+// QHP navigation (14 Oct 2026): assessment_id lets the QHP's assessor (coach_assessment.coach_id)
+// route to a client who is not assigned to them as a trainer; mode 'navigate' returns the
+// encoded polyline and skips the static map and the reverse geocode (one Google call, fast),
+// so the app can refresh the route every minute or so while riding.
 //
 // Deploy: supabase functions deploy roster-distance
 // Secrets used: GOOGLE_API_KEY (already set), SUPABASE_* (auto-injected).
@@ -51,6 +56,8 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const client_id = body?.client_id;
     if (!client_id) return json({ ok: false, error: "client_id required" }, 400);
+    const navigate = body?.mode === "navigate";
+    const assessment_id = typeof body?.assessment_id === "string" ? body.assessment_id : null;
     // Optional live origin from the device — preferred over the hourly log when present.
     const liveLat = Number(body?.origin?.lat), liveLng = Number(body?.origin?.lng);
     const liveOrigin = isFinite(liveLat) && isFinite(liveLng) ? { lat: liveLat, lng: liveLng } : null;
@@ -60,17 +67,30 @@ Deno.serve(async (req) => {
 
     // Guard: the caller must actually be assigned to this client — either via
     // trainer_clients (trainers/doctors) OR a scheduled session_schedule row
-    // (doctor rosters are HOD-created and don't always have a trainer_clients row).
-    const { data: assignment } = await admin
-      .from("trainer_clients").select("id")
-      .eq("trainer_id", uid).eq("client_id", client_id).limit(1).maybeSingle();
-    if (!assignment) {
+    // (doctor rosters are HOD-created and don't always have a trainer_clients row),
+    // OR be the assessor of the QHP named by assessment_id (navigation to a QHP).
+    let allowed = false;
+    if (assessment_id) {
+      const { data: qhp } = await admin
+        .from("coach_assessment").select("id")
+        .eq("id", assessment_id).eq("coach_id", uid).eq("client_id", client_id)
+        .limit(1).maybeSingle();
+      allowed = !!qhp;
+    }
+    if (!allowed) {
+      const { data: assignment } = await admin
+        .from("trainer_clients").select("id")
+        .eq("trainer_id", uid).eq("client_id", client_id).limit(1).maybeSingle();
+      allowed = !!assignment;
+    }
+    if (!allowed) {
       const { data: rostered } = await admin
         .from("session_schedule").select("id")
         .eq("trainer_id", uid).eq("client_id", client_id).neq("status", "cancelled")
         .limit(1).maybeSingle();
-      if (!rostered) return json({ ok: false, error: "not_your_client" }, 403);
+      allowed = !!rostered;
     }
+    if (!allowed) return json({ ok: false, error: "not_your_client" }, 403);
 
     // Client home + display fields.
     const { data: client } = await admin
@@ -126,6 +146,16 @@ Deno.serve(async (req) => {
       approx = true;
     }
 
+    // Navigation refreshes want the numbers and the line only: no static map, no geocode.
+    if (navigate) {
+      return json({
+        ok: true, approx, traffic, distanceKm, durationMin, locationAgeMin: ageMin, polyline,
+        clientLat, clientLng,
+        clientName: `${client?.first_name ?? ""} ${client?.last_name ?? ""}`.trim(),
+        clientAddress: client?.location ?? null,
+      });
+    }
+
     const [png, originPlace] = await Promise.all([
       staticRouteMap(origin, dest, polyline).catch(() => null),
       reverseGeocode(origin).catch(() => null),
@@ -154,6 +184,7 @@ Deno.serve(async (req) => {
       clientLat, clientLng,
       clientName: `${client?.first_name ?? ""} ${client?.last_name ?? ""}`.trim(),
       clientAddress: client?.location ?? null,
+      polyline,
       mapImageBase64: png ? encodeBase64(png) : null,
     });
   } catch (e) {

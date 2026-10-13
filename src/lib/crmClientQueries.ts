@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from './supabase';
+import { computeEssentials, EssentialsStatus } from './essentials';
 import { invokeWithTimeout, uploadWithTimeout, SLOW_FN_MS } from './withTimeout';
 
 /* ============ CRM Clients list + Client Details — mirrors the web CRMClients /
@@ -11,6 +12,8 @@ const fullName = (p: any) => `${p?.first_name ?? ''} ${p?.last_name ?? ''}`.repl
 /* ---------- A. Clients list ---------- */
 export type CrmClientRow = {
   id: string; name: string; status: string; subscription: string | null;
+  /** Essentials 30-day pass status (30 Sep 2026); null for every other subscription. */
+  essentials: EssentialsStatus | null;
   package: string | null; packageDuration: string | null; monthly: boolean; hasPackage: boolean;
   phone: string | null;
   appUser: boolean; renewalPending: boolean; paused: boolean;
@@ -28,7 +31,7 @@ export function useCrmClientList(crmId: string | null, status: 'active' | 'inact
       if (!ids.length) return [];
       const { data: clients, error: cErr } = await supabase
         .from('clients')
-        .select('id, first_name, last_name, status, subscription_type, session_package, package_duration, is_monthly_subscription, created_at, phone, profile_id')
+        .select('id, first_name, last_name, status, subscription_type, essentials_extensions, session_package, package_duration, is_monthly_subscription, created_at, phone, profile_id')
         .in('id', ids).eq('status', status).order('created_at', { ascending: false });
       if (cErr) throw new Error(cErr.message);
       const rows = (clients ?? []) as any[];
@@ -56,6 +59,7 @@ export function useCrmClientList(crmId: string | null, status: 'active' | 'inact
         return {
           id: c.id, name: fullName(c), status: c.status ?? 'active',
           subscription: p?.subscription_type ?? c.subscription_type ?? null,
+          essentials: computeEssentials(c.subscription_type, c.essentials_extensions),
           package: c.session_package ?? null,
           packageDuration: c.package_duration ?? null,
           monthly: c.is_monthly_subscription === true,
@@ -75,6 +79,8 @@ export function useCrmClientList(crmId: string | null, status: 'active' | 'inact
 export type CrmClientDetail = {
   client: any;
   subscription: string | null;
+  /** Essentials 30-day pass status (30 Sep 2026); null for every other subscription. */
+  essentials: EssentialsStatus | null;
   appUser: boolean;
   trainers: { id: string; name: string; role: string | null }[]; // active only
   crms: { id: string; name: string }[];
@@ -122,6 +128,7 @@ export function useCrmClientDetail(clientId: string | null) {
       const journeyDone = flags.filter(Boolean).length;
       return {
         client, subscription, appUser, trainers, crms, basicInfo,
+        essentials: computeEssentials(client.subscription_type, client.essentials_extensions),
         journeyPct: journeyTotal ? Math.round((journeyDone / journeyTotal) * 100) : 0,
         journeyDone, journeyTotal,
       };
@@ -193,9 +200,9 @@ export function usePackageCycle(clientId: string | null) {
    workout/rehab/cancelled/other, cancelled rows deduped by trainer+minute. ---------- */
 export type SessionCategory = 'workout' | 'rehab' | 'cancelled' | 'other';
 const REHAB_SESSION_TYPES = new Set([
-  'physiotherapy', 'rehabilitation', 'massage_therapy', 'red_light_therapy',
+  'physiotherapy', 'rehabilitation', 'recovery', 'massage_therapy', 'red_light_therapy',
   'cold_bath_therapy', 'pneumatic_therapy', 'cupping_therapy', 'dry_needling', 'cryotherapy',
-]);
+]); // 'recovery' added 2026-10-07: a doctor's recovery log is a rehab-type session, not 'other'
 const categorize = (sessionType: string | null, status: string): SessionCategory => {
   if (status === 'cancelled') return 'cancelled';
   if (sessionType && REHAB_SESSION_TYPES.has(sessionType)) return 'rehab';
@@ -358,7 +365,7 @@ export function useTrainingFrequency(clientId: string | null, period: FreqPeriod
 export const COMM_CATEGORIES = ['Regular Touch Point', 'After 3 Session Feedback', 'After 6 Session Feedback', 'Renewal', 'Upsell'] as const;
 export const COMM_STATUSES = ['Follow Up Done', 'Follow-up Required', 'Not Responding', 'Counselling Done', 'Call Rescheduled', 'Client Not Available'] as const;
 export const COMM_MEDIUMS = ['phone', 'whatsapp', 'email'] as const;
-export type CommEntry = { id: string; callDate: string; status: string | null; category: string | null; medium: string | null; remarks: string | null; followUp: string | null; overdue: boolean; voicePath: string | null; voiceSec: number | null };
+export type CommEntry = { id: string; callDate: string; status: string | null; category: string | null; medium: string | null; remarks: string | null; followUp: string | null; overdue: boolean; voicePath: string | null; voiceSec: number | null; agenda: string | null };
 export function useClientComms(clientId: string | null) {
   return useQuery({
     queryKey: ['crm-client-comms', clientId],
@@ -367,7 +374,7 @@ export function useClientComms(clientId: string | null) {
     queryFn: async (): Promise<CommEntry[]> => {
       const { data, error } = await supabase
         .from('crm_communications')
-        .select('id, call_date, call_status, call_medium, category, remarks, next_follow_up_date, voice_note_path, voice_note_duration_sec')
+        .select('id, call_date, call_status, call_medium, category, remarks, next_follow_up_date, voice_note_path, voice_note_duration_sec, next_call_agenda')
         .eq('client_id', clientId).order('call_date', { ascending: false }).limit(50);
       if (error) throw new Error(error.message);
       const now = Date.now();
@@ -376,6 +383,7 @@ export function useClientComms(clientId: string | null) {
         medium: r.call_medium ?? null, remarks: r.remarks ?? null, followUp: r.next_follow_up_date ?? null,
         overdue: r.call_status !== 'Follow Up Done' && !!r.next_follow_up_date && new Date(r.next_follow_up_date).getTime() < now,
         voicePath: r.voice_note_path ?? null, voiceSec: r.voice_note_duration_sec ?? null,
+        agenda: r.next_call_agenda ?? null,
       }));
     },
   });
@@ -388,6 +396,7 @@ export type CommsBookRow = {
   commId: string; callDate: string; status: string | null; medium: string | null;
   category: string | null; remarks: string | null; followUp: string | null; overdue: boolean;
   voicePath: string | null;
+  agenda: string | null;
 };
 /* One entry in the full chronological log (every communication, not deduped). */
 export type CommLogRow = {
@@ -395,6 +404,7 @@ export type CommLogRow = {
   callDate: string; status: string | null; medium: string | null;
   category: string | null; remarks: string | null; followUp: string | null; overdue: boolean;
   voicePath: string | null;
+  agenda: string | null;
 };
 export type CommsBook = {
   rows: CommsBookRow[];   // latest touch point per client
@@ -412,7 +422,7 @@ export function useCrmCommsBook(crmId: string | null) {
     queryFn: async (): Promise<CommsBook> => {
       const { data, error } = await supabase
         .from('crm_communications')
-        .select('id, client_id, call_date, call_status, call_medium, category, remarks, next_follow_up_date, voice_note_path, clients(id, first_name, last_name, phone)')
+        .select('id, client_id, call_date, call_status, call_medium, category, remarks, next_follow_up_date, voice_note_path, next_call_agenda, clients(id, first_name, last_name, phone)')
         .eq('crm_id', crmId)
         .order('call_date', { ascending: false })
         .limit(5000);
@@ -427,7 +437,7 @@ export function useCrmCommsBook(crmId: string | null) {
           id: cm.id, clientId: cm.client_id, clientName: cl ? fullName(cl) : 'Client', phone: cl?.phone ?? null,
           callDate: cm.call_date, status: cm.call_status ?? null, medium: cm.call_medium ?? null,
           category: cm.category ?? null, remarks: cm.remarks ?? null, followUp: cm.next_follow_up_date ?? null,
-          overdue: overdueOf(cm), voicePath: cm.voice_note_path ?? null,
+          overdue: overdueOf(cm), voicePath: cm.voice_note_path ?? null, agenda: cm.next_call_agenda ?? null,
         };
       });
       // Latest comm per client (rows come newest-first).
@@ -440,7 +450,7 @@ export function useCrmCommsBook(crmId: string | null) {
           commId: cm.id, callDate: cm.call_date, status: cm.call_status ?? null,
           medium: cm.call_medium ?? null, category: cm.category ?? null, remarks: cm.remarks ?? null,
           followUp: cm.next_follow_up_date ?? null,
-          overdue: overdueOf(cm), voicePath: cm.voice_note_path ?? null,
+          overdue: overdueOf(cm), voicePath: cm.voice_note_path ?? null, agenda: cm.next_call_agenda ?? null,
         });
       });
       // 30-day analytics (same window + formulas as the web).
@@ -471,8 +481,12 @@ export function useCrmCommsBook(crmId: string | null) {
 export function useLogCommunication() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { crmId: string; clientId: string; category: string; status: string; medium: string | null; remarks: string; followUpDate: string | null; voiceNotePath?: string | null; voiceNoteDurationSec?: number | null }) => {
+    mutationFn: async (input: { crmId: string; clientId: string; category: string; status: string; medium: string | null; remarks: string; agenda: string; followUpDate: string | null; voiceNotePath?: string | null; voiceNoteDurationSec?: number | null }) => {
       if (!input.remarks.trim()) throw new Error('Remarks are required');
+      // Next Call Agenda is mandatory on every hand-logged communication (user decision
+      // 25 Sep 2026, web CRMCommunicationForm parity). App-side rule only: automatic rows
+      // (pause journey, status change) and older rows keep a NULL agenda.
+      if (!input.agenda.trim()) throw new Error('Next call agenda is required');
       const { error } = await supabase.from('crm_communications').insert({
         crm_id: input.crmId,
         client_id: input.clientId,
@@ -481,6 +495,7 @@ export function useLogCommunication() {
         call_medium: input.medium,
         category: input.category,
         remarks: input.remarks.trim(),
+        next_call_agenda: input.agenda.trim(),
         next_follow_up_date: input.followUpDate,
         // Voice memo (web parity, 15 Sep 2026): storage path + length; both NULL on plain entries.
         voice_note_path: input.voiceNotePath ?? null,

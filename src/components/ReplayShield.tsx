@@ -25,6 +25,16 @@ try {
   }
 } catch { /* native module unavailable — fall through to plain View */ }
 
+/* Inline variant for one sensitive element on an unshielded screen (e.g. the cycle
+   label on the trainer dashboard): same amp-block mask, but sized by its content
+   instead of flex: 1. */
+export function ReplayMask({ children, style }: { children: React.ReactNode; style?: any }) {
+  if (AmpMaskView) {
+    return <AmpMaskView mask="amp-block" style={style}>{children}</AmpMaskView>;
+  }
+  return <View style={style}>{children}</View>;
+}
+
 export function ReplayShield({ children }: { children: React.ReactNode }) {
   if (AmpMaskView) {
     return <AmpMaskView mask="amp-block" style={{ flex: 1 }}>{children}</AmpMaskView>;

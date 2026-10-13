@@ -110,7 +110,10 @@ function PrescriptionEditor({ call, doctorName, onSaved, onCancel }: { call: Cal
   });
   const save = () => {
     const payload = buildPayload();
-    if (payload.medicines.length === 0) { Alert.alert('Add a medicine', 'Add at least one medicine before saving.'); return; }
+    // A prescription may carry no medicine (tests-only consults are normal, user rule
+    // 2026-10-07); it just must not be empty. Same rule as the RPCs (rx_has_content).
+    const hasContent = payload.medicines.length > 0 || payload.lab_tests.length > 0 || ((payload as any).special_instruction ?? '').trim() !== '';
+    if (!hasContent) { Alert.alert('Nothing to save', 'Add a medicine, a test or a special instruction before saving.'); return; }
     if (fuValue.trim() !== '' && !(Number(fuValue) > 0)) { Alert.alert('Check the follow-up', 'The follow-up must be a number of days, weeks or months.'); return; }
     Keyboard.dismiss();
     amend.mutate({ slotId: call.id, payload, note: note.trim() || null }, {

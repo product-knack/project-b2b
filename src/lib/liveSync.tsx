@@ -41,6 +41,10 @@ const TABLE_KEYS: Record<string, string[]> = {
   client_pause_history: ['crm-client-pause', 'crm-client-list', 'crm-ended-pauses'],
   client_renewals: ['crm-package-cycle', 'crm-client-list', 'crm-inactive-clients'],
   medical_diagnosis: ['crm-client-diagnoses'],
+  // CRM Doctor Consultation (6 Oct 2026): bookings and the DB-maintained CRM record
+  doctor_consultation_details: ['consultation-slots-for-clients', 'consultation-slots', 'consultation-room-slot', 'doctor-consultation-slots'],
+  crm_clients_medical_history: ['crm-medical-records', 'crm-doctor-clients'],
+  client_medical_history: ['crm-client-medhistory', 'crm-doctor-clients'],
   client_discontinuation_requests: ['crm-client-discontinue'],
   health_reports: ['client-reports'],
   qhp_details: ['client-reports', 'coach-clients-overview', 'coach-overview-client'],
