@@ -100,22 +100,67 @@ ${BIKE_CSS}
     passedLine.setLatLngs([]);
     if (m.overview && routePts.length) { var b = L.latLngBounds(routePts); if (lastPos) b.extend(lastPos); map.fitBounds(b, { paddingTopLeft:[36, 230], paddingBottomRight:[36, 120], animate:false }); }
   }
-  function setPos(m){
-    lastPos = [m.lat, m.lng];
-    me.setLatLng(lastPos); me.setOpacity(1);
-    setBike(m.heading, m.moving);
-    if (m.alongIndex != null && routePts.length) { passedLine.setLatLngs(routePts.slice(0, Math.max(0, m.alongIndex)).concat([lastPos])); }
-    if (!follow && followResumeAt && Date.now() > followResumeAt) { follow = true; followResumeAt = 0; }
-    if (follow && m.follow !== false) centerWithOffset(lastPos, zoomNav);
+  /* Smooth motion (14 Oct 2026, user: "make it smooth like Google Maps"): every GPS fix
+     becomes a target; a frame loop glides the badge from where it is drawn to the target
+     over the fix interval, eases the heading along the shortest arc, keeps the camera on
+     the badge, and extends the ridden line. The compass drives the heading while standing
+     still or slow (under 2 m/s); the GPS course takes over once moving. Under reduce
+     motion everything jumps instead. */
+  var anim = { cur:null, from:null, to:null, t0:0, dur:1200, headCur:0, headTo:0, gpsHead:null, compass:null, speed:0, moving:false, alongIndex:null, followOk:true, loop:false };
+  function targetHeading(){
+    var useGps = anim.moving && anim.speed > 2 && anim.gpsHead != null;
+    if (useGps) return anim.gpsHead;
+    if (anim.compass != null) return anim.compass;
+    return anim.gpsHead != null ? anim.gpsHead : anim.headCur;
   }
+  function drawAt(pos, head){
+    me.setLatLng(pos); me.setOpacity(1);
+    setBike(head, anim.moving);
+    if (anim.alongIndex != null && routePts.length) passedLine.setLatLngs(routePts.slice(0, Math.max(0, anim.alongIndex)).concat([pos]));
+    if (!follow && followResumeAt && Date.now() > followResumeAt) { follow = true; followResumeAt = 0; }
+    if (follow && anim.followOk) centerWithOffset(pos, zoomNav);
+  }
+  function frame(){
+    if (!anim.loop) return;
+    var reduce = document.documentElement.classList.contains('ob-no-motion');
+    var now = performance.now();
+    if (anim.to) {
+      var k = reduce ? 1 : Math.min(1, (now - anim.t0) / anim.dur);
+      anim.cur = [anim.from[0] + (anim.to[0] - anim.from[0]) * k, anim.from[1] + (anim.to[1] - anim.from[1]) * k];
+      if (k >= 1) { anim.from = anim.to; anim.to = null; }
+    }
+    var want = targetHeading();
+    var diff = ((want - anim.headCur + 540) % 360) - 180;
+    anim.headCur = reduce ? want : (anim.headCur + diff * 0.18 + 360) % 360;
+    if (anim.cur) drawAt(anim.cur, anim.headCur);
+    lastPos = anim.cur;
+    requestAnimationFrame(frame);
+  }
+  function startLoop(){ if (!anim.loop) { anim.loop = true; requestAnimationFrame(frame); } }
+  function setPos(m){
+    var target = [m.lat, m.lng];
+    var now = performance.now();
+    if (!anim.cur) { anim.cur = target; anim.from = target; anim.headCur = typeof m.heading === 'number' ? m.heading : 0; }
+    else { anim.from = anim.cur.slice(); }
+    anim.to = target; anim.t0 = now;
+    anim.dur = Math.min(2500, Math.max(350, m.intervalMs || 1200));
+    if (typeof m.heading === 'number' && isFinite(m.heading)) anim.gpsHead = m.heading;
+    anim.speed = typeof m.speed === 'number' ? m.speed : 0;
+    anim.moving = !!m.moving;
+    anim.alongIndex = m.alongIndex == null ? null : m.alongIndex;
+    anim.followOk = m.follow !== false;
+    startLoop();
+  }
+  function setCompass(m){ if (typeof m.deg === 'number' && isFinite(m.deg)) { anim.compass = m.deg; startLoop(); } }
   window.__nav = { apply: function(m){ try {
     if (!m) return;
     if (m.type === 'init') init(m);
     else if (m.type === 'route') setRoute(m);
     else if (m.type === 'pos') setPos(m);
+    else if (m.type === 'compass') setCompass(m);
     else if (m.type === 'start') { follow = true; requestWake(); }
     else if (m.type === 'arrived') { follow = true; if (lastPos) map.setView(lastPos, 17, { animate:false }); }
-    else if (m.type === 'stop') { releaseWake(); }
+    else if (m.type === 'stop') { releaseWake(); anim.loop = false; }
     else if (m.type === 'recenter') { follow = true; followResumeAt = 0; if (lastPos) centerWithOffset(lastPos, zoomNav); }
     else if (m.type === 'motion') { reduce = !!m.reduce; applyMotion(); }
   } catch(e) { post({ type:'error', message: String(e && e.message || e) }); } } };

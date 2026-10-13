@@ -121,7 +121,9 @@ export function QhpNavigation() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapReady, target, stale.stale, send]);
 
-  // GPS: foreground watch, every 2 s or 3 m.
+  // GPS: foreground watch, a fix every second; the compass beside it for the badge's heading.
+  const compassRef = React.useRef<number | null>(null);
+  const headingSubRef = React.useRef<Location.LocationSubscription | null>(null);
   React.useEffect(() => {
     if (!target) return;
     let sub: Location.LocationSubscription | null = null;
@@ -131,16 +133,29 @@ export function QhpNavigation() {
         let perm = await Location.getForegroundPermissionsAsync();
         if (!perm.granted && perm.canAskAgain) perm = await Location.requestForegroundPermissionsAsync();
         if (!perm.granted) { if (alive) setPermDenied(true); return; }
-        // distanceInterval 0: a fix every 2 s even while standing still, so the map, the
+        // distanceInterval 0: a fix every second even while standing still, so the map, the
         // projection and the recording keep ticking at a signal or before setting off.
-        sub = await Location.watchPositionAsync({ accuracy: Location.Accuracy.BestForNavigation, timeInterval: 2000, distanceInterval: 0 }, (p) => {
+        sub = await Location.watchPositionAsync({ accuracy: Location.Accuracy.BestForNavigation, timeInterval: 1000, distanceInterval: 0 }, (p) => {
           if (!alive) return;
           const f: Fix = { t: p.timestamp || Date.now(), lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy ?? null, spd: p.coords.speed ?? null, heading: p.coords.heading ?? null };
           onFix(f);
         });
+        // The compass turns the badge with the phone while standing still or slow (user, 14 Oct
+        // 2026: "when we twist the phone its direction does not change"); throttled to 10 a second.
+        let lastSent = 0, lastDeg = -1;
+        headingSubRef.current = await Location.watchHeadingAsync((h) => {
+          if (!alive) return;
+          const deg = h.trueHeading >= 0 ? h.trueHeading : h.magHeading;
+          if (!(deg >= 0)) return;
+          const now = Date.now();
+          if (now - lastSent < 100 || Math.abs(deg - lastDeg) < 1) return;
+          lastSent = now; lastDeg = deg;
+          compassRef.current = deg;
+          send({ type: 'compass', deg });
+        });
       } catch { if (alive) setPermDenied(true); }
     })();
-    return () => { alive = false; sub?.remove(); };
+    return () => { alive = false; sub?.remove(); headingSubRef.current?.remove(); headingSubRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [target?.assessmentId]);
 
@@ -179,9 +194,11 @@ export function QhpNavigation() {
       }
       if (Date.now() - lastPartialSave.current > PARTIAL_SAVE_MS) { lastPartialSave.current = Date.now(); void partialSave(); }
     }
-    // Map: the rider; alongIndex lets the page grey out the ridden part of the line.
+    // Map: the rider; alongIndex lets the page grey out the ridden part of the line; the
+    // interval lets it glide to this fix over the time the next one will take to arrive.
     const alongIndex = pj && r ? nearestIndex(here, r.points) : null;
-    send({ type: 'pos', lat: f.lat, lng: f.lng, heading: headingRef.current, moving: movingRef.current && phaseRef.current !== 'arrived', alongIndex, follow: phaseRef.current !== 'ready' });
+    const intervalMs = prev ? Math.max(0, f.t - prev.t) : 1000;
+    send({ type: 'pos', lat: f.lat, lng: f.lng, heading: headingRef.current, speed: f.spd ?? 0, intervalMs, moving: movingRef.current && phaseRef.current !== 'arrived', alongIndex, follow: phaseRef.current !== 'ready' });
   };
 
   const nearestIndex = (p: LatLng, pts: LatLng[]): number => {
@@ -204,7 +221,7 @@ export function QhpNavigation() {
       // Project the last fix onto the new line at once (numbers lose the tilde, the badge and
       // the ridden part update) instead of waiting for the next GPS tick.
       const f = prevFix.current;
-      if (f) { const pj = projectOnRoute([f.lat, f.lng], r.points); setProj(pj); send({ type: 'pos', lat: f.lat, lng: f.lng, heading: headingRef.current, moving: movingRef.current && phaseRef.current !== 'arrived', alongIndex: pj ? nearestIndex([f.lat, f.lng], r.points) : null, follow: phaseRef.current !== 'ready' && why !== 'start' }); }
+      if (f) { const pj = projectOnRoute([f.lat, f.lng], r.points); setProj(pj); send({ type: 'pos', lat: f.lat, lng: f.lng, heading: headingRef.current, speed: f.spd ?? 0, intervalMs: 400, moving: movingRef.current && phaseRef.current !== 'arrived', alongIndex: pj ? nearestIndex([f.lat, f.lng], r.points) : null, follow: phaseRef.current !== 'ready' && why !== 'start' }); }
     } catch {
       // The screen keeps working on the phone's own numbers; the line stays as it was.
       setRouteState('local');
