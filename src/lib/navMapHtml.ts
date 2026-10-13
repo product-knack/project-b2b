@@ -5,7 +5,11 @@
    injectJavaScript; the page reports back through ReactNativeWebView.postMessage.
    The page also holds a screen wake lock while navigating (no native module). */
 
-export const NAV_TILES = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+/* OpenStreetMap's own tiles (no key). CARTO's dark basemap stamps "API KEY REQUIRED" on
+   tiles requested from an app (seen on the phone, 14 Oct 2026), so the night look comes
+   from a CSS filter on the tile pane instead: invert + hue-rotate keeps water blue and
+   parks green while streets go dark. Markers and the route sit in other panes, unfiltered. */
+export const NAV_TILES = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 
 const BIKE_CSS = `
 .ob-wrap{position:relative;width:64px;height:64px;pointer-events:none}
@@ -47,6 +51,7 @@ export const NAV_MAP_HTML = `<!doctype html>
 <style>
 html,body{margin:0;height:100%;background:#0b0b0f;overflow:hidden;-webkit-user-select:none;user-select:none}
 #map{position:absolute;inset:0;background:#0b0b0f}
+.leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.82) contrast(.92) saturate(.55)}
 .leaflet-control-zoom{display:none}
 .leaflet-control-attribution{font:10px system-ui;background:rgba(8,6,6,.55)!important;color:#9A938C!important}
 .leaflet-control-attribution a{color:#C8C2BC!important}
@@ -76,7 +81,7 @@ ${BIKE_CSS}
   function centerWithOffset(latlng, zoom){ var z = zoom == null ? map.getZoom() : zoom; var h = map.getSize().y; var p = map.project(latlng, z).subtract([0, h*0.14]); map.setView(map.unproject(p, z), z, { animate:false }); }
   function init(m){
     map = L.map('map', { zoomControl:false, attributionControl:true, zoomAnimation:false, fadeAnimation:false, markerZoomAnimation:false, inertia:true, tap:false });
-    tiles = L.tileLayer(${JSON.stringify(NAV_TILES)}, { maxZoom:19, subdomains:'abcd', attribution:'&copy; OpenStreetMap &copy; CARTO' }).addTo(map);
+    tiles = L.tileLayer(${JSON.stringify(NAV_TILES)}, { maxZoom:19, attribution:'&copy; OpenStreetMap' }).addTo(map);
     dest = L.marker([m.dest.lat, m.dest.lng], { icon: L.divIcon({ className:'', html:'<div class="dest'+(m.stale?' stale':'')+'"><div class="lbl">'+String(m.dest.name||'CLIENT').toUpperCase().slice(0,14)+'</div><div class="pin"></div></div>', iconSize:[84,46], iconAnchor:[42,35] }), zIndexOffset: 500 }).addTo(map);
     passedLine = L.polyline([], { color:'#8A847E', weight:5, opacity:.55 }).addTo(map);
     routeCase = L.polyline([], { color:'#ffffff', weight:10, opacity:.95 }).addTo(map);

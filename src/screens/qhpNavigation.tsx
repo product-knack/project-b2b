@@ -111,10 +111,14 @@ export function QhpNavigation() {
   }, []);
   React.useEffect(() => { if (mapReady) send({ type: 'motion', reduce: reduceMotion }); }, [mapReady, reduceMotion, send]);
 
-  // Map init once the page is up.
+  // Map init once the page is up, then replay the last fix (a fix that arrived before the
+  // page loaded was sent into the void; without this a still phone shows no badge).
   React.useEffect(() => {
     if (!mapReady || !target) return;
     send({ type: 'init', dest: { lat: target.lat, lng: target.lng, name: target.clientName.split(' ')[0] }, stale: stale.stale });
+    const f = prevFix.current;
+    if (f) setTimeout(() => onFix(f), 150);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapReady, target, stale.stale, send]);
 
   // GPS: foreground watch, every 2 s or 3 m.
@@ -127,7 +131,9 @@ export function QhpNavigation() {
         let perm = await Location.getForegroundPermissionsAsync();
         if (!perm.granted && perm.canAskAgain) perm = await Location.requestForegroundPermissionsAsync();
         if (!perm.granted) { if (alive) setPermDenied(true); return; }
-        sub = await Location.watchPositionAsync({ accuracy: Location.Accuracy.BestForNavigation, timeInterval: 2000, distanceInterval: 3 }, (p) => {
+        // distanceInterval 0: a fix every 2 s even while standing still, so the map, the
+        // projection and the recording keep ticking at a signal or before setting off.
+        sub = await Location.watchPositionAsync({ accuracy: Location.Accuracy.BestForNavigation, timeInterval: 2000, distanceInterval: 0 }, (p) => {
           if (!alive) return;
           const f: Fix = { t: p.timestamp || Date.now(), lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy ?? null, spd: p.coords.speed ?? null, heading: p.coords.heading ?? null };
           onFix(f);
@@ -190,10 +196,15 @@ export function QhpNavigation() {
     lastRouteCallAt.current = Date.now();
     try {
       const r = await fetchNavRoute(target, { lat: origin[0], lng: origin[1] });
+      routeRef.current = r;
       setRoute(r);
       setRouteState('ok');
       setRouteAgo('just now');
       send({ type: 'route', points: r.points, dim: false, overview: why === 'start' });
+      // Project the last fix onto the new line at once (numbers lose the tilde, the badge and
+      // the ridden part update) instead of waiting for the next GPS tick.
+      const f = prevFix.current;
+      if (f) { const pj = projectOnRoute([f.lat, f.lng], r.points); setProj(pj); send({ type: 'pos', lat: f.lat, lng: f.lng, heading: headingRef.current, moving: movingRef.current && phaseRef.current !== 'arrived', alongIndex: pj ? nearestIndex([f.lat, f.lng], r.points) : null, follow: phaseRef.current !== 'ready' && why !== 'start' }); }
     } catch {
       // The screen keeps working on the phone's own numbers; the line stays as it was.
       setRouteState('local');
