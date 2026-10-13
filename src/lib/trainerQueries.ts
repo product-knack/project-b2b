@@ -504,6 +504,8 @@ export type RosterDistance = {
   /** Reverse-geocoded place name of the trainer's origin point (e.g. "Hauz Khas, New Delhi"). */
   originName?: string | null;
   clientLat?: number; clientLng?: number; clientName?: string; clientAddress?: string | null;
+  /** clients.phone, for the in-app navigation's Call button (function deployed 14 Oct 2026). */
+  clientPhone?: string | null;
   mapImageBase64?: string | null;
 };
 

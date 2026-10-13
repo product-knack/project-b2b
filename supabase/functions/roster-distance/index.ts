@@ -94,7 +94,7 @@ Deno.serve(async (req) => {
 
     // Client home + display fields.
     const { data: client } = await admin
-      .from("clients").select("first_name, last_name, location, brb_location")
+      .from("clients").select("first_name, last_name, phone, location, brb_location")
       .eq("id", client_id).maybeSingle();
     const home = client?.brb_location;
     const clientLat = Number(home?.lat), clientLng = Number(home?.lng);
@@ -154,6 +154,7 @@ Deno.serve(async (req) => {
         clientLat, clientLng,
         clientName: `${client?.first_name ?? ""} ${client?.last_name ?? ""}`.trim(),
         clientAddress: client?.location ?? null,
+        clientPhone: client?.phone ?? null,
       });
     }
 
@@ -185,6 +186,7 @@ Deno.serve(async (req) => {
       clientLat, clientLng,
       clientName: `${client?.first_name ?? ""} ${client?.last_name ?? ""}`.trim(),
       clientAddress: client?.location ?? null,
+      clientPhone: client?.phone ?? null, // for the in-app navigation's Call button (14 Oct 2026)
       polyline,
       mapImageBase64: png ? encodeBase64(png) : null,
     });

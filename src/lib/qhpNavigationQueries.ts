@@ -10,9 +10,14 @@ import { invokeWithTimeout, withTimeout, NET_MS } from './withTimeout';
 import { enqueueOutbox, getIsOnline } from './offline';
 import { decodePolyline, type NavigationTrack, type RouteInfo } from './qhpNavigation';
 
-/** What the QHP card hands to the screen (set before go('qhp-navigate'), read on mount). */
+/** What the QHP card or the roster distance sheet hands to the screen (set before
+    go('qhp-navigate'), read on mount). A QHP ride carries assessmentId and is saved on the
+    QHP row; a roster session ride (14 Oct 2026, user: "from Today's Roster it takes me to
+    Google Maps, show this map there too") carries scheduleId and is not stored anywhere. */
 export type NavTarget = {
-  assessmentId: string;
+  kind: 'qhp' | 'session';
+  assessmentId: string | null;
+  scheduleId: string | null;
   clientId: string;
   clientName: string;
   address: string | null;
@@ -43,8 +48,10 @@ async function invokeWithToken(name: string, body: any) {
 
 /** One route refresh. Throws on any failure; the screen then runs on the local estimate. */
 export async function fetchNavRoute(target: NavTarget, origin: { lat: number; lng: number }): Promise<RouteInfo> {
+  // assessment_id authorizes the QHP's assessor; a roster session relies on the function's
+  // trainer_clients / session_schedule checks.
   const { data, error } = await invokeWithToken('roster-distance', {
-    client_id: target.clientId, assessment_id: target.assessmentId, origin, mode: 'navigate',
+    client_id: target.clientId, ...(target.assessmentId ? { assessment_id: target.assessmentId } : {}), origin, mode: 'navigate',
   });
   if (error) {
     const res: Response | undefined = (error as any)?.context;

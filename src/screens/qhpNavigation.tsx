@@ -19,7 +19,7 @@ import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { F, hexA } from '../theme';
 import { Icon } from '../icons';
-import { useStore } from '../store';
+import { useStore, homeRouteFor } from '../store';
 import { useSpeech } from '../lib/useSpeech';
 import { NAV_MAP_HTML } from '../lib/navMapHtml';
 import { navTargetRef, fetchNavRoute, saveNavigationTrack, appVersionLabel, type NavTarget } from '../lib/qhpNavigationQueries';
@@ -32,6 +32,9 @@ import {
 type Phase = 'locating' | 'ready' | 'navigating' | 'arrived' | 'saving';
 type RouteState = 'none' | 'ok' | 'recalculating' | 'local';
 const TRACK_KEY = (id: string) => `qhp-nav-track:${id}`;
+/* A roster session ride (kind 'session', from Today's Roster) has no assessment row to
+   write to: it navigates exactly the same but nothing is stored (14 Oct 2026). */
+const savesRide = (t: NavTarget) => t.kind === 'qhp' && !!t.assessmentId;
 const PARTIAL_SAVE_MS = 60_000;
 
 /* Google's navigation palette */
@@ -72,8 +75,10 @@ function RoundBtn({ path, name, label, onPress, active, tint }: { path?: string;
 }
 
 export function QhpNavigation() {
-  const { back, canGoBack, go } = useStore();
+  const { back, canGoBack, go, role } = useStore();
   const insets = useSafeAreaInsets();
+  // Where Exit lands when there is no history: the QHP page for a QHP ride, else the role's home (trainer or doctor roster).
+  const leave = (kind: 'qhp' | 'session' | null) => (canGoBack ? back() : go(kind === 'qhp' ? 'qhp' : homeRouteFor(role)));
   const target = React.useRef<NavTarget | null>(navTargetRef.current).current;
   const web = React.useRef<WebView>(null);
   const speech = useSpeech();
@@ -172,7 +177,7 @@ export function QhpNavigation() {
     })();
     return () => { alive = false; sub?.remove(); headingSubRef.current?.remove(); headingSubRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [target?.assessmentId]);
+  }, [target?.assessmentId, target?.scheduleId]);
 
   const nearestIndex = (p: LatLng, pts: LatLng[]): number => {
     let bi = 0, bd = Infinity;
@@ -198,7 +203,7 @@ export function QhpNavigation() {
       const last = points.current[points.current.length - 1] ?? null;
       if (shouldKeep(last, f, s)) {
         points.current.push(toPoint(f, s));
-        if (points.current.length % 6 === 0) persistLocal();
+        if (points.current.length % 6 === 0 && target && savesRide(target)) persistLocal();
       }
       if (pin && isArrived(here, pin, f.acc) && phaseRef.current === 'navigating') {
         setPhase('arrived');
@@ -214,7 +219,7 @@ export function QhpNavigation() {
       } else if (Date.now() - lastRouteCallAt.current > ROUTE_REFRESH_MS && !routeInFlight.current) {
         refreshRoute(here, 'periodic');
       }
-      if (Date.now() - lastPartialSave.current > PARTIAL_SAVE_MS) { lastPartialSave.current = Date.now(); void partialSave(); }
+      if (target && savesRide(target) && Date.now() - lastPartialSave.current > PARTIAL_SAVE_MS) { lastPartialSave.current = Date.now(); void partialSave(); }
       // Turn-by-turn: the next manoeuvre and its spoken cue.
       if (r && pj && phaseRef.current === 'navigating') {
         const mv = nextManeuver(pj.alongM, r.steps, pj.totalM);
@@ -262,7 +267,7 @@ export function QhpNavigation() {
   }, []);
 
   const persistLocal = () => {
-    if (!target || startMs.current == null) return;
+    if (!target || !target.assessmentId || startMs.current == null) return;
     AsyncStorage.setItem(TRACK_KEY(target.assessmentId), JSON.stringify({ startMs: startMs.current, points: points.current })).catch(() => {});
   };
 
@@ -280,7 +285,7 @@ export function QhpNavigation() {
 
   const partialSave = async () => {
     const t = currentTrack(null, null);
-    if (!t || !target) return;
+    if (!t || !target || !target.assessmentId) return;
     try { await saveNavigationTrack(target.assessmentId, t); } catch { /* best effort while riding */ }
   };
 
@@ -307,7 +312,7 @@ export function QhpNavigation() {
     setFollowing(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     send({ type: 'start' });
-    persistLocal();
+    if (savesRide(target)) persistLocal();
     if (!routeRef.current) await refreshRoute([fix.lat, fix.lng], 'start');
     routeAtStart.current = routeRef.current;
     const r = routeRef.current;
@@ -328,14 +333,14 @@ export function QhpNavigation() {
     send({ type: 'stop' });
     const t = currentTrack(endedBy, Date.now());
     try {
-      if (t) {
+      if (t && savesRide(target) && target.assessmentId) {
         const res = await saveNavigationTrack(target.assessmentId, t, { final: true });
         setSaveNote(res === 'queued' ? 'Ride saved on this phone; it syncs when you are back online.' : null);
+        await AsyncStorage.removeItem(TRACK_KEY(target.assessmentId)).catch(() => {});
       }
-      await AsyncStorage.removeItem(TRACK_KEY(target.assessmentId)).catch(() => {});
       if (endedBy === 'arrived') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       navTargetRef.current = null;
-      canGoBack ? back() : go('qhp');
+      leave(target.kind);
     } catch (e: any) {
       finishing.current = false;
       setPhase(endedBy === 'arrived' ? 'arrived' : 'navigating');
@@ -344,8 +349,8 @@ export function QhpNavigation() {
   };
 
   const confirmExit = () => {
-    if (phase === 'ready' || phase === 'locating') { speech.stop(); navTargetRef.current = null; canGoBack ? back() : go('qhp'); return; }
-    Alert.alert('Exit navigation?', 'The ride so far is saved with the QHP.', [
+    if (phase === 'ready' || phase === 'locating') { speech.stop(); navTargetRef.current = null; leave(target?.kind ?? null); return; }
+    Alert.alert('Exit navigation?', target && savesRide(target) ? 'The ride so far is saved with the QHP.' : 'You can start again from the roster card.', [
       { text: 'Keep going', style: 'cancel' },
       { text: 'Exit', style: 'destructive', onPress: () => finish('ended') },
     ]);
@@ -359,8 +364,8 @@ export function QhpNavigation() {
   if (!target) {
     return (
       <View style={{ flex: 1, backgroundColor: '#e8eaed', alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12 }}>
-        <Text style={{ fontFamily: F.body, fontSize: 13, color: G.muted, textAlign: 'center' }}>Nothing to navigate to. Open an upcoming QHP and tap Start navigation.</Text>
-        <Pressable onPress={() => (canGoBack ? back() : go('qhp'))} hitSlop={10}><Text style={{ fontFamily: F.bodySemi, fontSize: 13.5, color: G.blue }}>Back</Text></Pressable>
+        <Text style={{ fontFamily: F.body, fontSize: 13, color: G.muted, textAlign: 'center' }}>Nothing to navigate to. Open an upcoming QHP or a roster card's distance and tap Start navigation.</Text>
+        <Pressable onPress={() => leave(null)} hitSlop={10}><Text style={{ fontFamily: F.bodySemi, fontSize: 13.5, color: G.blue }}>Back</Text></Pressable>
       </View>
     );
   }

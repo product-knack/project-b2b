@@ -455,9 +455,14 @@ function RescheduleSheet({ row, visible, onClose }: { row: RosterRow; visible: b
   );
 }
 
-/* ---------- Roster distance sheet: map + km + drive time to the client's home ---------- */
-export function DistanceSheet({ row, visible, onClose }: { row: { client_id: string | null; client_name: string }; visible: boolean; onClose: () => void }) {
+/* ---------- Roster distance sheet: map + km + drive time to the client's home ----------
+   Its primary action opens the in-app navigation (the same Google-Maps-style screen the
+   QHP cards use; 14 Oct 2026, user: "from Today's Roster it takes me to Google Maps, show
+   this map there too"). Google Maps stays as a quiet second link. A roster ride is not
+   stored (only QHP rides are saved on the QHP row). */
+export function DistanceSheet({ row, visible, onClose }: { row: { id?: string; client_id: string | null; client_name: string }; visible: boolean; onClose: () => void }) {
   const insets = useSafeAreaInsets();
+  const navActions = useStoreActions();
   // Fresh device fix as the origin (real "where I am now"); null → let the server
   // fall back to the hourly location log. undefined → still resolving, hold the query.
   const [origin, setOrigin] = React.useState<{ lat: number; lng: number } | null | undefined>(undefined);
@@ -492,9 +497,19 @@ export function DistanceSheet({ row, visible, onClose }: { row: { client_id: str
     : distQ.isError ? (distQ.error as Error).message
     : 'Could not compute the route. Try again in a moment.';
 
-  const navigate = () => {
+  const openGoogleMaps = () => {
     if (d?.clientLat == null || d?.clientLng == null) return;
     Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${d.clientLat},${d.clientLng}&travelmode=driving`);
+  };
+  const startNavigation = () => {
+    if (!row.client_id || d?.clientLat == null || d?.clientLng == null) return;
+    navTargetRef.current = {
+      kind: 'session', assessmentId: null, scheduleId: row.id ?? null, clientId: row.client_id,
+      clientName: d.clientName || row.client_name, address: d.clientAddress ?? null, phone: d.clientPhone ?? null,
+      lat: d.clientLat, lng: d.clientLng, pinCapturedAt: null, pinMethod: null,
+    };
+    onClose();
+    navActions.go('qhp-navigate');
   };
 
   return (
@@ -573,7 +588,10 @@ export function DistanceSheet({ row, visible, onClose }: { row: { client_id: str
                 ) : null}
               </View>
 
-              <GradientButton label="Navigate in Google Maps" onPress={navigate} />
+              <GradientButton label="Start navigation" onPress={startNavigation} />
+              <Pressable onPress={openGoogleMaps} hitSlop={10} accessibilityRole="button" style={{ alignSelf: 'center', paddingVertical: 4, paddingHorizontal: 8 }}>
+                <Body style={{ fontSize: 12, color: C.muted2 }}>Open in Google Maps instead</Body>
+              </Pressable>
             </View>
           ) : null}
         </Pressable>
@@ -8763,7 +8781,7 @@ function QhpAssessor() {
   const startNavigation = (q: import('../lib/qhpQueries').QhpRow) => {
     if (!q.client_id || q.home_lat == null || q.home_lng == null) return;
     navTargetRef.current = {
-      assessmentId: q.id, clientId: q.client_id, clientName: q.client_name ?? 'Client',
+      kind: 'qhp', assessmentId: q.id, scheduleId: null, clientId: q.client_id, clientName: q.client_name ?? 'Client',
       address: q.location || q.lead_address || null, phone: q.client_phone ?? null,
       lat: q.home_lat, lng: q.home_lng, pinCapturedAt: q.home_captured_at, pinMethod: q.home_method,
     };
