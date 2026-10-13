@@ -63,8 +63,11 @@ export async function currentWeather(c: Coords) {
   return await r.json();
 }
 
-// --- Routes API: driving distance + traffic-aware duration ------------------
-export type RouteResult = { distanceMeters: number; durationSec: number; encodedPolyline: string | null };
+// --- Routes API: driving distance + traffic-aware duration + turn-by-turn steps --
+/* One step = the manoeuvre at its start (Google's navigationInstruction) and the distance
+   travelled after it until the next one. maneuver is Google's enum (TURN_LEFT, ...). */
+export type RouteStep = { maneuver: string; instruction: string; distanceMeters: number; polyline: string | null };
+export type RouteResult = { distanceMeters: number; durationSec: number; encodedPolyline: string | null; steps?: RouteStep[] };
 export type RouteOutcome = { route: RouteResult | null; detail?: string };
 
 export async function computeRoute(origin: Coords, dest: Coords): Promise<RouteOutcome> {
@@ -74,13 +77,15 @@ export async function computeRoute(origin: Coords, dest: Coords): Promise<RouteO
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Goog-FieldMask": "routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline",
+        "X-Goog-FieldMask": "routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline,routes.legs.steps.distanceMeters,routes.legs.steps.navigationInstruction,routes.legs.steps.polyline.encodedPolyline",
       },
       body: JSON.stringify({
         origin: { location: { latLng: { latitude: origin.lat, longitude: origin.lon } } },
         destination: { location: { latLng: { latitude: dest.lat, longitude: dest.lon } } },
         travelMode: "DRIVE",
         routingPreference: "TRAFFIC_AWARE",
+        languageCode: "en-IN",
+        units: "METRIC",
       }),
     },
   );
@@ -94,28 +99,76 @@ export async function computeRoute(origin: Coords, dest: Coords): Promise<RouteO
   try { j = JSON.parse(text); } catch { return { route: null, detail: "routes_bad_json" }; }
   const route = j?.routes?.[0];
   if (!route?.distanceMeters) return { route: null, detail: `routes_empty: ${text.slice(0, 200)}` };
+  const steps: RouteStep[] = ((route.legs ?? []) as any[]).flatMap((l) => (l.steps ?? []) as any[]).map((s) => ({
+    maneuver: String(s.navigationInstruction?.maneuver ?? "STRAIGHT"),
+    instruction: String(s.navigationInstruction?.instructions ?? ""),
+    distanceMeters: Number(s.distanceMeters ?? 0) || 0,
+    polyline: s.polyline?.encodedPolyline ?? null,
+  }));
   return {
     route: {
       distanceMeters: route.distanceMeters,
       durationSec: parseInt(String(route.duration ?? "0").replace(/s$/, ""), 10) || 0,
       encodedPolyline: route.polyline?.encodedPolyline ?? null,
+      steps,
     },
   };
 }
 
 // --- OSRM (keyless) fallback: real road routing when Routes API is blocked --
-// Public demo server; no traffic awareness, but actual road distance + drive time.
+// Public demo server; no traffic awareness, but actual road distance + drive time,
+// and turn-by-turn steps mapped onto Google's manoeuvre names.
+function osrmManeuver(m: any): string {
+  const type = String(m?.type ?? "");
+  const mod = String(m?.modifier ?? "");
+  const side = /left/.test(mod) ? "LEFT" : /right/.test(mod) ? "RIGHT" : "";
+  if (type === "depart") return "DEPART";
+  if (type === "arrive") return "ARRIVE";
+  if (type === "roundabout" || type === "rotary") return side ? `ROUNDABOUT_${side}` : "ROUNDABOUT_LEFT";
+  if (type === "merge") return "MERGE";
+  if (type === "fork") return side ? `FORK_${side}` : "STRAIGHT";
+  if (type === "on ramp" || type === "off ramp") return side ? `RAMP_${side}` : "STRAIGHT";
+  if (type === "new name") return "NAME_CHANGE";
+  if (/uturn/.test(mod)) return side ? `UTURN_${side}` : "UTURN_LEFT";
+  if (/sharp/.test(mod) && side) return `TURN_SHARP_${side}`;
+  if (/slight/.test(mod) && side) return `TURN_SLIGHT_${side}`;
+  if (side) return `TURN_${side}`;
+  return "STRAIGHT";
+}
+function osrmText(s: any): string {
+  const name = String(s?.name ?? "").trim();
+  const k = osrmManeuver(s?.maneuver);
+  const onto = name ? ` onto ${name}` : "";
+  if (k === "DEPART") return name ? `Head on ${name}` : "Head out";
+  if (k === "ARRIVE") return "You have arrived at your destination";
+  if (k.startsWith("TURN_SHARP_")) return `Turn sharp ${k.endsWith("LEFT") ? "left" : "right"}${onto}`;
+  if (k.startsWith("TURN_SLIGHT_")) return `Turn slight ${k.endsWith("LEFT") ? "left" : "right"}${onto}`;
+  if (k.startsWith("TURN_")) return `Turn ${k.endsWith("LEFT") ? "left" : "right"}${onto}`;
+  if (k.startsWith("UTURN_")) return `Make a U-turn${onto}`;
+  if (k.startsWith("ROUNDABOUT_")) return `At the roundabout, continue${onto}`;
+  if (k === "MERGE") return `Merge${onto}`;
+  if (k.startsWith("FORK_")) return `Keep ${k.endsWith("LEFT") ? "left" : "right"}${onto}`;
+  if (k.startsWith("RAMP_")) return `Take the ramp on the ${k.endsWith("LEFT") ? "left" : "right"}${onto}`;
+  return name ? `Continue onto ${name}` : "Continue straight";
+}
 export async function osrmRoute(origin: Coords, dest: Coords): Promise<RouteResult | null> {
-  const url = `https://router.project-osrm.org/route/v1/driving/${origin.lon},${origin.lat};${dest.lon},${dest.lat}?overview=full&geometries=polyline`;
+  const url = `https://router.project-osrm.org/route/v1/driving/${origin.lon},${origin.lat};${dest.lon},${dest.lat}?overview=full&geometries=polyline&steps=true`;
   const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
   if (!r.ok) return null;
   const j = await r.json();
   const route = j?.routes?.[0];
   if (!route?.distance) return null;
+  const steps: RouteStep[] = ((route.legs?.[0]?.steps ?? []) as any[]).map((s) => ({
+    maneuver: osrmManeuver(s.maneuver),
+    instruction: osrmText(s),
+    distanceMeters: Math.round(Number(s.distance ?? 0)) || 0,
+    polyline: s.geometry ?? null,
+  }));
   return {
     distanceMeters: Math.round(route.distance),
     durationSec: Math.round(route.duration),
     encodedPolyline: route.geometry ?? null,
+    steps,
   };
 }
 

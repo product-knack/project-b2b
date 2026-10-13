@@ -1,66 +1,73 @@
 /* QHP navigation (14 Oct 2026, owner: "a Start navigation button on the upcoming QHP
    cards, Uber-style live tracking to the client's pin, only when clients.brb_location
-   exists"). Night map in a WebView (CARTO dark tiles on OpenStreetMap data), the
-   planned route from the roster-distance function (Google, server key), the phone's
-   GPS every few seconds in the foreground, the Odds bike marker, and the ride saved
-   as coach_assessment.navigation_track at Arrived / End.
-   One obvious action per moment: Start before moving, the map while moving, Arrived
-   at the pin. Calm: a thin dark layer over the map, no decoration.
-   States: finding GPS, ready, navigating, off route (recalculating), route service
-   down (local estimate), at the pin, and a stale pin flag. No background location. */
+   exists"; same afternoon: "beautify it like Google Maps, same style map, same animation,
+   and tell me 'after 400 metres turn left'").
+   A light vector map in a WebView (MapLibre + OpenFreeMap, no key) with a pitched
+   heading-up camera that glides between fixes, the Odds bike badge, the planned
+   route from the roster-distance function (Google Routes with turn-by-turn steps,
+   OSRM fallback), a turn banner on top with the distance to the manoeuvre, spoken
+   cues at 400 m and at the turn (expo-speech, mute button), the time left in a white
+   bottom sheet with Exit, round side buttons (north / heading, mute, overview), a
+   Re-centre pill when the camera is moved, and the ride saved as
+   coach_assessment.navigation_track at Arrived / End. Foreground GPS only. */
 import React from 'react';
-import { View, Text, Pressable, ActivityIndicator, Alert, AppState, Linking, AccessibilityInfo } from 'react-native';
+import { View, Text, Pressable, ActivityIndicator, Alert, AppState, Linking, AccessibilityInfo, Platform } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform } from 'react-native';
-import { C, F, hexA } from '../theme';
+import { F, hexA } from '../theme';
 import { Icon } from '../icons';
-import { Serif, Body, Mono } from '../components/primitives';
 import { useStore } from '../store';
+import { useSpeech } from '../lib/useSpeech';
 import { NAV_MAP_HTML } from '../lib/navMapHtml';
 import { navTargetRef, fetchNavRoute, saveNavigationTrack, appVersionLabel, type NavTarget } from '../lib/qhpNavigationQueries';
 import {
-  type Fix, type LatLng, type RouteInfo, type TrackPoint, type Projection,
+  type Fix, type LatLng, type RouteInfo, type TrackPoint, type Projection, type Maneuver, type ManeuverKind,
   projectOnRoute, isOffRoute, isArrived, estimateLeft, arrivalClock, agoText, shouldKeep, toPoint, headingFrom, isMoving,
-  buildTrack, stalePin, haversineM, ROUTE_REFRESH_MS, ROUTE_MIN_GAP_MS,
+  buildTrack, stalePin, haversineM, nextManeuver, fmtStepDistance, voiceCue, maneuverPhrase, instructionTitle, ARRIVE_CUE, ROUTE_REFRESH_MS, ROUTE_MIN_GAP_MS,
 } from '../lib/qhpNavigation';
 
 type Phase = 'locating' | 'ready' | 'navigating' | 'arrived' | 'saving';
 type RouteState = 'none' | 'ok' | 'recalculating' | 'local';
-const ORANGE = C.orange;
 const TRACK_KEY = (id: string) => `qhp-nav-track:${id}`;
 const PARTIAL_SAVE_MS = 60_000;
 
-function IconBtn({ name, color, label, onPress }: { name: any; color: string; label: string; onPress: () => void }) {
+/* Google's navigation palette */
+const G = { blue: '#1A73E8', green: '#188038', red: '#D93025', teal: '#0B6E63', tealDark: '#095A51', ink: '#202124', ink2: '#3C4043', muted: '#5F6368', line: '#DADCE0', sheet: '#FFFFFF', amber: '#B06000', amberBg: '#FEF7E0' };
+const shadow = { shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 5 } as const;
+
+/* Manoeuvre arrows (24 x 24 strokes, drawn by the app's Icon with a raw path). */
+const ARROWS: Record<ManeuverKind, string> = {
+  straight: 'M12 20V5M7 10l5-5 5 5',
+  left: 'M17 20v-6a4 4 0 0 0-4-4H5M9 6l-4 4 4 4',
+  right: 'M7 20v-6a4 4 0 0 1 4-4h8M15 6l4 4-4 4',
+  'slight-left': 'M14 20v-6l-6-6M8 13V8h5',
+  'slight-right': 'M10 20v-6l6-6M16 13V8h-5',
+  'sharp-left': 'M16 20V9a3 3 0 0 0-3-3H8M11 3 6 6l3 5',
+  'sharp-right': 'M8 20V9a3 3 0 0 1 3-3h5M13 3l5 3-3 5',
+  'uturn-left': 'M16 20V9a4 4 0 0 0-8 0v4M11 10l-3 3-3-3',
+  'uturn-right': 'M8 20V9a4 4 0 0 1 8 0v4M13 10l3 3 3-3',
+  'roundabout-left': 'M12 21v-5M12 16a4.5 4.5 0 1 0-4.5-4.5M7.5 11.5V7.5M10 10 7.5 7.5 5 10',
+  'roundabout-right': 'M12 21v-5M12 16a4.5 4.5 0 1 1 4.5-4.5M16.5 11.5V7.5M14 10l2.5-2.5L19 10',
+  merge: 'M12 21V9M12 9 7 4M12 9l5-5',
+  'fork-left': 'M12 21v-9M12 12 7 7M7 11V7h4',
+  'fork-right': 'M12 21v-9M12 12l5-5M17 11V7h-4',
+  'ramp-left': 'M14 20v-6l-6-6M8 13V8h5',
+  'ramp-right': 'M10 20v-6l6-6M16 13V8h-5',
+  depart: 'M12 20V5M7 10l5-5 5 5',
+  arrive: 'M12 21s-6-5.3-6-10a6 6 0 1 1 12 0c0 4.7-6 10-6 10zM12 11h.01',
+  ferry: 'M4 17c2 1.5 4 1.5 6 0s4-1.5 6 0 4 1.5 4 0M6 13l1-5h10l1 5M12 4v4',
+};
+
+function RoundBtn({ path, name, label, onPress, active, tint }: { path?: string; name?: any; label: string; onPress: () => void; active?: boolean; tint?: string }) {
+  const col = tint ?? (active ? G.blue : G.ink2);
   return (
-    <Pressable onPress={onPress} hitSlop={10} accessibilityRole="button" accessibilityLabel={label}
-      style={({ pressed }) => ({ width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', backgroundColor: hexA(color, pressed ? 0.26 : 0.14), borderWidth: 1, borderColor: hexA(color, 0.45) })}>
-      <Icon name={name} size={15} color={color} strokeWidth={2.2} />
+    <Pressable onPress={onPress} hitSlop={8} accessibilityRole="button" accessibilityLabel={label}
+      style={({ pressed }) => ({ width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: pressed ? '#F1F3F4' : '#fff', ...shadow })}>
+      {path ? <Icon path={path} size={22} color={col} strokeWidth={2.2} /> : <Icon name={name} size={20} color={col} strokeWidth={2.2} />}
     </Pressable>
-  );
-}
-
-function Chip({ text, color, spin }: { text: string; color: string; spin?: boolean }) {
-  return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 5, paddingHorizontal: 10, borderRadius: 999, backgroundColor: hexA(color, 0.14), borderWidth: 1, borderColor: hexA(color, 0.5) }}>
-      {spin ? <ActivityIndicator size={8} color={color} /> : <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: color }} />}
-      <Mono style={{ fontSize: 10, letterSpacing: 1.2, color }}>{text.toUpperCase()}</Mono>
-    </View>
-  );
-}
-
-function Num({ value, unit, label }: { value: string; unit: string; label: string }) {
-  return (
-    <View style={{ flex: 1 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 3 }}>
-        <Text style={{ fontFamily: F.bodyBold, fontSize: 32, lineHeight: 36, color: '#fff', letterSpacing: -0.3 }}>{value}</Text>
-        <Text style={{ fontFamily: F.bodySemi, fontSize: 15, color: C.ink3 }}>{unit}</Text>
-      </View>
-      <Mono style={{ fontSize: 10, letterSpacing: 1.4, color: C.mono, marginTop: 2 }}>{label}</Mono>
-    </View>
   );
 }
 
@@ -69,7 +76,9 @@ export function QhpNavigation() {
   const insets = useSafeAreaInsets();
   const target = React.useRef<NavTarget | null>(navTargetRef.current).current;
   const web = React.useRef<WebView>(null);
+  const speech = useSpeech();
   const [mapReady, setMapReady] = React.useState(false);
+  const [mapError, setMapError] = React.useState<string | null>(null);
   const [phase, setPhase] = React.useState<Phase>('locating');
   const [routeState, setRouteState] = React.useState<RouteState>('none');
   const [route, setRoute] = React.useState<RouteInfo | null>(null);
@@ -79,6 +88,12 @@ export function QhpNavigation() {
   const [reduceMotion, setReduceMotion] = React.useState(false);
   const [permDenied, setPermDenied] = React.useState(false);
   const [saveNote, setSaveNote] = React.useState<string | null>(null);
+  const [following, setFollowing] = React.useState(true);
+  const [reached, setReached] = React.useState(false); // the pin was reached (stays true while saving)
+  const [cameraNorth, setCameraNorth] = React.useState(false);
+  const [muted, setMuted] = React.useState(false);
+  const mutedRef = React.useRef(false);
+  mutedRef.current = muted;
 
   // Ride recording
   const startMs = React.useRef<number | null>(null);
@@ -92,6 +107,10 @@ export function QhpNavigation() {
   const phaseRef = React.useRef<Phase>('locating');
   const lastPartialSave = React.useRef(0);
   const finishing = React.useRef(false);
+  const routeAtStart = React.useRef<RouteInfo | null>(null);
+  const spoken = React.useRef<Set<string>>(new Set());
+  const compassRef = React.useRef<number | null>(null);
+  const headingSubRef = React.useRef<Location.LocationSubscription | null>(null);
   phaseRef.current = phase;
   routeRef.current = route;
 
@@ -102,7 +121,11 @@ export function QhpNavigation() {
     web.current?.injectJavaScript(`window.__nav && window.__nav.apply(${JSON.stringify(m)}); true;`);
   }, []);
 
-  // Reduce motion (system) also freezes the marker in the page.
+  const say = React.useCallback((id: string, text: string) => {
+    if (mutedRef.current) return;
+    speech.speak(id, text);
+  }, [speech]);
+
   React.useEffect(() => {
     let alive = true;
     AccessibilityInfo.isReduceMotionEnabled().then((r) => { if (alive) setReduceMotion(!!r); }).catch(() => {});
@@ -111,19 +134,15 @@ export function QhpNavigation() {
   }, []);
   React.useEffect(() => { if (mapReady) send({ type: 'motion', reduce: reduceMotion }); }, [mapReady, reduceMotion, send]);
 
-  // Map init once the page is up, then replay the last fix (a fix that arrived before the
-  // page loaded was sent into the void; without this a still phone shows no badge).
+  // Map init once the page is up, then replay the last fix.
   React.useEffect(() => {
     if (!mapReady || !target) return;
-    send({ type: 'init', dest: { lat: target.lat, lng: target.lng, name: target.clientName.split(' ')[0] }, stale: stale.stale });
     const f = prevFix.current;
     if (f) setTimeout(() => onFix(f), 150);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapReady, target, stale.stale, send]);
+  }, [mapReady]);
 
-  // GPS: foreground watch, a fix every second; the compass beside it for the badge's heading.
-  const compassRef = React.useRef<number | null>(null);
-  const headingSubRef = React.useRef<Location.LocationSubscription | null>(null);
+  // GPS: a fix every second; the compass beside it for the badge's heading.
   React.useEffect(() => {
     if (!target) return;
     let sub: Location.LocationSubscription | null = null;
@@ -133,15 +152,11 @@ export function QhpNavigation() {
         let perm = await Location.getForegroundPermissionsAsync();
         if (!perm.granted && perm.canAskAgain) perm = await Location.requestForegroundPermissionsAsync();
         if (!perm.granted) { if (alive) setPermDenied(true); return; }
-        // distanceInterval 0: a fix every second even while standing still, so the map, the
-        // projection and the recording keep ticking at a signal or before setting off.
         sub = await Location.watchPositionAsync({ accuracy: Location.Accuracy.BestForNavigation, timeInterval: 1000, distanceInterval: 0 }, (p) => {
           if (!alive) return;
           const f: Fix = { t: p.timestamp || Date.now(), lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy ?? null, spd: p.coords.speed ?? null, heading: p.coords.heading ?? null };
           onFix(f);
         });
-        // The compass turns the badge with the phone while standing still or slow (user, 14 Oct
-        // 2026: "when we twist the phone its direction does not change"); throttled to 10 a second.
         let lastSent = 0, lastDeg = -1;
         headingSubRef.current = await Location.watchHeadingAsync((h) => {
           if (!alive) return;
@@ -159,6 +174,14 @@ export function QhpNavigation() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [target?.assessmentId]);
 
+  const nearestIndex = (p: LatLng, pts: LatLng[]): number => {
+    let bi = 0, bd = Infinity;
+    for (let i = 0; i < pts.length; i++) { const d = haversineM(p, pts[i]); if (d < bd) { bd = d; bi = i; } }
+    return bi;
+  };
+
+  const [maneuver, setManeuver] = React.useState<Maneuver | null>(null);
+
   const onFix = (f: Fix) => {
     const prev = prevFix.current;
     headingRef.current = headingFrom(prev, f, headingRef.current);
@@ -171,20 +194,19 @@ export function QhpNavigation() {
     const pj = r ? projectOnRoute(here, r.points) : null;
     setProj(pj);
     if (phaseRef.current === 'navigating' || phaseRef.current === 'arrived') {
-      // Record the ride.
       const s = startMs.current ?? f.t;
       const last = points.current[points.current.length - 1] ?? null;
       if (shouldKeep(last, f, s)) {
         points.current.push(toPoint(f, s));
         if (points.current.length % 6 === 0) persistLocal();
       }
-      // Arrival: at the pin, the Arrived action appears (never auto-closes).
       if (pin && isArrived(here, pin, f.acc) && phaseRef.current === 'navigating') {
         setPhase('arrived');
+        setReached(true);
+        if (!spoken.current.has(ARRIVE_CUE)) { spoken.current.add(ARRIVE_CUE); say(ARRIVE_CUE, 'You have arrived at your destination.'); }
         send({ type: 'arrived' });
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       }
-      // Off route: a fresh route from here, rate limited; while waiting the line dims.
       if (r && pj && isOffRoute(pj, f.acc) && !routeInFlight.current && Date.now() - lastRouteCallAt.current > ROUTE_MIN_GAP_MS) {
         setRouteState('recalculating');
         send({ type: 'route', points: r.points, dim: true });
@@ -193,18 +215,17 @@ export function QhpNavigation() {
         refreshRoute(here, 'periodic');
       }
       if (Date.now() - lastPartialSave.current > PARTIAL_SAVE_MS) { lastPartialSave.current = Date.now(); void partialSave(); }
+      // Turn-by-turn: the next manoeuvre and its spoken cue.
+      if (r && pj && phaseRef.current === 'navigating') {
+        const mv = nextManeuver(pj.alongM, r.steps, pj.totalM);
+        setManeuver(mv);
+        const cue = voiceCue(mv, spoken.current);
+        if (cue) { spoken.current.add(cue.id); say(cue.id, cue.text); }
+      }
     }
-    // Map: the rider; alongIndex lets the page grey out the ridden part of the line; the
-    // interval lets it glide to this fix over the time the next one will take to arrive.
     const alongIndex = pj && r ? nearestIndex(here, r.points) : null;
     const intervalMs = prev ? Math.max(0, f.t - prev.t) : 1000;
     send({ type: 'pos', lat: f.lat, lng: f.lng, heading: headingRef.current, speed: f.spd ?? 0, intervalMs, moving: movingRef.current && phaseRef.current !== 'arrived', alongIndex, follow: phaseRef.current !== 'ready' });
-  };
-
-  const nearestIndex = (p: LatLng, pts: LatLng[]): number => {
-    let bi = 0, bd = Infinity;
-    for (let i = 0; i < pts.length; i++) { const d = haversineM(p, pts[i]); if (d < bd) { bd = d; bi = i; } }
-    return bi;
   };
 
   const refreshRoute = async (origin: LatLng, why: 'start' | 'periodic' | 'off-route') => {
@@ -217,13 +238,17 @@ export function QhpNavigation() {
       setRoute(r);
       setRouteState('ok');
       setRouteAgo('just now');
-      send({ type: 'route', points: r.points, dim: false, overview: why === 'start' });
-      // Project the last fix onto the new line at once (numbers lose the tilde, the badge and
-      // the ridden part update) instead of waiting for the next GPS tick.
+      if (why !== 'periodic') spoken.current = new Set(); // a new line: cues start over
+      send({ type: 'route', points: r.points, dim: false, overview: false });
       const f = prevFix.current;
-      if (f) { const pj = projectOnRoute([f.lat, f.lng], r.points); setProj(pj); send({ type: 'pos', lat: f.lat, lng: f.lng, heading: headingRef.current, speed: f.spd ?? 0, intervalMs: 400, moving: movingRef.current && phaseRef.current !== 'arrived', alongIndex: pj ? nearestIndex([f.lat, f.lng], r.points) : null, follow: phaseRef.current !== 'ready' && why !== 'start' }); }
+      if (f) {
+        const pj = projectOnRoute([f.lat, f.lng], r.points);
+        setProj(pj);
+        if (pj) setManeuver(nextManeuver(pj.alongM, r.steps, pj.totalM));
+        send({ type: 'pos', lat: f.lat, lng: f.lng, heading: headingRef.current, speed: f.spd ?? 0, intervalMs: 400, moving: movingRef.current && phaseRef.current !== 'arrived', alongIndex: pj ? nearestIndex([f.lat, f.lng], r.points) : null, follow: phaseRef.current !== 'ready' });
+      }
+      if (why === 'off-route') say('reroute', 'Rerouting.');
     } catch {
-      // The screen keeps working on the phone's own numbers; the line stays as it was.
       setRouteState('local');
       if (routeRef.current) send({ type: 'route', points: routeRef.current.points, dim: false });
     } finally {
@@ -231,7 +256,6 @@ export function QhpNavigation() {
     }
   };
 
-  // "Route updated N ago" ticks every 10 s.
   React.useEffect(() => {
     const t = setInterval(() => { if (routeRef.current) setRouteAgo(agoText(Date.now() - routeRef.current.fetchedAt)); }, 10_000);
     return () => clearInterval(t);
@@ -253,7 +277,6 @@ export function QhpNavigation() {
       last, source: Platform.OS === 'ios' ? 'ios' : 'android', appVersion: appVersionLabel(),
     });
   };
-  const routeAtStart = React.useRef<RouteInfo | null>(null);
 
   const partialSave = async () => {
     const t = currentTrack(null, null);
@@ -261,23 +284,47 @@ export function QhpNavigation() {
     try { await saveNavigationTrack(target.assessmentId, t); } catch { /* best effort while riding */ }
   };
 
+  // Preview the route as soon as we know where the assessor is (before Start).
+  const previewed = React.useRef(false);
+  React.useEffect(() => {
+    if (phase !== 'ready' || !fix || previewed.current || !mapReady) return;
+    previewed.current = true;
+    (async () => {
+      await refreshRoute([fix.lat, fix.lng], 'start');
+      send({ type: 'overview' });
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, fix, mapReady]);
+
   const start = async () => {
     if (!target || !fix || phase !== 'ready') return;
     startMs.current = Date.now();
     points.current = [toPoint(fix, startMs.current)];
     lastPartialSave.current = Date.now();
+    lastRouteCallAt.current = 0;
+    spoken.current = new Set();
     setPhase('navigating');
+    setFollowing(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     send({ type: 'start' });
     persistLocal();
-    await refreshRoute([fix.lat, fix.lng], 'start');
+    if (!routeRef.current) await refreshRoute([fix.lat, fix.lng], 'start');
     routeAtStart.current = routeRef.current;
+    const r = routeRef.current;
+    const first = r?.steps?.[0];
+    const pj = r ? projectOnRoute([fix.lat, fix.lng], r.points) : null;
+    const mv = r && pj ? nextManeuver(pj.alongM, r.steps, pj.totalM) : null;
+    setManeuver(mv);
+    const opening = first ? instructionTitle(first.instruction) : null;
+    const next = mv && mv.kind !== 'arrive' ? `, then in ${fmtStepDistance(mv.distanceM).replace(' m', ' metres').replace(' km', ' kilometres')} ${maneuverPhrase(mv.kind, mv.street, mv.prep)}` : '';
+    say('start', `${opening ?? 'Starting navigation'}${next}.`);
   };
 
   const finish = async (endedBy: 'arrived' | 'ended') => {
     if (!target || finishing.current) return;
     finishing.current = true;
     setPhase('saving');
+    speech.stop();
     send({ type: 'stop' });
     const t = currentTrack(endedBy, Date.now());
     try {
@@ -296,25 +343,24 @@ export function QhpNavigation() {
     }
   };
 
-  const confirmEnd = () => {
-    if (phase === 'ready' || phase === 'locating') { navTargetRef.current = null; canGoBack ? back() : go('qhp'); return; }
-    Alert.alert('End navigation?', 'The ride so far is saved with the QHP.', [
+  const confirmExit = () => {
+    if (phase === 'ready' || phase === 'locating') { speech.stop(); navTargetRef.current = null; canGoBack ? back() : go('qhp'); return; }
+    Alert.alert('Exit navigation?', 'The ride so far is saved with the QHP.', [
       { text: 'Keep going', style: 'cancel' },
-      { text: 'End', style: 'destructive', onPress: () => finish('ended') },
+      { text: 'Exit', style: 'destructive', onPress: () => finish('ended') },
     ]);
   };
 
-  // Leaving the app pauses nothing (foreground only); on return the map recentres.
   React.useEffect(() => {
-    const sub = AppState.addEventListener('change', (s) => { if (s === 'active') send({ type: 'recenter' }); });
+    const sub = AppState.addEventListener('change', (s) => { if (s === 'active' && phaseRef.current === 'navigating') send({ type: 'recenter' }); });
     return () => sub.remove();
   }, [send]);
 
   if (!target) {
     return (
-      <View style={{ flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12 }}>
-        <Body style={{ fontSize: 13, color: C.muted2, textAlign: 'center' }}>Nothing to navigate to. Open an upcoming QHP and tap Start navigation.</Body>
-        <Pressable onPress={() => (canGoBack ? back() : go('qhp'))} hitSlop={10}><Text style={{ fontFamily: F.bodySemi, fontSize: 13.5, color: ORANGE }}>Back</Text></Pressable>
+      <View style={{ flex: 1, backgroundColor: '#e8eaed', alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12 }}>
+        <Text style={{ fontFamily: F.body, fontSize: 13, color: G.muted, textAlign: 'center' }}>Nothing to navigate to. Open an upcoming QHP and tap Start navigation.</Text>
+        <Pressable onPress={() => (canGoBack ? back() : go('qhp'))} hitSlop={10}><Text style={{ fontFamily: F.bodySemi, fontSize: 13.5, color: G.blue }}>Back</Text></Pressable>
       </View>
     );
   }
@@ -322,47 +368,36 @@ export function QhpNavigation() {
   // ---- the numbers
   const here: LatLng | null = fix ? [fix.lat, fix.lng] : null;
   const est = here && pin ? estimateLeft(here, pin, route, proj) : null;
-  const atPin = phase === 'arrived';
+  const atPin = reached && (phase === 'arrived' || phase === 'saving');
   const gapM = here && pin ? Math.round(haversineM(here, pin)) : null;
-  const leftValue = !est ? '—' : atPin && gapM != null ? String(gapM) : est.km < 1 ? String(Math.round(est.km * 1000)) : `${est.local || routeState === 'local' ? '~' : ''}${est.km}`;
-  const leftUnit = !est ? 'km' : atPin || est.km < 1 ? 'm' : 'km';
-  const minValue = !est ? '—' : atPin ? '0' : `${est.local || routeState === 'local' || routeState === 'recalculating' ? '~' : ''}${est.min}`;
-  const arriveValue = !est ? '—' : arrivalClock(Date.now(), atPin ? 0 : est.min);
-  const [arriveHM, arriveAP] = arriveValue === '—' ? ['—', ''] : [arriveValue.replace(/\s?(AM|PM)$/, ''), (arriveValue.match(/(AM|PM)$/) ?? [''])[0]];
+  const approx = (est?.local || routeState === 'local' || routeState === 'recalculating') && !atPin;
+  const minText = !est ? '—' : atPin ? '0' : `${approx ? '~' : ''}${est.min}`;
+  const kmText = !est ? '' : atPin && gapM != null ? `${gapM} m` : est.km < 1 ? `${Math.round(est.km * 1000)} m` : `${est.km} km`;
+  const arriveText = !est ? '' : arrivalClock(Date.now(), atPin ? 0 : est.min);
+  const navigating = phase === 'navigating' || phase === 'arrived' || phase === 'saving';
 
-  const chip = permDenied ? { text: 'Location off', color: C.red }
-    : phase === 'locating' ? { text: 'Finding you', color: C.gold, spin: true }
-    : phase === 'saving' ? { text: 'Saving ride', color: C.gold, spin: true }
-    : atPin ? { text: 'You are here', color: C.green }
-    : routeState === 'recalculating' ? { text: 'Recalculating', color: C.gold, spin: true }
-    : routeState === 'local' ? { text: 'Local estimate', color: C.muted }
-    : phase === 'ready' ? { text: 'Ready', color: C.gold }
-    : { text: 'Live', color: C.green };
+  const bannerKind: ManeuverKind = atPin ? 'arrive' : maneuver?.kind ?? 'straight';
+  const bannerDist = atPin ? (gapM != null ? `${gapM} m` : '') : maneuver ? fmtStepDistance(maneuver.distanceM) : '';
+  const bannerText = atPin ? 'You have arrived' : maneuver
+    ? (maneuver.kind === 'arrive' ? target.clientName : (maneuver.street ?? maneuver.instruction ?? 'Continue'))
+    : (route && !route.steps.length ? 'Follow the blue line' : 'Finding the route');
+  const bannerSub = atPin ? target.clientName : maneuver ? (maneuver.street ? maneuver.instruction : maneuver.note) : null;
 
-  const note: { text: string; color: string } | null = permDenied
-    ? { text: 'Location is off for Odds. Allow it in the phone settings, then come back.', color: C.red }
-    : phase === 'locating' ? { text: 'Move outdoors if you are inside. The route loads as soon as your position is known.', color: C.gold }
-    : atPin ? { text: `Within ${gapM ?? '—'} m of the pin. Tap Arrived when you are with the client.`, color: C.green }
-    : routeState === 'recalculating' ? { text: 'Off the route. Recalculating from where you are.', color: C.gold }
-    : routeState === 'local' ? { text: 'Running on the phone only: straight line times 1.35, at 22 km/h. The map still follows you.', color: C.muted2 }
-    : stale.stale && phase === 'ready' ? { text: stale.reason!, color: C.gold }
+  const statusLine: { text: string; color: string; bg: string } | null = permDenied
+    ? { text: 'Location is off for Odds. Allow it in the phone settings.', color: '#fff', bg: G.red }
+    : routeState === 'recalculating' ? { text: 'Rerouting…', color: G.ink2, bg: '#fff' }
+    : routeState === 'local' ? { text: `Route service unreachable${route ? `, last route ${routeAgo}` : ''}. Estimates only.`, color: G.amber, bg: G.amberBg }
     : null;
-
-  const updLine = permDenied ? ''
-    : phase === 'locating' ? 'WAITING FOR THE FIRST GPS FIX'
-    : phase === 'ready' ? (fix?.acc != null ? `GPS ACCURACY ±${Math.round(fix.acc)} M` : 'GPS READY')
-    : routeState === 'local' ? `ROUTE SERVICE UNREACHABLE${route ? ` · LAST ROUTE ${routeAgo.toUpperCase()}` : ''}`
-    : route ? `ROUTE UPDATED ${routeAgo.toUpperCase()}` : 'FETCHING THE ROUTE';
 
   const call = () => { if (target.phone) Linking.openURL(`tel:${target.phone.replace(/[^0-9+]/g, '')}`).catch(() => {}); };
   const openMaps = () => Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${target.lat},${target.lng}&travelmode=driving`).catch(() => {});
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#0b0b0f' }}>
+    <View style={{ flex: 1, backgroundColor: '#e8eaed' }}>
       <WebView
         ref={web}
         source={{ html: NAV_MAP_HTML, baseUrl: 'https://odds.local/' }}
-        style={{ flex: 1, backgroundColor: '#0b0b0f' }}
+        style={{ flex: 1, backgroundColor: '#e8eaed' }}
         javaScriptEnabled
         domStorageEnabled
         originWhitelist={['*']}
@@ -374,66 +409,137 @@ export function QhpNavigation() {
         allowsBackForwardNavigationGestures={false}
         textZoom={100}
         setBuiltInZoomControls={false}
+        androidLayerType="hardware"
         onMessage={(e) => {
           try {
             const m = JSON.parse(e.nativeEvent.data);
-            if (m.type === 'loaded') setMapReady(true);
+            if (m.type === 'loaded') { send({ type: 'init', dest: { lat: target.lat, lng: target.lng, name: target.clientName.split(' ')[0] }, stale: stale.stale }); }
+            else if (m.type === 'ready') setMapReady(true);
+            else if (m.type === 'drag') setFollowing(false);
+            else if (m.type === 'error') setMapError(String(m.message ?? 'map error'));
           } catch { /* not ours */ }
         }}
       />
 
-      {/* Top card: a thin dark layer, the client first, then the three numbers */}
-      <View style={{ position: 'absolute', left: 0, right: 0, top: 0, paddingTop: insets.top + 8, paddingHorizontal: 16, paddingBottom: 10, backgroundColor: 'rgba(8,6,6,0.94)', borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.08)' }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <IconBtn name="arrowLeft" color={C.ink3} label="Back" onPress={confirmEnd} />
-          <View style={{ flex: 1 }} />
-          <Chip text={chip.text} color={chip.color} spin={(chip as any).spin} />
-          {target.phone ? <IconBtn name="phone" color={C.green} label="Call the client" onPress={call} /> : null}
-          <IconBtn name="map" color={C.blue} label="Open in Google Maps" onPress={openMaps} />
-        </View>
-        <Serif numberOfLines={1} style={{ fontSize: 25, lineHeight: 29, marginTop: 10 }}>{target.clientName}</Serif>
-        <Body numberOfLines={1} style={{ fontSize: 13, color: C.ink3, marginTop: 2 }}>{target.address ?? 'Client home pin'}</Body>
-        <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-          <Num value={leftValue} unit={leftUnit} label="LEFT" />
-          <Num value={minValue} unit="min" label="TIME" />
-          <Num value={arriveHM} unit={arriveAP} label="ARRIVE" />
-        </View>
-        {note ? (
-          <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 7, marginTop: 10 }}>
-            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: note.color, marginTop: 5 }} />
-            <Body style={{ flex: 1, fontSize: 12, lineHeight: 16, color: note.color }}>{note.text}</Body>
+      {/* ---- Top: the turn banner while navigating, the client card before */}
+      <View style={{ position: 'absolute', left: 12, right: 12, top: insets.top + 8 }} pointerEvents="box-none">
+        {navigating ? (
+          <View style={{ borderRadius: 18, backgroundColor: G.teal, ...shadow, overflow: 'hidden' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 14, paddingHorizontal: 16 }}>
+              <View style={{ alignItems: 'center', width: 64 }}>
+                <Icon path={ARROWS[bannerKind]} size={44} color="#fff" strokeWidth={2.6} />
+                <Text style={{ fontFamily: F.bodyBold, fontSize: 22, color: '#fff', marginTop: 2 }}>{bannerDist.replace(/ (m|km)$/, '')}<Text style={{ fontSize: 13, color: 'rgba(255,255,255,0.85)' }}> {bannerDist.endsWith('km') ? 'km' : 'm'}</Text></Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text numberOfLines={2} style={{ fontFamily: F.bodySemi, fontSize: 24, lineHeight: 29, color: '#fff' }}>{bannerText}</Text>
+                {bannerSub && bannerSub !== bannerText ? <Text numberOfLines={1} style={{ fontFamily: F.body, fontSize: 13, color: 'rgba(255,255,255,0.8)', marginTop: 2 }}>{bannerSub}</Text> : null}
+              </View>
+            </View>
+            {maneuver?.then && !atPin ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8, paddingHorizontal: 16, backgroundColor: G.tealDark }}>
+                <Text style={{ fontFamily: F.bodySemi, fontSize: 13, color: 'rgba(255,255,255,0.9)' }}>Then</Text>
+                <Icon path={ARROWS[maneuver.then.kind]} size={20} color="#fff" strokeWidth={2.4} />
+                {maneuver.then.street ? <Text numberOfLines={1} style={{ fontFamily: F.body, fontSize: 13, color: 'rgba(255,255,255,0.9)', flex: 1 }}>{maneuver.then.street}</Text> : null}
+              </View>
+            ) : null}
           </View>
-        ) : null}
-        {updLine ? <Mono style={{ fontSize: 10, letterSpacing: 1, color: C.muted3, marginTop: 9 }}>{updLine}</Mono> : null}
-      </View>
-
-      {/* Bottom bar: one action per moment */}
-      <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 16, paddingTop: 12, paddingBottom: insets.bottom + 12, backgroundColor: 'rgba(8,6,6,0.94)', borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.08)', alignItems: 'center', gap: 10 }}>
-        {saveNote ? <Body style={{ fontSize: 11.5, color: C.gold, textAlign: 'center' }}>{saveNote}</Body> : null}
-        {phase === 'locating' || phase === 'ready' ? (
-          <>
-            <Pressable onPress={start} disabled={phase !== 'ready'} hitSlop={10} accessibilityRole="button" accessibilityState={{ disabled: phase !== 'ready' }}
-              style={({ pressed }) => ({ width: '100%', height: 52, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: ORANGE, opacity: phase !== 'ready' ? 0.45 : pressed ? 0.85 : 1 })}>
-              <Text style={{ fontFamily: F.bodyBold, fontSize: 15, color: '#fff' }}>Start navigation</Text>
-            </Pressable>
-            {phase === 'ready' ? (
-              <Pressable onPress={confirmEnd} hitSlop={10} accessibilityRole="button" style={{ paddingVertical: 6, paddingHorizontal: 12 }}><Text style={{ fontFamily: F.bodySemi, fontSize: 14, color: C.muted }}>Back</Text></Pressable>
-            ) : <Body style={{ fontSize: 11, color: C.muted3 }}>Starts when your position is found</Body>}
-          </>
-        ) : phase === 'arrived' || phase === 'saving' ? (
-          <>
-            <Pressable onPress={() => finish('arrived')} disabled={phase === 'saving'} hitSlop={10} accessibilityRole="button"
-              style={({ pressed }) => ({ width: '100%', height: 52, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: ORANGE, opacity: phase === 'saving' ? 0.6 : pressed ? 0.85 : 1 })}>
-              {phase === 'saving' ? <ActivityIndicator color="#fff" /> : <Text style={{ fontFamily: F.bodyBold, fontSize: 15, color: '#fff' }}>Arrived</Text>}
-            </Pressable>
-            <Pressable onPress={confirmEnd} hitSlop={10} accessibilityRole="button" style={{ paddingVertical: 6, paddingHorizontal: 12 }}><Text style={{ fontFamily: F.bodySemi, fontSize: 14, color: C.muted }}>End navigation</Text></Pressable>
-          </>
         ) : (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 18 }}>
-            <Pressable onPress={() => send({ type: 'recenter' })} hitSlop={10} accessibilityRole="button" style={{ paddingVertical: 6, paddingHorizontal: 12 }}><Text style={{ fontFamily: F.bodySemi, fontSize: 14, color: C.ink3 }}>Recentre</Text></Pressable>
-            <Pressable onPress={confirmEnd} hitSlop={10} accessibilityRole="button" style={{ paddingVertical: 6, paddingHorizontal: 12 }}><Text style={{ fontFamily: F.bodySemi, fontSize: 14, color: C.muted }}>End navigation</Text></Pressable>
+          <View style={{ borderRadius: 18, backgroundColor: '#fff', ...shadow, padding: 14, gap: 6 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <Pressable onPress={confirmExit} hitSlop={10} accessibilityRole="button" accessibilityLabel="Back" style={{ width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F1F3F4' }}>
+                <Icon name="arrowLeft" size={16} color={G.ink2} strokeWidth={2.3} />
+              </Pressable>
+              <View style={{ flex: 1 }}>
+                <Text numberOfLines={1} style={{ fontFamily: F.bodyBold, fontSize: 20, color: G.ink }}>{target.clientName}</Text>
+                <Text numberOfLines={1} style={{ fontFamily: F.body, fontSize: 13, color: G.muted, marginTop: 1 }}>{target.address ?? 'Client home pin'}</Text>
+              </View>
+              {target.phone ? (
+                <Pressable onPress={call} hitSlop={8} accessibilityRole="button" accessibilityLabel="Call the client" style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: hexA(G.green, 0.12) }}>
+                  <Icon name="phone" size={16} color={G.green} strokeWidth={2.2} />
+                </Pressable>
+              ) : null}
+            </View>
+            {stale.stale ? (
+              <View style={{ flexDirection: 'row', gap: 8, padding: 10, borderRadius: 10, backgroundColor: G.amberBg }}>
+                <Icon name="alert" size={14} color={G.amber} strokeWidth={2.2} />
+                <Text style={{ flex: 1, fontFamily: F.body, fontSize: 12, lineHeight: 16, color: G.amber }}>{stale.reason}</Text>
+              </View>
+            ) : null}
           </View>
         )}
+        {statusLine ? (
+          <View style={{ alignSelf: 'center', marginTop: 8, paddingVertical: 7, paddingHorizontal: 14, borderRadius: 999, backgroundColor: statusLine.bg, ...shadow, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            {routeState === 'recalculating' ? <ActivityIndicator size={10} color={G.ink2} /> : null}
+            <Text style={{ fontFamily: F.bodySemi, fontSize: 12.5, color: statusLine.color }}>{statusLine.text}</Text>
+          </View>
+        ) : mapError ? (
+          <View style={{ alignSelf: 'center', marginTop: 8, paddingVertical: 7, paddingHorizontal: 14, borderRadius: 999, backgroundColor: G.amberBg, ...shadow }}>
+            <Text style={{ fontFamily: F.bodySemi, fontSize: 12.5, color: G.amber }}>The map could not load. The turns and numbers still work.</Text>
+          </View>
+        ) : null}
+      </View>
+
+      {/* ---- Right: round controls */}
+      {navigating && phase !== 'saving' ? (
+        <View style={{ position: 'absolute', right: 12, top: insets.top + 160, gap: 12 }}>
+          <RoundBtn path="M12 3l4 9-4 9-4-9zM12 3v18" label={cameraNorth ? 'Heading up' : 'North up'} active={cameraNorth} onPress={() => { const n = !cameraNorth; setCameraNorth(n); send({ type: 'camera', mode: n ? 'north' : 'heading' }); }} />
+          <RoundBtn path={muted ? 'M11 5 6 9H3v6h3l5 4zM22 9l-6 6M16 9l6 6' : 'M11 5 6 9H3v6h3l5 4zM15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13'} label={muted ? 'Unmute voice' : 'Mute voice'} tint={muted ? G.red : G.ink2} onPress={() => { const m = !muted; setMuted(m); if (m) speech.stop(); }} />
+          <RoundBtn path="M6 20V9a3 3 0 0 1 3-3h6a3 3 0 0 1 3 3v11M6 20h12M12 6V3M9 3h6" label="Route overview" onPress={() => { setFollowing(false); send({ type: 'overview' }); }} />
+          <RoundBtn name="map" label="Open in Google Maps" tint={G.blue} onPress={openMaps} />
+        </View>
+      ) : null}
+
+      {/* ---- Re-centre pill */}
+      {navigating && !following && phase !== 'saving' ? (
+        <Pressable onPress={() => { setFollowing(true); send({ type: 'recenter' }); }} hitSlop={8} accessibilityRole="button"
+          style={{ position: 'absolute', left: 16, bottom: insets.bottom + 112, flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, paddingHorizontal: 16, borderRadius: 999, backgroundColor: '#fff', ...shadow }}>
+          <Icon path="M12 3l4 9-4 9-4-9z" size={16} color={G.teal} strokeWidth={2.2} fill={G.teal} />
+          <Text style={{ fontFamily: F.bodySemi, fontSize: 15, color: G.teal }}>Re-centre</Text>
+        </Pressable>
+      ) : null}
+
+      {/* ---- Bottom sheet */}
+      <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 16, paddingTop: 12, paddingBottom: insets.bottom + 12, backgroundColor: G.sheet, borderTopLeftRadius: 22, borderTopRightRadius: 22, ...shadow, gap: 10 }}>
+        {saveNote ? <Text style={{ fontFamily: F.body, fontSize: 12, color: G.amber, textAlign: 'center' }}>{saveNote}</Text> : null}
+        {!navigating ? (
+          <>
+            <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8 }}>
+              <Text style={{ fontFamily: F.bodyBold, fontSize: 30, color: G.green }}>{phase === 'locating' ? '—' : minText}<Text style={{ fontSize: 16 }}> min</Text></Text>
+              <Text style={{ fontFamily: F.body, fontSize: 15, color: G.muted }}>{phase === 'locating' ? 'Finding your position…' : est ? `${kmText} · arrive ${arriveText}` : 'Fetching the route…'}</Text>
+            </View>
+            <Pressable onPress={start} disabled={phase !== 'ready'} hitSlop={6} accessibilityRole="button" accessibilityState={{ disabled: phase !== 'ready' }}
+              style={({ pressed }) => ({ height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8, backgroundColor: G.blue, opacity: phase !== 'ready' ? 0.5 : pressed ? 0.85 : 1 })}>
+              <Icon path="M12 3l4 9-4 9-4-9z" size={16} color="#fff" strokeWidth={2.2} fill="#fff" />
+              <Text style={{ fontFamily: F.bodyBold, fontSize: 16, color: '#fff' }}>Start</Text>
+            </Pressable>
+            {phase === 'locating' ? <Text style={{ fontFamily: F.body, fontSize: 11.5, color: G.muted, textAlign: 'center' }}>Move outdoors if you are inside. Starts when your position is found.</Text> : null}
+          </>
+        ) : (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            <Pressable onPress={() => { setMuted((m) => !m); if (!muted) speech.stop(); }} hitSlop={8} accessibilityRole="button" accessibilityLabel={muted ? 'Unmute' : 'Mute'}
+              style={{ width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F1F3F4' }}>
+              <Icon path={muted ? 'M11 5 6 9H3v6h3l5 4zM22 9l-6 6M16 9l6 6' : 'M11 5 6 9H3v6h3l5 4zM15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13'} size={22} color={muted ? G.red : G.ink2} strokeWidth={2.2} />
+            </Pressable>
+            <View style={{ flex: 1, alignItems: 'center' }}>
+              {atPin ? (
+                <Pressable onPress={() => finish('arrived')} disabled={phase === 'saving'} hitSlop={6} accessibilityRole="button"
+                  style={({ pressed }) => ({ alignSelf: 'stretch', height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center', backgroundColor: G.blue, opacity: phase === 'saving' ? 0.6 : pressed ? 0.85 : 1 })}>
+                  {phase === 'saving' ? <ActivityIndicator color="#fff" /> : <Text style={{ fontFamily: F.bodyBold, fontSize: 16, color: '#fff' }}>Arrived</Text>}
+                </Pressable>
+              ) : (
+                <>
+                  <Text style={{ fontFamily: F.bodyBold, fontSize: 30, lineHeight: 34, color: approx ? G.amber : G.green }}>{minText}<Text style={{ fontSize: 16 }}> min</Text></Text>
+                  <Text style={{ fontFamily: F.body, fontSize: 14, color: G.muted, marginTop: 1 }}>{kmText}{arriveText ? ` · ${arriveText}` : ''}</Text>
+                </>
+              )}
+            </View>
+            <Pressable onPress={confirmExit} disabled={phase === 'saving'} hitSlop={8} accessibilityRole="button" accessibilityLabel="Exit navigation"
+              style={({ pressed }) => ({ height: 52, paddingHorizontal: 20, borderRadius: 26, alignItems: 'center', justifyContent: 'center', backgroundColor: G.red, opacity: pressed ? 0.85 : 1 })}>
+              <Text style={{ fontFamily: F.bodyBold, fontSize: 16, color: '#fff' }}>Exit</Text>
+            </Pressable>
+          </View>
+        )}
+        <Text style={{ fontFamily: F.body, fontSize: 9.5, color: '#9AA0A6', textAlign: 'center', marginTop: -2 }}>Map © OpenStreetMap contributors · OpenFreeMap{routeState === 'ok' && route ? ` · route ${routeAgo}` : ''}</Text>
       </View>
     </View>
   );

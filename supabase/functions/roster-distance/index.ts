@@ -150,6 +150,7 @@ Deno.serve(async (req) => {
     if (navigate) {
       return json({
         ok: true, approx, traffic, distanceKm, durationMin, locationAgeMin: ageMin, polyline,
+        steps: route?.steps ?? [], // turn-by-turn (Google, else OSRM); empty on the straight-line fallback
         clientLat, clientLng,
         clientName: `${client?.first_name ?? ""} ${client?.last_name ?? ""}`.trim(),
         clientAddress: client?.location ?? null,

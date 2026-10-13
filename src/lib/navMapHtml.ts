@@ -1,15 +1,13 @@
-/* The navigation map page that runs inside the WebView (14 Oct 2026). Leaflet from
-   cdnjs, CARTO's dark basemap on OpenStreetMap data (free, no key), the planned
-   route as a cased line, the client's pin, and the Odds bike marker for the
-   assessor. The app drives it with window.__nav.apply(message) through
-   injectJavaScript; the page reports back through ReactNativeWebView.postMessage.
-   The page also holds a screen wake lock while navigating (no native module). */
+/* The navigation map page that runs inside the WebView (14 Oct 2026, Google-style
+   since the same afternoon: user "same style map, the animation of Google Maps").
+   MapLibre GL from jsDelivr with OpenFreeMap's "liberty" vector style (OpenStreetMap
+   data, free, no key), a pitched heading-up camera that glides between fixes, the
+   planned route as a cased blue line with the ridden part greyed, the client's pin,
+   and the Odds bike badge for the assessor. The app drives it with
+   window.__nav.apply(message) through injectJavaScript; the page reports back through
+   ReactNativeWebView.postMessage. The page holds a screen wake lock while navigating. */
 
-/* OpenStreetMap's own tiles (no key). CARTO's dark basemap stamps "API KEY REQUIRED" on
-   tiles requested from an app (seen on the phone, 14 Oct 2026), so the night look comes
-   from a CSS filter on the tile pane instead: invert + hue-rotate keeps water blue and
-   parks green while streets go dark. Markers and the route sit in other panes, unfiltered. */
-export const NAV_TILES = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+export const NAV_STYLE = 'https://tiles.openfreemap.org/styles/liberty';
 
 const BIKE_CSS = `
 .ob-wrap{position:relative;width:64px;height:64px;pointer-events:none}
@@ -47,29 +45,28 @@ const BIKE_SVG = `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
 export const NAV_MAP_HTML = `<!doctype html>
 <html><head><meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css"/>
 <style>
-html,body{margin:0;height:100%;background:#0b0b0f;overflow:hidden;-webkit-user-select:none;user-select:none}
-#map{position:absolute;inset:0;background:#0b0b0f}
-.leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.82) contrast(.92) saturate(.55)}
-.leaflet-control-zoom{display:none}
-.leaflet-control-attribution{font:10px system-ui;background:rgba(8,6,6,.55)!important;color:#9A938C!important}
-.leaflet-control-attribution a{color:#C8C2BC!important}
-.dest{position:relative;width:84px;height:46px}
-.dest .pin{position:absolute;left:33px;top:26px;width:18px;height:18px;border-radius:9px;background:#57C98A;border:3px solid #fff;box-shadow:0 0 0 1.5px rgba(0,0,0,.6);box-sizing:border-box}
-.dest .lbl{position:absolute;left:0;top:0;width:82px;text-align:center;font:700 10px/1 system-ui;letter-spacing:1px;color:#fff;background:rgba(8,6,6,.9);padding:4px 0;border-radius:6px;border:1px solid rgba(87,201,138,.6);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.dest.stale .pin{background:#E0A53C}.dest.stale .lbl{border-color:rgba(224,165,60,.7)}
+html,body{margin:0;height:100%;background:#e8eaed;overflow:hidden;-webkit-user-select:none;user-select:none}
+#map{position:absolute;inset:0;background:#e8eaed}
+.maplibregl-ctrl{display:none!important} /* the OpenStreetMap credit is printed by the app's bottom sheet */
+.dest{position:relative;width:96px;height:52px}
+.dest .pin{position:absolute;left:39px;top:30px;width:20px;height:20px;border-radius:10px;background:#34A853;border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45);box-sizing:border-box}
+.dest .lbl{position:absolute;left:0;top:0;width:94px;text-align:center;font:700 11px/1 system-ui;letter-spacing:.3px;color:#fff;background:#1A73E8;padding:6px 0;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.35);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dest.stale .pin{background:#F9AB00}.dest.stale .lbl{background:#B06000}
 ${BIKE_CSS}
 </style></head>
 <body><div id="map"></div>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <script>
 (function(){
   var post = function(m){ try { window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify(m)); } catch(e){} };
-  var map, tiles, routeCase, routeLine, passedLine, me, dest, follow = true, followResumeAt = 0, zoomNav = 16, lastPos = null, routePts = [], wake = null;
+  var map, me, meEl, dest, follow = true, mode = 'heading', routePts = [], loaded = false, pending = [], wake = null, lastPos = null, userGesture = false;
+  var cam = { zoom: 17, pitch: 55 }; // the follow camera; arrival pulls it closer and flatter
+  var easeUntil = 0;                 // while a programmatic easeTo plays, the frame loop leaves the camera alone
+  var errors = [];                   // the last map errors, for window.__nav.debug()
+  var frameNo = 0;
   var BIKE_SVG = ${JSON.stringify(BIKE_SVG)};
-  function bikeIcon(){ return L.divIcon({ className:'', html:'<div class="ob-wrap still" style="--h:0deg;width:64px;height:64px"><div class="ob-pulse"></div><div class="ob-rot">'+BIKE_SVG+'</div></div>', iconSize:[64,64], iconAnchor:[32,32] }); }
-  function setBike(h, moving){ var el = me && me.getElement && me.getElement(); if(!el) return; var w = el.querySelector('.ob-wrap'); if(!w) return; if (typeof h === 'number' && isFinite(h)) w.style.setProperty('--h', h+'deg'); w.classList.toggle('moving', !!moving); w.classList.toggle('still', !moving); }
   function noMotion(on){ document.documentElement.classList.toggle('ob-no-motion', !!on); }
   var mq = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
   var reduce = false;
@@ -78,35 +75,40 @@ ${BIKE_CSS}
   document.addEventListener('visibilitychange', function(){ applyMotion(); if (document.visibilityState === 'visible') requestWake(); });
   function requestWake(){ try { if (navigator.wakeLock && !wake) navigator.wakeLock.request('screen').then(function(w){ wake = w; w.addEventListener('release', function(){ wake = null; }); }).catch(function(){}); } catch(e){} }
   function releaseWake(){ try { if (wake) { wake.release(); wake = null; } } catch(e){} }
-  function centerWithOffset(latlng, zoom){ var z = zoom == null ? map.getZoom() : zoom; var h = map.getSize().y; var p = map.project(latlng, z).subtract([0, h*0.14]); map.setView(map.unproject(p, z), z, { animate:false }); }
+  function setBike(h, moving){ if(!meEl) return; var w = meEl.querySelector('.ob-wrap'); if(!w) return; if (typeof h === 'number' && isFinite(h)) w.style.setProperty('--h', h+'deg'); w.classList.toggle('moving', !!moving); w.classList.toggle('still', !moving); }
+  function toLL(p){ return [p[1], p[0]]; }
+  function lineFeature(pts){ return { type:'Feature', geometry:{ type:'LineString', coordinates: pts.map(toLL) }, properties:{} }; }
+  function src(id, pts){ var s = map.getSource(id); if (s) s.setData(lineFeature(pts)); }
+
   function init(m){
-    map = L.map('map', { zoomControl:false, attributionControl:true, zoomAnimation:false, fadeAnimation:false, markerZoomAnimation:false, inertia:true, tap:false });
-    tiles = L.tileLayer(${JSON.stringify(NAV_TILES)}, { maxZoom:19, attribution:'&copy; OpenStreetMap' }).addTo(map);
-    dest = L.marker([m.dest.lat, m.dest.lng], { icon: L.divIcon({ className:'', html:'<div class="dest'+(m.stale?' stale':'')+'"><div class="lbl">'+String(m.dest.name||'CLIENT').toUpperCase().slice(0,14)+'</div><div class="pin"></div></div>', iconSize:[84,46], iconAnchor:[42,35] }), zIndexOffset: 500 }).addTo(map);
-    passedLine = L.polyline([], { color:'#8A847E', weight:5, opacity:.55 }).addTo(map);
-    routeCase = L.polyline([], { color:'#ffffff', weight:10, opacity:.95 }).addTo(map);
-    routeLine = L.polyline([], { color:'#4F8BFF', weight:6, opacity:1 }).addTo(map);
-    me = L.marker([m.dest.lat, m.dest.lng], { icon: bikeIcon(), zIndexOffset: 1000, opacity: 0 }).addTo(map);
-    map.setView([m.dest.lat, m.dest.lng], 14, { animate:false });
-    map.on('dragstart', function(){ follow = false; followResumeAt = Date.now() + 10000; post({ type:'drag' }); });
-    map.on('zoomend', function(){ if (!follow) zoomNav = map.getZoom(); });
+    try {
+      map = new maplibregl.Map({ container:'map', style:${JSON.stringify(NAV_STYLE)}, center:[m.dest.lng, m.dest.lat], zoom:13.5, pitch:0, bearing:0, attributionControl:false, pitchWithRotate:false, fadeDuration:0 });
+    } catch (e) { post({ type:'error', message:'map: ' + String(e && e.message || e) }); return; }
+    map.on('error', function(e){ var msg = String(e && e.error && e.error.message || ''); errors.push(msg.slice(0, 120)); if (errors.length > 20) errors.shift(); post({ type:'maperror', message: msg }); });
+    var destEl = document.createElement('div');
+    destEl.innerHTML = '<div class="dest'+(m.stale?' stale':'')+'"><div class="lbl">'+String(m.dest.name||'CLIENT').toUpperCase().slice(0,14)+'</div><div class="pin"></div></div>';
+    dest = new maplibregl.Marker({ element: destEl.firstChild, anchor:'center', offset:[0,-14], pitchAlignment:'viewport', rotationAlignment:'viewport' }).setLngLat([m.dest.lng, m.dest.lat]).addTo(map);
+    meEl = document.createElement('div');
+    meEl.innerHTML = '<div class="ob-wrap still" style="--h:0deg;width:64px;height:64px;opacity:0"><div class="ob-pulse"></div><div class="ob-rot">'+BIKE_SVG+'</div></div>';
+    me = new maplibregl.Marker({ element: meEl, anchor:'center', pitchAlignment:'viewport', rotationAlignment:'viewport' }).setLngLat([m.dest.lng, m.dest.lat]).addTo(map);
+    map.on('load', function(){
+      map.addSource('passed', { type:'geojson', data: lineFeature([]) });
+      map.addSource('route', { type:'geojson', data: lineFeature([]) });
+      map.addLayer({ id:'passed', type:'line', source:'passed', layout:{ 'line-cap':'round', 'line-join':'round' }, paint:{ 'line-color':'#9AA0A6', 'line-width':['interpolate',['linear'],['zoom'],12,4,17,9], 'line-opacity':.85 } });
+      map.addLayer({ id:'route-casing', type:'line', source:'route', layout:{ 'line-cap':'round', 'line-join':'round' }, paint:{ 'line-color':'#1548A5', 'line-width':['interpolate',['linear'],['zoom'],12,7,17,14] } });
+      map.addLayer({ id:'route', type:'line', source:'route', layout:{ 'line-cap':'round', 'line-join':'round' }, paint:{ 'line-color':'#4285F4', 'line-width':['interpolate',['linear'],['zoom'],12,4.5,17,9.5] } });
+      loaded = true;
+      pending.forEach(apply); pending = [];
+      post({ type:'ready' });
+    });
+    ['dragstart','rotatestart','pitchstart','wheel'].forEach(function(ev){ map.on(ev, function(e){ if (e && e.originalEvent) { follow = false; userGesture = true; post({ type:'drag' }); } }); });
+    map.on('zoomstart', function(e){ if (e && e.originalEvent) { follow = false; post({ type:'drag' }); } });
     applyMotion();
-    post({ type:'ready' });
   }
-  function setRoute(m){
-    routePts = Array.isArray(m.points) ? m.points : [];
-    routeLine.setLatLngs(routePts); routeCase.setLatLngs(routePts);
-    var op = m.dim ? .45 : 1; routeLine.setStyle({ opacity: op }); routeCase.setStyle({ opacity: op * .95 });
-    passedLine.setLatLngs([]);
-    if (m.overview && routePts.length) { var b = L.latLngBounds(routePts); if (lastPos) b.extend(lastPos); map.fitBounds(b, { paddingTopLeft:[36, 230], paddingBottomRight:[36, 120], animate:false }); }
-  }
-  /* Smooth motion (14 Oct 2026, user: "make it smooth like Google Maps"): every GPS fix
-     becomes a target; a frame loop glides the badge from where it is drawn to the target
-     over the fix interval, eases the heading along the shortest arc, keeps the camera on
-     the badge, and extends the ridden line. The compass drives the heading while standing
-     still or slow (under 2 m/s); the GPS course takes over once moving. Under reduce
-     motion everything jumps instead. */
-  var anim = { cur:null, from:null, to:null, t0:0, dur:1200, headCur:0, headTo:0, gpsHead:null, compass:null, speed:0, moving:false, alongIndex:null, followOk:true, loop:false };
+
+  /* ---- smooth motion: every fix is a target; the frame loop glides the badge, eases the
+     heading along the shortest arc and keeps the camera on the badge (heading-up, pitched). */
+  var anim = { cur:null, from:null, to:null, t0:0, dur:1200, headCur:0, gpsHead:null, compass:null, speed:0, moving:false, alongIndex:null, followOk:true, loop:false };
   function targetHeading(){
     var useGps = anim.moving && anim.speed > 2 && anim.gpsHead != null;
     if (useGps) return anim.gpsHead;
@@ -114,25 +116,35 @@ ${BIKE_CSS}
     return anim.gpsHead != null ? anim.gpsHead : anim.headCur;
   }
   function drawAt(pos, head){
-    me.setLatLng(pos); me.setOpacity(1);
-    setBike(head, anim.moving);
-    if (anim.alongIndex != null && routePts.length) passedLine.setLatLngs(routePts.slice(0, Math.max(0, anim.alongIndex)).concat([pos]));
-    if (!follow && followResumeAt && Date.now() > followResumeAt) { follow = true; followResumeAt = 0; }
-    if (follow && anim.followOk) centerWithOffset(pos, zoomNav);
+    me.setLngLat([pos[1], pos[0]]);
+    meEl.querySelector('.ob-wrap').style.opacity = '1';
+    var bearing = mode === 'heading' && follow && anim.followOk ? head : map.getBearing();
+    // badge rotation is relative to the screen: the map already turned by the bearing
+    setBike(head - bearing, anim.moving);
+    if (anim.alongIndex != null && routePts.length && (frameNo++ % 4 === 0)) {
+      // the ridden part in grey, the rest in blue, both cut at the badge (re-cut ~15 times a second)
+      var i = Math.max(0, Math.min(routePts.length - 1, anim.alongIndex));
+      src('passed', routePts.slice(0, i + 1).concat([pos]));
+      src('route', [pos].concat(routePts.slice(i + 1)));
+    }
+    if (follow && anim.followOk && performance.now() > easeUntil) {
+      var h = map.getContainer().clientHeight;
+      map.jumpTo({ center:[pos[1], pos[0]], bearing: mode === 'heading' ? head : 0, pitch: cam.pitch, zoom: cam.zoom, offset:[0, h * 0.2] });
+    }
   }
   function frame(){
     if (!anim.loop) return;
-    var reduce = document.documentElement.classList.contains('ob-no-motion');
+    var reduceNow = document.documentElement.classList.contains('ob-no-motion');
     var now = performance.now();
     if (anim.to) {
-      var k = reduce ? 1 : Math.min(1, (now - anim.t0) / anim.dur);
+      var k = reduceNow ? 1 : Math.min(1, (now - anim.t0) / anim.dur);
       anim.cur = [anim.from[0] + (anim.to[0] - anim.from[0]) * k, anim.from[1] + (anim.to[1] - anim.from[1]) * k];
       if (k >= 1) { anim.from = anim.to; anim.to = null; }
     }
     var want = targetHeading();
     var diff = ((want - anim.headCur + 540) % 360) - 180;
-    anim.headCur = reduce ? want : (anim.headCur + diff * 0.18 + 360) % 360;
-    if (anim.cur) drawAt(anim.cur, anim.headCur);
+    anim.headCur = reduceNow ? want : (anim.headCur + diff * 0.14 + 360) % 360;
+    if (anim.cur && loaded) drawAt(anim.cur, anim.headCur);
     lastPos = anim.cur;
     requestAnimationFrame(frame);
   }
@@ -152,18 +164,50 @@ ${BIKE_CSS}
     startLoop();
   }
   function setCompass(m){ if (typeof m.deg === 'number' && isFinite(m.deg)) { anim.compass = m.deg; startLoop(); } }
-  window.__nav = { apply: function(m){ try {
-    if (!m) return;
-    if (m.type === 'init') init(m);
-    else if (m.type === 'route') setRoute(m);
+  function setRoute(m){
+    routePts = Array.isArray(m.points) ? m.points : [];
+    src('route', routePts);
+    map.setPaintProperty('route', 'line-opacity', m.dim ? .45 : 1);
+    map.setPaintProperty('route-casing', 'line-opacity', m.dim ? .45 : 1);
+    src('passed', []);
+    if (m.overview) overview();
+  }
+  function overview(){
+    if (!routePts.length) return;
+    var b = new maplibregl.LngLatBounds();
+    routePts.forEach(function(p){ b.extend([p[1], p[0]]); });
+    if (lastPos) b.extend([lastPos[1], lastPos[0]]);
+    follow = false;
+    map.fitBounds(b, { padding:{ top:230, bottom:220, left:44, right:44 }, pitch:0, bearing:0, duration:600 });
+  }
+  function recenter(){
+    follow = true; userGesture = false;
+    if (lastPos) {
+      var h = map.getContainer().clientHeight;
+      easeUntil = performance.now() + 750;
+      map.easeTo({ center:[lastPos[1], lastPos[0]], bearing: mode === 'heading' ? anim.headCur : 0, pitch: cam.pitch, zoom: cam.zoom, offset:[0, h * 0.2], duration: 700 });
+    }
+  }
+  function apply(m){
+    if (m.type === 'route') setRoute(m);
     else if (m.type === 'pos') setPos(m);
     else if (m.type === 'compass') setCompass(m);
-    else if (m.type === 'start') { follow = true; requestWake(); }
-    else if (m.type === 'arrived') { follow = true; if (lastPos) map.setView(lastPos, 17, { animate:false }); }
+    else if (m.type === 'start') { follow = true; cam = { zoom: 17, pitch: 55 }; requestWake(); recenter(); }
+    else if (m.type === 'arrived') { cam = { zoom: 18, pitch: 35 }; recenter(); }
     else if (m.type === 'stop') { releaseWake(); anim.loop = false; }
-    else if (m.type === 'recenter') { follow = true; followResumeAt = 0; if (lastPos) centerWithOffset(lastPos, zoomNav); }
+    else if (m.type === 'recenter') recenter();
+    else if (m.type === 'overview') overview();
+    else if (m.type === 'camera') { mode = m.mode === 'north' ? 'north' : 'heading'; if (follow) recenter(); }
     else if (m.type === 'motion') { reduce = !!m.reduce; applyMotion(); }
-  } catch(e) { post({ type:'error', message: String(e && e.message || e) }); } } };
+  }
+  window.__nav = { apply: function(m){ try {
+    if (!m) return;
+    if (m.type === 'init') { init(m); return; }
+    if (!map) return;
+    if (!loaded && m.type !== 'motion') { pending.push(m); return; }
+    apply(m);
+  } catch(e) { post({ type:'error', message: String(e && e.message || e) }); } },
+    debug: function(){ if (!map) return null; var c = map.getCenter(); return { bearing: map.getBearing(), pitch: map.getPitch(), zoom: map.getZoom(), center: [c.lat, c.lng], follow: follow, mode: mode, headCur: anim.headCur, loaded: loaded, styleLoaded: map.isStyleLoaded(), tilesLoaded: map.areTilesLoaded(), pending: pending.length, errors: errors }; } };
   post({ type:'loaded' });
 })();
 </script></body></html>`;

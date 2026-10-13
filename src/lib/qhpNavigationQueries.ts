@@ -55,6 +55,14 @@ export async function fetchNavRoute(target: NavTarget, origin: { lat: number; ln
   if (!data?.ok) throw new Error(String(data?.error ?? 'Route service unavailable'));
   const polyline: string | null = typeof data.polyline === 'string' && data.polyline ? data.polyline : null;
   const points = polyline ? decodePolyline(polyline) : [];
+  const steps = Array.isArray(data.steps)
+    ? (data.steps as any[]).map((s) => ({
+        maneuver: String(s?.maneuver ?? 'STRAIGHT'),
+        instruction: String(s?.instruction ?? ''),
+        distanceMeters: Number(s?.distanceMeters) || 0,
+        polyline: typeof s?.polyline === 'string' ? s.polyline : null,
+      }))
+    : [];
   return {
     points: points.length >= 2 ? points : [[origin.lat, origin.lng], [target.lat, target.lng]],
     distanceKm: Number(data.distanceKm) || 0,
@@ -63,6 +71,7 @@ export async function fetchNavRoute(target: NavTarget, origin: { lat: number; ln
     approx: !!data.approx || !polyline,
     fetchedAt: Date.now(),
     polyline,
+    steps,
   };
 }
 
