@@ -3,6 +3,7 @@ import { supabase } from './supabase';
 import type { SessionTiming } from './sessionTiming';
 import { computeEssentials, EssentialsStatus } from './essentials';
 import { invokeWithTimeout, withTimeout, NET_MS } from './withTimeout';
+import { parseCheckinInfo, type MedicineCheckinInfo, type MedicineCheckinPayload } from './medicineCheckin';
 import type { ConsultAINotes } from './consultantQueries';
 import { parseVoiceNotes, SessionVoiceNote } from './sessionVoiceTypes';
 
@@ -52,19 +53,41 @@ async function nutritionTodayQuery(clientId: string, today: string) {
   }
   return supabase.from('nutrition_tracker').select('nutrition_rating, steps_by_trainer').eq('client_id', clientId).eq('rating_date', today).limit(1);
 }
+/* Medicine check-in (14 Oct 2026): every 10 days the check-in also asks which medicines the
+   client takes. The server decides "due" and the candidate list (hub-track migration
+   20261014170000). Before the SQL runs (PGRST202), or for a caller the RPC refuses (42501),
+   the gate simply carries no medicine block. Never throws: the four health values must
+   never be blocked by this read. */
+let medicineRpcMissing = false;
+async function medicineCheckinQuery(clientId: string): Promise<MedicineCheckinInfo | null> {
+  if (medicineRpcMissing) return null;
+  try {
+    const { data, error } = await withTimeout(
+      Promise.resolve(supabase.rpc('get_client_medicine_checkin', { p_client_id: clientId })),
+      NET_MS, 'Medicine check-in',
+    );
+    if (error) {
+      if ((error as any).code === 'PGRST202') medicineRpcMissing = true;
+      return null;
+    }
+    return parseCheckinInfo(data);
+  } catch { return null; }
+}
+
 export function useClientHealthCheck(clientId: string | null) {
   return useQuery({
-    queryKey: [HEALTH_CHECK_KEY, 'v4', clientId],
+    queryKey: [HEALTH_CHECK_KEY, 'v5', clientId],
     enabled: !!clientId,
     staleTime: 60_000,
     queryFn: async () => {
       const today = localToday();
       const now = new Date();
-      const [hmR, slR, nutR, schedR] = await Promise.all([
+      const [hmR, slR, nutR, schedR, medicineCheckin] = await Promise.all([
         supabase.from('daily_health_metrics').select('sleep_duration_minutes').eq('client_id', clientId).eq('metric_date', today).limit(1),
         supabase.from('daily_sleep_logs').select('hours_slept').eq('client_id', clientId).eq('log_date', today).limit(1),
         nutritionTodayQuery(clientId!, today),
         supabase.from('monthly_sleep_schedules').select('average_sleep_hours').eq('client_id', clientId).eq('month', now.getMonth() + 1).eq('year', now.getFullYear()).limit(1),
+        medicineCheckinQuery(clientId!),
       ]);
       const hmMins = hmR.data?.[0]?.sleep_duration_minutes;
       const slHours = slR.data?.[0]?.hours_slept;
@@ -85,7 +108,43 @@ export function useClientHealthCheck(clientId: string | null) {
         nutritionRating: rating ?? null,
         stepsCount: steps ?? null,
         scheduledHours: schedR.data?.[0]?.average_sleep_hours ?? 8,
+        // Medicines (14 Oct 2026): null = not supported / not allowed; due decides whether the card shows.
+        medicineCheckin,
       };
+    },
+  });
+}
+
+/** record_client_medicine_checkin: one batch per check-in, idempotent on checkinId. Called from
+    the workout outbox drain with the workout's session id (online and offline alike). A missing
+    RPC (PGRST202) is skipped so a workout never fails on the medicine block. */
+export async function submitMedicineCheckin(clientId: string, workoutSessionId: string | null, p: MedicineCheckinPayload): Promise<void> {
+  const { error } = await withTimeout(
+    Promise.resolve(supabase.rpc('record_client_medicine_checkin', {
+      p_client_id: clientId, p_checkin_id: p.checkinId, p_workout_session_id: workoutSessionId, p_items: p.items,
+    })),
+    NET_MS, 'Medicine check-in',
+  );
+  if (error) {
+    if ((error as any).code === 'PGRST202') { medicineRpcMissing = true; return; }
+    throw new Error(error.message);
+  }
+}
+
+/** Catalog suggestions for the "Add medicine" box (medicines table, readable by trainers). */
+export function useMedicineSuggestions(query: string) {
+  const q = query.trim();
+  return useQuery({
+    queryKey: ['medicine-suggestions', q.toLowerCase()],
+    enabled: q.length >= 2,
+    staleTime: 10 * 60_000,
+    queryFn: async (): Promise<{ name: string; strength: string | null }[]> => {
+      const { data, error } = await withTimeout(
+        Promise.resolve(supabase.from('medicines').select('name, strength').eq('is_active', true).ilike('name', `%${q.replace(/[%_]/g, '')}%`).order('name').limit(6)),
+        NET_MS, 'Medicines',
+      );
+      if (error) return [];
+      return ((data ?? []) as any[]).map((r) => ({ name: String(r.name), strength: r.strength ?? null }));
     },
   });
 }
@@ -151,7 +210,7 @@ export function useSaveHealthData() {
 /* Everything that shows a client's sleep / nutrition / steps: the workout gate, the Trends
    weekly summary and the daily-stats list. */
 export function invalidateHealthViews(qc: ReturnType<typeof useQueryClient>, clientId: string) {
-  qc.invalidateQueries({ queryKey: [HEALTH_CHECK_KEY, 'v4', clientId] });
+  qc.invalidateQueries({ queryKey: [HEALTH_CHECK_KEY, 'v5', clientId] });
   qc.invalidateQueries({ queryKey: ['weekly-health-summary', clientId] });
   qc.invalidateQueries({ queryKey: ['client-daily-stats', clientId] });
 }

@@ -4,6 +4,7 @@ import NetInfo from '@react-native-community/netinfo';
 import type { QueryClient } from '@tanstack/react-query';
 import { onlineManager } from '@tanstack/react-query';
 import { submitWorkoutLog, submitHealthData, submitWorkoutPlan, submitWorkoutPlanEdit, WorkoutLogInput, WorkoutPlanCreateInput, WorkoutPlanEditInput, HealthDataInput } from './clientQueries';
+import type { MedicineCheckinPayload } from './medicineCheckin';
 import { submitChatMessage } from './chatQueries';
 import { submitLocationLog, LocationLogPayload } from './locationLog';
 import { registerTeardown } from './sessionTeardown';
@@ -31,7 +32,7 @@ export type OutboxItem = {
   payload: any;           // WorkoutLogInput (+ optional health) | WorkoutPlanCreateInput
 };
 
-export type WorkoutLogOutboxPayload = WorkoutLogInput & { health?: HealthDataInput | null };
+export type WorkoutLogOutboxPayload = WorkoutLogInput & { health?: HealthDataInput | null; medicines?: MedicineCheckinPayload | null };
 
 /* ---- store ---- */
 let items: OutboxItem[] = [];
@@ -212,13 +213,20 @@ async function processItem(item: OutboxItem): Promise<{ linkPending?: boolean } 
     // Health gate data entered offline syncs first (idempotent upserts),
     // then the log itself (idempotent via pre-generated session id).
     if (p.health) await submitHealthData(p.health);
+    // Medicine check-in (14 Oct 2026): recorded with the workout's session id, idempotent on
+    // its checkin id, so a retried item never doubles it. Lazy require (clientQueries imports
+    // this module's enqueue helpers).
+    if (p.medicines) {
+      const { submitMedicineCheckin } = require('./clientQueries');
+      await submitMedicineCheckin(p.clientId, p.sessionId ?? null, p.medicines);
+    }
     const { link } = await submitWorkoutLog(p);
     qcRef?.invalidateQueries({ queryKey: ['trainer-roster'] });
     qcRef?.invalidateQueries({ queryKey: ['client-sessions'] });
     qcRef?.invalidateQueries({ queryKey: ['trainer-month-sessions-v2'] }); // key was bumped to v2 — the old prefix matched nothing
     qcRef?.invalidateQueries({ queryKey: ['mgr-plan-outcome-v5'] }); // crew card LOGGED tick
-    if (p.health) {
-      qcRef?.invalidateQueries({ queryKey: ['client-health-check', 'v4', p.clientId] }); // v3: today-attributed gate (24 Sep 2026)
+    if (p.health || p.medicines) {
+      qcRef?.invalidateQueries({ queryKey: ['client-health-check', 'v5', p.clientId] }); // v5: + medicine check-in (14 Oct 2026)
       qcRef?.invalidateQueries({ queryKey: ['weekly-health-summary', p.clientId] });
       qcRef?.invalidateQueries({ queryKey: ['client-daily-stats', p.clientId] });
     }

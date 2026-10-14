@@ -48,7 +48,8 @@ import { ClientThreadsCard } from '../components/clientThreadsCard';
 import { ManagerTeamChatCard } from './managerChat';
 import { istToday, useMyManagerTeam, TRAINER_MODALITIES } from '../lib/managerChatQueries';
 import { useKeyboardHeight } from '../lib/useKeyboardHeight';
-import { localToday, fetchScheduledSleepHours } from '../lib/clientQueries';
+import { localToday, fetchScheduledSleepHours, useMedicineSuggestions } from '../lib/clientQueries';
+import { buildCheckinItems, initialTicked, isDuplicateName, nameKey, sourceLabel, lastCheckinLine, type MedicineCheckinPayload } from '../lib/medicineCheckin';
 import { startTimer, finishTimer, clearTimer, SessionTiming } from '../lib/sessionTiming';
 import { useQhpAssessments, useQhpPermissions, useQhpConnectAlerts, useMarkQhpConnected, useQhpAssessors, useQhpClients, useScheduleQhp, useRequestQhpReschedule, useClientMedicalHistory, useClientHealthReports, HealthReportItem, useParqLinks, useGenerateParqLink, qhpFormatDuration, qhpUrgency, QHP_TARGET_MINS } from '../lib/qhpQueries';
 import { PdfPreview } from '../components/PdfPreview';
@@ -6362,6 +6363,7 @@ const ExerciseCard = React.memo(function ExerciseCard(props: ExerciseCardProps) 
 });
 
 const HYDRATION = '#38BDF8'; // the hydration card's accent (5 Oct 2026)
+const MEDS = '#2DD4BF'; // the medicine check-in card's accent (14 Oct 2026)
 export function Workout() {
   const { modality, set, selectedClientId, selectedClientName, workoutScheduleId, editingOutboxId, back, canGoBack, go } = useStore();
   const insets = useSafeAreaInsets();
@@ -6450,7 +6452,35 @@ export function Workout() {
   const [hRating, setHRating] = React.useState<number | null>(null);
   const [hSteps, setHSteps] = React.useState('');
   const [hHydration, setHHydration] = React.useState(''); // litres, 5 Oct 2026
+  // Medicine check-in (14 Oct 2026): when the server says it is due (no trainer check-in in
+  // the last 10 days), the sheet lists the latest prescription's and QHP's medicines plus
+  // last time's ticked ones; the trainer ticks and adds. Save keeps the answer in the form;
+  // the workout submit carries it in the outbox payload with the session id.
+  const medicineInfo = health?.medicineCheckin ?? null;
+  const medicineDue = !!medicineInfo?.due;
+  const [medTicked, setMedTicked] = React.useState<Record<string, boolean>>({});
+  const [medAdded, setMedAdded] = React.useState<string[]>([]);
+  const [medInput, setMedInput] = React.useState('');
+  const [pendingMedicines, setPendingMedicines] = React.useState<MedicineCheckinPayload | null>(null);
+  const medSugQ = useMedicineSuggestions(healthOpen && medicineDue ? medInput : '');
+  React.useEffect(() => {
+    if (!healthOpen || !medicineInfo?.due) return;
+    setMedTicked(initialTicked(medicineInfo.candidates));
+    setMedAdded([]);
+    setMedInput('');
+  }, [healthOpen, medicineInfo]);
+  React.useEffect(() => { setPendingMedicines(null); }, [selectedClientId]);
+  const addMedicine = (raw?: string) => {
+    const name = (raw ?? medInput).replace(/\s+/g, ' ').trim();
+    if (!name) return;
+    if (isDuplicateName(name, medicineInfo?.candidates ?? [], medAdded)) { Alert.alert('Already in the list', `${name} is already listed. Tick it instead.`); return; }
+    setMedAdded((x) => [...x, name]);
+    setMedInput('');
+  };
   const saveHealth = async () => {
+    if (medicineDue && medicineInfo) {
+      setPendingMedicines({ checkinId: uuidv4(), items: buildCheckinItems(medicineInfo.candidates, medTicked, medAdded) });
+    }
     const payload: HealthDataInput = {
       clientId: selectedClientId as string,
       trainerId,
@@ -7115,6 +7145,7 @@ export function Workout() {
           sessionId: uuidv4(),
           sessionDate: new Date().toISOString().slice(0, 10),
           health: offlineHealth,
+          medicines: pendingMedicines, // the 10-day medicine check-in, recorded with this session id (14 Oct 2026)
           sessionTiming: timed?.timing ?? null,
         };
         const item = await enqueueOutbox('workout-log', label, payload, { autoDrain: false });
@@ -7324,6 +7355,8 @@ export function Workout() {
                     { id: 'steps', icon: 'activity' as const, col: C.blue, text: `${health?.stepsCount ?? offlineHealth?.stepsCount ?? '—'} steps` },
                     // Steps and water share the icon, so the key is the chip's own id (duplicate-key warning, 13 Oct 2026).
                     ...(hydrationAsked ? [{ id: 'water', icon: 'activity' as const, col: HYDRATION, text: `${health?.hydrationLitres ?? offlineHealth?.hydrationLitres ?? '—'} L water` }] : []),
+                    // The 10-day medicine check-in answered in this form (14 Oct 2026).
+                    ...(pendingMedicines ? [{ id: 'meds', icon: 'heart' as const, col: MEDS, text: pendingMedicines.items.length ? `${pendingMedicines.items.length} medicine${pendingMedicines.items.length === 1 ? '' : 's'}` : 'no medicines' }] : []),
                   ].map((c) => (
                     <View key={c.id} style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 8, borderRadius: 11, backgroundColor: hexA(c.col, 0.07), borderWidth: 1, borderColor: hexA(c.col, 0.2) }}>
                       <Icon name={c.icon} size={12} color={c.col} strokeWidth={2} />
@@ -7983,6 +8016,79 @@ export function Workout() {
                       );
                     })}
                   </View>
+                </View>
+              ) : null}
+
+              {/* Medicines, every 10 days (14 Oct 2026): the latest prescription's and QHP's medicines plus
+                  last time's ticked ones; tick what the client takes now, add anything new. Nothing ticked
+                  saves "none" so the clock still resets. Rides with the workout submit. */}
+              {medicineDue && medicineInfo ? (
+                <View style={{ padding: 15, borderRadius: 18, backgroundColor: hexA(MEDS, 0.05), borderWidth: 1, borderColor: hexA(MEDS, 0.22), gap: 12 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
+                    <View style={{ width: 30, height: 30, borderRadius: 10, backgroundColor: hexA(MEDS, 0.13), alignItems: 'center', justifyContent: 'center' }}>
+                      <Icon path="M10.5 3.5 3.5 10.5a4.95 4.95 0 0 0 7 7l7-7a4.95 4.95 0 0 0-7-7ZM7 7l7 7" size={15} color={MEDS} strokeWidth={2} />
+                    </View>
+                    <Body style={{ flex: 1, fontSize: 14.5, fontFamily: F.bodySemi, color: '#fff' }}>Medicines</Body>
+                    <Mono style={{ fontSize: 10, color: C.muted3 }}>EVERY {medicineInfo.interval_days} DAYS</Mono>
+                  </View>
+                  <Body style={{ fontSize: 11.5, color: C.muted2, lineHeight: 16 }}>
+                    Tick what the client is taking now and add anything new. {lastCheckinLine(medicineInfo)}.
+                    {medicineInfo.prescription ? ` Prescription${medicineInfo.prescription.doctor ? ` by ${medicineInfo.prescription.doctor}` : ''} and` : ''}{medicineInfo.qhp ? ' the latest QHP' : medicineInfo.prescription ? ' the records' : ''}{medicineInfo.prescription || medicineInfo.qhp ? ' are listed below.' : ''}
+                  </Body>
+                  {medicineInfo.candidates.length === 0 && medAdded.length === 0 ? (
+                    <Body style={{ fontSize: 11.5, color: C.muted3, lineHeight: 16 }}>No medicines on the prescription or the QHP. Add any the client mentions, or save as is to record none.</Body>
+                  ) : null}
+                  {medicineInfo.candidates.map((c) => {
+                    const on = !!medTicked[nameKey(c.name)];
+                    return (
+                      <Pressable key={`${c.source}:${c.name}`} onPress={() => setMedTicked((t) => ({ ...t, [nameKey(c.name)]: !on }))} hitSlop={6} accessibilityRole="checkbox" accessibilityState={{ checked: on }}
+                        style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 9, paddingHorizontal: 11, borderRadius: 12, backgroundColor: on ? hexA(MEDS, 0.1) : 'rgba(0,0,0,0.2)', borderWidth: 1, borderColor: on ? hexA(MEDS, 0.45) : 'rgba(255,255,255,0.08)' }}>
+                        <View style={{ width: 20, height: 20, borderRadius: 6, alignItems: 'center', justifyContent: 'center', borderWidth: on ? 0 : 2, borderColor: 'rgba(255,255,255,0.3)', backgroundColor: on ? MEDS : 'transparent' }}>
+                          {on ? <Icon path="M20 6 9 17l-5-5" size={12} color="#0c0808" strokeWidth={3} /> : null}
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ fontFamily: F.bodySemi, fontSize: 13.5, color: '#fff' }} numberOfLines={2}>{c.name}{c.strength ? <Text style={{ color: C.muted2 }}> · {c.strength}</Text> : null}</Text>
+                          {c.dose_text ? <Mono style={{ fontSize: 8.5, letterSpacing: 0.5, color: C.muted3, marginTop: 2 }}>{c.dose_text.toUpperCase()}</Mono> : null}
+                        </View>
+                        <Mono style={{ fontSize: 8, letterSpacing: 0.5, color: c.source === 'doctor' ? C.blue : c.source === 'qhp' ? C.gold : MEDS }}>{sourceLabel(c)}</Mono>
+                      </Pressable>
+                    );
+                  })}
+                  {medAdded.map((name) => (
+                    <View key={`added:${name}`} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 9, paddingHorizontal: 11, borderRadius: 12, backgroundColor: hexA(MEDS, 0.1), borderWidth: 1, borderColor: hexA(MEDS, 0.45) }}>
+                      <View style={{ width: 20, height: 20, borderRadius: 6, alignItems: 'center', justifyContent: 'center', backgroundColor: MEDS }}>
+                        <Icon path="M20 6 9 17l-5-5" size={12} color="#0c0808" strokeWidth={3} />
+                      </View>
+                      <Text style={{ flex: 1, fontFamily: F.bodySemi, fontSize: 13.5, color: '#fff' }} numberOfLines={2}>{name}</Text>
+                      <Mono style={{ fontSize: 8, letterSpacing: 0.5, color: MEDS }}>ADDED</Mono>
+                      <Pressable onPress={() => setMedAdded((x) => x.filter((n) => n !== name))} hitSlop={10} accessibilityRole="button" accessibilityLabel={`Remove ${name}`} style={{ width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.06)' }}>
+                        <Icon name="close" size={11} color={C.muted} strokeWidth={2.4} />
+                      </Pressable>
+                    </View>
+                  ))}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', borderRadius: 13, borderWidth: 1, borderColor: medInput ? hexA(MEDS, 0.4) : 'rgba(255,255,255,0.12)', backgroundColor: 'rgba(0,0,0,0.25)', paddingHorizontal: 14 }}>
+                      <TextInput value={medInput} onChangeText={(t) => setMedInput(t.slice(0, 120))} onSubmitEditing={() => addMedicine()} onFocus={() => setTimeout(() => healthScrollRef.current?.scrollToEnd({ animated: true }), 120)} placeholder="Add a medicine by name" placeholderTextColor={C.muted3} autoCapitalize="words" returnKeyType="done" blurOnSubmit={false} style={{ flex: 1, paddingVertical: 12, fontFamily: F.bodySemi, fontSize: 14.5, color: '#fff' }} />
+                    </View>
+                    <Pressable onPress={() => addMedicine()} disabled={!medInput.trim()} hitSlop={8} accessibilityRole="button" accessibilityLabel="Add this medicine"
+                      style={{ paddingVertical: 12, paddingHorizontal: 14, borderRadius: 13, backgroundColor: hexA(MEDS, medInput.trim() ? 0.18 : 0.06), borderWidth: 1, borderColor: hexA(MEDS, medInput.trim() ? 0.5 : 0.2), opacity: medInput.trim() ? 1 : 0.6 }}>
+                      <Text style={{ fontFamily: F.bodyBold, fontSize: 13, color: MEDS }}>Add</Text>
+                    </Pressable>
+                  </View>
+                  {medInput.trim().length >= 2 && (medSugQ.data?.length ?? 0) > 0 ? (
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}>
+                      {medSugQ.data!.map((s) => (
+                        <Pressable key={s.name} onPress={() => addMedicine(s.name)} hitSlop={6} style={{ paddingVertical: 6, paddingHorizontal: 11, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' }}>
+                          <Text style={{ fontFamily: F.body, fontSize: 12.5, color: C.ink }}>{s.name}{s.strength ? <Text style={{ color: C.muted3 }}> · {s.strength}</Text> : null}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  ) : null}
+                  {!Object.values(medTicked).some(Boolean) && medAdded.length === 0 ? (
+                    <Body style={{ fontSize: 10.5, color: C.muted3, lineHeight: 15 }}>Nothing ticked: saving records that the client takes no medicines right now. Unticked medicines from older records will not be listed again.</Body>
+                  ) : (
+                    <Body style={{ fontSize: 10.5, color: C.muted3, lineHeight: 15 }}>Saved with this session. Unticked medicines from older records will not be listed again.</Body>
+                  )}
                 </View>
               ) : null}
 
