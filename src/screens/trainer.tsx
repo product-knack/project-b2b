@@ -28,7 +28,8 @@ import { EssentialsBadge } from '../components/essentialsBadge';
 import { ClientHealthSummaryCard, ListenGateSheet } from '../components/clientHealthSummaryCard';
 import { useClientHealthSummary } from '../lib/clientHealthSummaryQueries';
 import { listenGate, gateDue } from '../lib/clientHealthSummary';
-import { VoiceNotesComposer, SessionVoicePlaylistPlayer, SessionVoiceSheet, SessionVoiceSheetInfo, LatestVoiceInline } from '../components/SessionVoice';
+import { VoiceNotesComposer, SessionVoicePlaylistPlayer, SessionVoiceSheet, SessionVoiceSheetInfo, LatestVoiceInline, toggleTakeFlag } from '../components/SessionVoice';
+import { hasPainNote } from '../lib/sessionVoiceTypes';
 import { useClientsLatestVoiceNotes } from '../lib/sessionVoiceQueries';
 import { PendingVoiceTake, discardTake } from '../lib/sessionVoiceQueries';
 import { cycleStatusLine, nextPeriodLine } from '../lib/cycleStatus';
@@ -1219,10 +1220,11 @@ function RosterCard({ row, trainerName, highlight, onAddWorkout, plans, devPos, 
             {row.modality ? chip(row.modality, C.ink3) : null}
             {/* Voice notes on the logged session: listen, and record more (30 Sep 2026) */}
             {logged && onVoice ? (
-              <Pressable onPress={onVoice} hitSlop={8} accessibilityRole="button" accessibilityLabel="Voice notes for this session"
-                style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 3, paddingHorizontal: 9, borderRadius: 999, backgroundColor: hexA(C.purple, row.voice_notes.length ? 0.16 : 0.1), borderWidth: 1, borderColor: hexA(C.purple, 0.45) }}>
+              <Pressable onPress={onVoice} hitSlop={8} accessibilityRole="button" accessibilityLabel={`Voice notes for this session${hasPainNote(row.voice_notes) ? ', pain or discomfort reported' : ''}`}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 3, paddingHorizontal: 9, borderRadius: 999, backgroundColor: hexA(C.purple, row.voice_notes.length ? 0.16 : 0.1), borderWidth: 1, borderColor: hexA(hasPainNote(row.voice_notes) ? C.red : C.purple, hasPainNote(row.voice_notes) ? 0.6 : 0.45) }}>
                 <Icon name="mic" size={10} color={C.purple} strokeWidth={2.4} />
                 <Text style={{ fontFamily: F.bodySemi, fontSize: 10, color: C.purple }}>{row.voice_notes.length ? `${row.voice_notes.length} voice note${row.voice_notes.length === 1 ? '' : 's'}` : 'Voice note'}</Text>
+                {hasPainNote(row.voice_notes) ? <Text style={{ fontFamily: F.bodySemi, fontSize: 10, color: C.red }}>· Pain</Text> : null}
               </Pressable>
             ) : null}
             {!isCancelled && !logged && row.status === 'confirmed' ? chip('Confirmed', C.green) : null}
@@ -5418,11 +5420,12 @@ export function ClientDetail() {
                       {voiceNotes.length ? (
                         <Pressable
                           onPress={() => setOpenClientVoice(voiceOpen ? null : i)}
-                          accessibilityRole="button" accessibilityLabel={`Play ${voiceNotes.length} voice notes`}
-                          style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 11, borderRadius: 12, borderWidth: 1, borderColor: hexA(C.purple, 0.35), backgroundColor: voiceOpen ? hexA(C.purple, 0.14) : hexA(C.purple, 0.06) }}
+                          accessibilityRole="button" accessibilityLabel={`Play ${voiceNotes.length} voice notes${hasPainNote(voiceNotes) ? ', pain or discomfort reported' : ''}`}
+                          style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 11, borderRadius: 12, borderWidth: 1, borderColor: hexA(hasPainNote(voiceNotes) ? C.red : C.purple, hasPainNote(voiceNotes) ? 0.5 : 0.35), backgroundColor: voiceOpen ? hexA(C.purple, 0.14) : hexA(C.purple, 0.06) }}
                         >
                           <Icon name="mic" size={14} color={C.purple} strokeWidth={2.2} />
                           <Text style={{ fontFamily: F.bodySemi, fontSize: 13, color: C.purple }}>Play{voiceNotes.length > 1 ? ` · ${voiceNotes.length}` : ''}</Text>
+                          {hasPainNote(voiceNotes) ? <Text style={{ fontFamily: F.bodySemi, fontSize: 11, color: C.red }}>· Pain</Text> : null}
                         </Pressable>
                       ) : null}
                     </View>
@@ -7125,7 +7128,7 @@ export function Workout() {
         for (const t of voiceTakes) {
           const it = await enqueueOutbox('session-voice-note', `${clientName} · voice note`, {
             workoutSessionId: notesSessionId, clientId: selectedClientId as string, userId: trainerId,
-            uri: t.uri, durationMs: t.durationMs, source: 'workout_form',
+            uri: t.uri, durationMs: t.durationMs, source: 'workout_form', painDiscomfort: t.painDiscomfort === true,
           }, { autoDrain: false });
           noteItemIds.push(it.id);
         }
@@ -7644,6 +7647,7 @@ export function Workout() {
             takes={voiceTakes}
             onAdd={(t) => setVoiceTakes((x) => [...x, t])}
             onRemove={(uri) => { discardTake(uri); setVoiceTakes((x) => x.filter((t) => t.uri !== uri)); }}
+            onToggleFlag={(uri) => setVoiceTakes((x) => toggleTakeFlag(x, uri))}
             onRecordingChange={setVoiceRecording}
             disabled={saving}
             hint="Up to 5 notes, 5 minutes each. Saved with the session; you can add more from Today's Roster."

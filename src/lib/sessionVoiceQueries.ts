@@ -32,12 +32,13 @@ const MIN_BYTES = 4 * 1024;
 const MAX_BYTES = 25 * 1024 * 1024;
 
 export type { SessionVoiceNote } from './sessionVoiceTypes';
-export { parseVoiceNotes } from './sessionVoiceTypes';
+export { parseVoiceNotes, hasPainNote } from './sessionVoiceTypes';
 import { parseVoiceNotes } from './sessionVoiceTypes';
 import type { SessionVoiceNote } from './sessionVoiceTypes';
 
-/** A take waiting to be saved: a durable local copy plus its length. JSON-safe (drafts, outbox). */
-export type PendingVoiceTake = { uri: string; durationMs: number; recordedAt: string };
+/** A take waiting to be saved: a durable local copy plus its length and the pain / discomfort
+    answer (14 Oct 2026). JSON-safe (drafts, outbox); an old draft without the flag reads false. */
+export type PendingVoiceTake = { uri: string; durationMs: number; recordedAt: string; painDiscomfort?: boolean };
 
 /* ---------- durable local copies ----------
    expo-audio records into the cache directory, which the OS may clear. A take
@@ -48,12 +49,12 @@ function voiceDir(): Directory {
   try { if (!dir.exists) dir.create({ intermediates: true }); } catch { /* exists, or created concurrently */ }
   return dir;
 }
-export async function persistTake(uri: string, durationMs: number): Promise<PendingVoiceTake> {
+export async function persistTake(uri: string, durationMs: number, painDiscomfort: boolean = false): Promise<PendingVoiceTake> {
   const src = new File(uri);
   const dst = new File(voiceDir(), `${uuidv4()}.m4a`);
   await src.copy(dst);
   try { src.delete(); } catch { /* cache file; the OS clears it anyway */ }
-  return { uri: dst.uri, durationMs, recordedAt: new Date().toISOString() };
+  return { uri: dst.uri, durationMs, recordedAt: new Date().toISOString(), painDiscomfort };
 }
 export function discardTake(uri: string) {
   try { const f = new File(uri); if (f.exists) f.delete(); } catch { /* already gone */ }
@@ -70,13 +71,14 @@ export async function uploadSessionVoiceNote(input: { clientId: string; workoutS
   return path;
 }
 
-export async function appendSessionVoiceNote(input: { workoutSessionId: string; path: string; durationMs: number; source: 'workout_form' | 'roster' }): Promise<SessionVoiceNote[]> {
+export async function appendSessionVoiceNote(input: { workoutSessionId: string; path: string; durationMs: number; source: 'workout_form' | 'roster'; painDiscomfort?: boolean }): Promise<SessionVoiceNote[]> {
   const { data, error } = await withTimeout(
     Promise.resolve(supabase.rpc('append_session_voice_note', {
       p_workout_session_id: input.workoutSessionId,
       p_path: input.path,
       p_duration_sec: Math.max(1, Math.round(input.durationMs / 1000)),
       p_source: input.source,
+      p_pain_discomfort: input.painDiscomfort === true, // migration 20261014160000; defaulted on the server
     })),
     NET_MS,
     'Save voice note',
@@ -92,6 +94,8 @@ export async function appendSessionVoiceNote(input: { workoutSessionId: string; 
 export type SessionVoiceOutboxPayload = {
   workoutSessionId: string; clientId: string; userId: string;
   uri: string; durationMs: number; source: 'workout_form' | 'roster';
+  /** the composer's pain / discomfort answer for this take (14 Oct 2026) */
+  painDiscomfort?: boolean;
 };
 
 /** The drain step: upload the durable file, append the row, drop the local copy.
@@ -102,7 +106,7 @@ export async function submitSessionVoiceNote(p: SessionVoiceOutboxPayload): Prom
   if (!local.exists) throw new Error('The recording file is missing on this device.');
   const path = await uploadSessionVoiceNote({ clientId: p.clientId, workoutSessionId: p.workoutSessionId, userId: p.userId, uri: p.uri });
   try {
-    await appendSessionVoiceNote({ workoutSessionId: p.workoutSessionId, path, durationMs: p.durationMs, source: p.source });
+    await appendSessionVoiceNote({ workoutSessionId: p.workoutSessionId, path, durationMs: p.durationMs, source: p.source, painDiscomfort: p.painDiscomfort === true });
   } catch (e: any) {
     // The row did not take it: remove the object again (own upload, allowed).
     try { await supabase.storage.from(SESSION_VOICE_BUCKET).remove([path]); } catch { /* best effort */ }

@@ -18,8 +18,8 @@ import {
 // Session voice notes (7 Oct 2026): the therapist records while logging and
 // listens on the client's session list, exactly like the trainer.
 import { useAuth } from '../auth';
-import { VoiceNotesComposer, SessionVoicePlaylistPlayer } from '../components/SessionVoice';
-import { discardTake, queueSessionVoiceNote, PendingVoiceTake } from '../lib/sessionVoiceQueries';
+import { VoiceNotesComposer, SessionVoicePlaylistPlayer, toggleTakeFlag } from '../components/SessionVoice';
+import { discardTake, queueSessionVoiceNote, PendingVoiceTake, hasPainNote } from '../lib/sessionVoiceQueries';
 import { startTimer, finishTimer, clearTimer } from '../lib/sessionTiming';
 
 /* ============ Therapist workspace — web /therapist parity ============
@@ -99,7 +99,7 @@ function AddTherapySessionSheet({ open, clients, presetClient, onClose }: {
           let failed: string | null = null;
           for (const t of takes) {
             const r = await queueSessionVoiceNote(
-              { workoutSessionId: sid, clientId, userId: meId, uri: t.uri, durationMs: t.durationMs, source: 'workout_form' },
+              { workoutSessionId: sid, clientId, userId: meId, uri: t.uri, durationMs: t.durationMs, source: 'workout_form', painDiscomfort: t.painDiscomfort === true },
               `${clientName} · voice note`,
             );
             if (r.status === 'failed') failed = r.error ?? 'The server rejected a voice note.';
@@ -228,6 +228,7 @@ function AddTherapySessionSheet({ open, clients, presetClient, onClose }: {
                 takes={voiceTakes}
                 onAdd={(t) => setVoiceTakes((x) => [...x, t])}
                 onRemove={(uri) => { discardTake(uri); setVoiceTakes((x) => x.filter((t) => t.uri !== uri)); }}
+                onToggleFlag={(uri) => setVoiceTakes((x) => toggleTakeFlag(x, uri))}
                 onRecordingChange={setVoiceRecording}
                 disabled={addM.isPending}
                 hint="Up to 5 notes, 5 minutes each. Saved with the session and played on the client's session list."
@@ -425,11 +426,12 @@ export function TherapistClientDetail() {
           {s.voiceNotes.length ? (
             <Pressable
               onPress={() => setVoiceOpenId((cur) => (cur === s.id ? null : s.id))}
-              accessibilityRole="button" accessibilityLabel={`Play ${s.voiceNotes.length} voice notes`}
-              style={{ alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 7, paddingHorizontal: 11, borderRadius: 999, borderWidth: 1, borderColor: hexA(ACC, 0.35), backgroundColor: hexA(ACC, voiceOpenId === s.id ? 0.16 : 0.07) }}
+              accessibilityRole="button" accessibilityLabel={`Play ${s.voiceNotes.length} voice notes${hasPainNote(s.voiceNotes) ? ', pain or discomfort reported' : ''}`}
+              style={{ alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 7, paddingHorizontal: 11, borderRadius: 999, borderWidth: 1, borderColor: hexA(hasPainNote(s.voiceNotes) ? C.red : ACC, hasPainNote(s.voiceNotes) ? 0.5 : 0.35), backgroundColor: hexA(ACC, voiceOpenId === s.id ? 0.16 : 0.07) }}
             >
               <Icon name="mic" size={12} color={ACC} strokeWidth={2.2} />
               <Text style={{ fontFamily: F.bodySemi, fontSize: 11.5, color: ACC }}>Play{s.voiceNotes.length > 1 ? ` · ${s.voiceNotes.length}` : ''}</Text>
+              {hasPainNote(s.voiceNotes) ? <Text style={{ fontFamily: F.bodySemi, fontSize: 10.5, color: C.red }}>· Pain</Text> : null}
             </Pressable>
           ) : null}
           {voiceOpenId === s.id && s.voiceNotes.length ? <SessionVoicePlaylistPlayer notes={s.voiceNotes} /> : null}

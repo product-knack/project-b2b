@@ -9,7 +9,13 @@ export type SessionVoiceNote = {
   recorded_by: string | null;
   recorded_by_name: string | null;
   source: 'workout_form' | 'roster';
+  /** The composer's checkbox "The client has pain or discomfort" (14 Oct 2026); older notes read false. */
+  pain_discomfort: boolean;
 };
+
+/** True when any note of the session was recorded with the pain / discomfort box ticked. */
+export const hasPainNote = (notes: SessionVoiceNote[] | null | undefined): boolean =>
+  Array.isArray(notes) && notes.some((n) => n.pain_discomfort === true);
 
 /** training_sessions.voice_notes, tolerant of null / a JSON string / junk elements. */
 export function parseVoiceNotes(v: unknown): SessionVoiceNote[] {
@@ -26,6 +32,7 @@ export function parseVoiceNotes(v: unknown): SessionVoiceNote[] {
       recorded_by: n.recorded_by ?? null,
       recorded_by_name: n.recorded_by_name ?? null,
       source: n.source === 'workout_form' ? 'workout_form' : 'roster',
+      pain_discomfort: n.pain_discomfort === true,
     }));
 }
 

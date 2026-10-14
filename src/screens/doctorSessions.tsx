@@ -15,8 +15,8 @@ import {
 } from '../lib/doctorQueries';
 // Session voice notes (7 Oct 2026): the doctor records while logging and from
 // the day list, exactly like the trainer; same component, same RPC.
-import { VoiceNotesComposer, SessionVoiceSheet, SessionVoiceSheetInfo } from '../components/SessionVoice';
-import { discardTake, queueSessionVoiceNote, PendingVoiceTake } from '../lib/sessionVoiceQueries';
+import { VoiceNotesComposer, SessionVoiceSheet, SessionVoiceSheetInfo, toggleTakeFlag } from '../components/SessionVoice';
+import { discardTake, queueSessionVoiceNote, PendingVoiceTake, hasPainNote } from '../lib/sessionVoiceQueries';
 import { startTimer, finishTimer, clearTimer } from '../lib/sessionTiming';
 
 /* ============ /doctor/sessions — day view + Log Physio Session (web port) ============ */
@@ -218,7 +218,7 @@ export function PhysioSessionSheet({ visible, onClose, clientId, clientName, sch
         let failed: string | null = null;
         for (const t of takes) {
           const r = await queueSessionVoiceNote(
-            { workoutSessionId: res.sessionId, clientId: activeClientId, userId: uid, uri: t.uri, durationMs: t.durationMs, source: 'workout_form' },
+            { workoutSessionId: res.sessionId, clientId: activeClientId, userId: uid, uri: t.uri, durationMs: t.durationMs, source: 'workout_form', painDiscomfort: t.painDiscomfort === true },
             `${activeClientName || 'Client'} · voice note`,
           );
           if (r.status === 'failed') failed = r.error ?? 'The server rejected a voice note.';
@@ -625,6 +625,7 @@ export function PhysioSessionSheet({ visible, onClose, clientId, clientName, sch
                   takes={voiceTakes}
                   onAdd={(t) => setVoiceTakes((x) => [...x, t])}
                   onRemove={(uri) => { discardTake(uri); setVoiceTakes((x) => x.filter((t) => t.uri !== uri)); }}
+                  onToggleFlag={(uri) => setVoiceTakes((x) => toggleTakeFlag(x, uri))}
                   onRecordingChange={setVoiceRecording}
                   disabled={submitM.isPending}
                   hint="Up to 5 notes, 5 minutes each. Saved with the session; you can add more from the Sessions list."
@@ -829,11 +830,12 @@ export function DoctorSessionsPage() {
                 {!isNC && !s.cancelled && s.clientId && uid ? (
                   <Pressable
                     onPress={() => setVoiceFor({ workoutSessionId: s.voiceSessionId || s.id, clientId: s.clientId, clientName: s.clientName, notes: s.voiceNotes })}
-                    accessibilityRole="button" accessibilityLabel={s.voiceNotes.length ? `${s.voiceNotes.length} voice notes` : 'Add a voice note'}
-                    style={{ alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 7, paddingHorizontal: 11, borderRadius: 999, borderWidth: 1, borderColor: hexA(C.purple, 0.35), backgroundColor: hexA(C.purple, s.voiceNotes.length ? 0.14 : 0.06) }}
+                    accessibilityRole="button" accessibilityLabel={s.voiceNotes.length ? `${s.voiceNotes.length} voice notes${hasPainNote(s.voiceNotes) ? ', pain or discomfort reported' : ''}` : 'Add a voice note'}
+                    style={{ alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 7, paddingHorizontal: 11, borderRadius: 999, borderWidth: 1, borderColor: hexA(hasPainNote(s.voiceNotes) ? C.red : C.purple, hasPainNote(s.voiceNotes) ? 0.5 : 0.35), backgroundColor: hexA(C.purple, s.voiceNotes.length ? 0.14 : 0.06) }}
                   >
                     <Icon name="mic" size={12} color={C.purple} strokeWidth={2.2} />
                     <Text style={{ fontFamily: F.bodySemi, fontSize: 11.5, color: C.purple }}>{s.voiceNotes.length ? `${s.voiceNotes.length} voice note${s.voiceNotes.length === 1 ? '' : 's'}` : 'Voice note'}</Text>
+                    {hasPainNote(s.voiceNotes) ? <Text style={{ fontFamily: F.bodySemi, fontSize: 10.5, color: C.red }}>· Pain</Text> : null}
                   </Pressable>
                 ) : null}
                 {s.hasPhysioExercises && !isNC ? <SessionExerciseDetails sessionId={s.id} /> : null}

@@ -35,7 +35,7 @@ import { useClientHealthReports } from '../lib/qhpQueries';
 import { PhysioSessionSheet } from './doctorSessions';
 // Session voice notes (7 Oct 2026): a rehab / recovery / therapy session's notes play back to back, as on the trainer's Sessions list.
 import { SessionVoicePlaylistPlayer } from '../components/SessionVoice';
-import { parseVoiceNotes } from '../lib/sessionVoiceTypes';
+import { parseVoiceNotes, hasPainNote } from '../lib/sessionVoiceTypes';
 import { ServicesButton } from '../components/servicesButton';
 
 /* ============ Doctor → Client Detail (web DoctorClientDetail.tsx port) ============
@@ -455,10 +455,11 @@ function RehabSessionCard({ s, onShowText }: { s: any; onShowText: (title: strin
         {voiceNotes.length ? (
           <Pressable
             onPress={() => setVoiceOpen((v) => !v)}
-            accessibilityRole="button" accessibilityLabel={`Play ${voiceNotes.length} voice notes`}
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: hexA(C.purple, voiceOpen ? 0.2 : 0.12), borderRadius: 9, paddingHorizontal: 9, paddingVertical: 5, borderWidth: 1, borderColor: hexA(C.purple, 0.3) }}
+            accessibilityRole="button" accessibilityLabel={`Play ${voiceNotes.length} voice notes${hasPainNote(voiceNotes) ? ', pain or discomfort reported' : ''}`}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: hexA(C.purple, voiceOpen ? 0.2 : 0.12), borderRadius: 9, paddingHorizontal: 9, paddingVertical: 5, borderWidth: 1, borderColor: hexA(hasPainNote(voiceNotes) ? C.red : C.purple, hasPainNote(voiceNotes) ? 0.5 : 0.3) }}
           >
             <Icon name="mic" size={11} color={C.purple} strokeWidth={2.2} /><Text style={{ fontFamily: F.bodySemi, fontSize: 10.5, color: C.purple }}>Play{voiceNotes.length > 1 ? ` · ${voiceNotes.length}` : ''}</Text>
+            {hasPainNote(voiceNotes) ? <Text style={{ fontFamily: F.bodySemi, fontSize: 10, color: C.red }}>· Pain</Text> : null}
           </Pressable>
         ) : null}
       </View>
