@@ -50,13 +50,18 @@ const normName = (s: string) => s.replace(/\s+/g, ' ').trim().toLowerCase();
 /** The key the ticked map uses (case-insensitive, single-spaced). */
 export const nameKey = normName;
 
+/** Form placeholders that are not medicines ("Other" is the QHP form's checkbox option; the
+    server splitter drops them too since migration 20261014180000; this is the safety net). */
+const PLACEHOLDER = /^(none|nil|no|na|n\/a|-|nothing|other|others|other medicines?|other medications?|no medications?|no medicines?|not applicable|none of the above)\.?$/i;
+export const isPlaceholderName = (name: string): boolean => PLACEHOLDER.test(normName(name));
+
 /** The RPC's json, tolerant of nulls and junk. Null when the shape is not usable. */
 export function parseCheckinInfo(v: unknown): MedicineCheckinInfo | null {
   if (!v || typeof v !== 'object') return null;
   const o = v as any;
   const candidates: MedicineCandidate[] = Array.isArray(o.candidates)
     ? o.candidates
-        .filter((c: any) => c && typeof c.name === 'string' && c.name.trim())
+        .filter((c: any) => c && typeof c.name === 'string' && c.name.trim() && !isPlaceholderName(c.name))
         .map((c: any) => ({
           name: String(c.name).replace(/\s+/g, ' ').trim().slice(0, MEDICINE_NAME_MAX),
           strength: typeof c.strength === 'string' && c.strength.trim() ? c.strength.trim() : null,
@@ -95,7 +100,7 @@ export function buildCheckinItems(candidates: MedicineCandidate[], ticked: Recor
   for (const raw of added) {
     const name = String(raw ?? '').replace(/\s+/g, ' ').trim().slice(0, MEDICINE_NAME_MAX);
     const k = normName(name);
-    if (!name || seen.has(k)) continue;
+    if (!name || seen.has(k) || isPlaceholderName(name)) continue;
     seen.add(k);
     out.push({ name, strength: null, source: 'trainer', origin: { kind: 'trainer' } });
   }
