@@ -6462,6 +6462,10 @@ export function Workout() {
   const [medAdded, setMedAdded] = React.useState<string[]>([]);
   const [medInput, setMedInput] = React.useState('');
   const [pendingMedicines, setPendingMedicines] = React.useState<MedicineCheckinPayload | null>(null);
+  // The four health values are already logged today (a second session, or entered through
+  // Trends) but the medicines are due: the sheet opens with the Medicines card alone, so the
+  // check-in really rides on the first logged session on or after the 10-day mark.
+  const medicineOnly = !gateBlocking && !healthLoading && medicineDue && !pendingMedicines && !editingOutboxId;
   const medSugQ = useMedicineSuggestions(healthOpen && medicineDue ? medInput : '');
   React.useEffect(() => {
     if (!healthOpen || !medicineInfo?.due) return;
@@ -6480,6 +6484,11 @@ export function Workout() {
   const saveHealth = async () => {
     if (medicineDue && medicineInfo) {
       setPendingMedicines({ checkinId: uuidv4(), items: buildCheckinItems(medicineInfo.candidates, medTicked, medAdded) });
+    }
+    if (medicineOnly) {
+      // Nothing to write for the four values; the medicines go with the workout submit.
+      closeHealthSheet();
+      return;
     }
     const payload: HealthDataInput = {
       clientId: selectedClientId as string,
@@ -6518,7 +6527,7 @@ export function Workout() {
   };
   // Hydration is required like the other three once the column is live (health?.hydrationSupported !== false).
   const hydrationAsked = health?.hydrationSupported !== false;
-  const healthValid = hSleep.trim() !== '' && hRating != null && hSteps.trim() !== '' && (!hydrationAsked || hHydration.trim() !== '');
+  const healthValid = medicineOnly || (hSleep.trim() !== '' && hRating != null && hSteps.trim() !== '' && (!hydrationAsked || hHydration.trim() !== ''));
   const [sessionName, setSessionName] = React.useState('');
   const [exercises, setExercisesRaw] = React.useState<WExercise[]>([]);
   // Every write flushes the debounced SetInput edits FIRST, so a template load,
@@ -7017,8 +7026,9 @@ export function Workout() {
   // the trainer fills the three fields and lands right back on the unlocked form.
   const autoOpened = React.useRef(false);
   React.useEffect(() => {
-    // The listen gate goes first; the health sheet opens once it is cleared.
-    if (gateBlocking && !listenRequired && !autoOpened.current) {
+    // The listen gate goes first; the health sheet opens once it is cleared. It also opens,
+    // medicines only, when the values are logged but the 10-day medicine check-in is due.
+    if ((gateBlocking || medicineOnly) && !listenRequired && !autoOpened.current) {
       autoOpened.current = true;
       setHSleep(health?.sleepHours != null ? String(health.sleepHours) : '');
       setHRating(health?.nutritionRating ?? null);
@@ -7026,7 +7036,7 @@ export function Workout() {
       setHHydration(health?.hydrationLitres != null ? String(health.hydrationLitres) : '');
       setHealthOpen(true);
     }
-  }, [gateBlocking, listenRequired]);
+  }, [gateBlocking, medicineOnly, listenRequired]);
 
   const missingHint = gateBlocked
     ? `Approved ${modLabel} plan required — limit of 3 plan-less sessions reached`
@@ -7894,8 +7904,12 @@ export function Workout() {
                 </View>
               </View>
               <View style={{ flex: 1 }}>
-                <Serif style={{ fontSize: 20 }}>Log Health Data</Serif>
-                <Body style={{ fontSize: 11.5, color: C.muted2, marginTop: 3, lineHeight: 16 }}>{clientName} hasn't logged last night's sleep or yesterday's nutrition. Enter it on their behalf.</Body>
+                <Serif style={{ fontSize: 20 }}>{medicineOnly ? 'Medicines check-in' : 'Log Health Data'}</Serif>
+                <Body style={{ fontSize: 11.5, color: C.muted2, marginTop: 3, lineHeight: 16 }}>
+                  {medicineOnly
+                    ? `${clientName}'s health data is already logged today. Tick the medicines they are taking now; it is saved with this workout.`
+                    : `${clientName} hasn't logged last night's sleep or yesterday's nutrition. Enter it on their behalf.`}
+                </Body>
               </View>
               <Pressable onPress={closeHealthSheet} style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center', justifyContent: 'center' }}>
                 <Icon name="close" size={14} color="#B8B2AC" strokeWidth={2.3} />
@@ -7918,6 +7932,7 @@ export function Workout() {
             ) : null}
 
             <ScrollView ref={healthScrollRef} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 13, paddingBottom: 24 }}>
+              {!medicineOnly ? (<>
               {/* Sleep */}
               <View style={{ padding: 15, borderRadius: 18, backgroundColor: hexA(C.gold, 0.05), borderWidth: 1, borderColor: hexA(C.gold, 0.2), gap: 12 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
@@ -8018,6 +8033,7 @@ export function Workout() {
                   </View>
                 </View>
               ) : null}
+              </>) : null}
 
               {/* Medicines, every 10 days (14 Oct 2026): the latest prescription's and QHP's medicines plus
                   last time's ticked ones; tick what the client takes now, add anything new. Nothing ticked
@@ -8105,7 +8121,7 @@ export function Workout() {
               <Pressable onPress={saveHealth} disabled={!healthValid || saveHealthM.isPending} style={{ opacity: !healthValid || saveHealthM.isPending ? 0.45 : 1, marginTop: 2 }}>
                 <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 16, borderRadius: 14 }}>
                   <Icon name="checks" path="M20 6 9 17l-5-5" size={16} color="#fff" strokeWidth={2.8} />
-                  <Text style={{ fontFamily: F.bodyBold, fontSize: 15, color: '#fff' }}>{saveHealthM.isPending ? 'Saving…' : 'Save Health Data'}</Text>
+                  <Text style={{ fontFamily: F.bodyBold, fontSize: 15, color: '#fff' }}>{saveHealthM.isPending ? 'Saving…' : medicineOnly ? 'Save Medicines' : 'Save Health Data'}</Text>
                 </LinearGradient>
               </Pressable>
               {!healthValid ? <Body style={{ fontSize: 11, color: C.muted3, textAlign: 'center' }}>Enter sleep, nutrition rating, steps and hydration to continue.</Body> : null}
