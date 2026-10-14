@@ -23,6 +23,7 @@ import { useStore, homeRouteFor } from '../store';
 import { useSpeech } from '../lib/useSpeech';
 import { NAV_MAP_HTML } from '../lib/navMapHtml';
 import { navTargetRef, fetchNavRoute, saveNavigationTrack, appVersionLabel, type NavTarget } from '../lib/qhpNavigationQueries';
+import { RoutePublisher, liveFromFix, type RouteEta } from '../lib/routeTracker';
 import {
   type Fix, type LatLng, type RouteInfo, type TrackPoint, type Projection, type Maneuver, type ManeuverKind,
   projectOnRoute, isOffRoute, isArrived, estimateLeft, arrivalClock, agoText, shouldKeep, toPoint, headingFrom, isMoving,
@@ -187,6 +188,11 @@ export function QhpNavigation() {
 
   const [maneuver, setManeuver] = React.useState<Maneuver | null>(null);
 
+  // Route tracker (14 Oct 2026, foreground-only): a QHP ride publishes its position to the
+  // office while this screen is open. Roster rides never publish. Failures never stop the ride.
+  const publisher = React.useRef<RoutePublisher | null>(null);
+  const etaNow = React.useRef<RouteEta>({ etaMin: null, distanceKm: null });
+
   const onFix = (f: Fix) => {
     const prev = prevFix.current;
     headingRef.current = headingFrom(prev, f, headingRef.current);
@@ -198,6 +204,8 @@ export function QhpNavigation() {
     const r = routeRef.current;
     const pj = r ? projectOnRoute(here, r.points) : null;
     setProj(pj);
+    const estNow = pin ? estimateLeft(here, pin, r, pj) : null;
+    etaNow.current = estNow ? { etaMin: estNow.min, distanceKm: estNow.km } : { etaMin: null, distanceKm: null };
     if (phaseRef.current === 'navigating' || phaseRef.current === 'arrived') {
       const s = startMs.current ?? f.t;
       const last = points.current[points.current.length - 1] ?? null;
@@ -211,7 +219,12 @@ export function QhpNavigation() {
         if (!spoken.current.has(ARRIVE_CUE)) { spoken.current.add(ARRIVE_CUE); say(ARRIVE_CUE, 'You have arrived at your destination.'); }
         send({ type: 'arrived' });
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+        if (publisher.current) {
+          const t = currentTrack('arrived', Date.now());
+          if (t) void publisher.current.arrived(liveFromFix(f, { etaMin: 0, distanceKm: 0 }, headingRef.current), t);
+        }
       }
+      publisher.current?.position(liveFromFix(f, etaNow.current, headingRef.current));
       if (r && pj && isOffRoute(pj, f.acc) && !routeInFlight.current && Date.now() - lastRouteCallAt.current > ROUTE_MIN_GAP_MS) {
         setRouteState('recalculating');
         send({ type: 'route', points: r.points, dim: true });
@@ -287,6 +300,9 @@ export function QhpNavigation() {
     const t = currentTrack(null, null);
     if (!t || !target || !target.assessmentId) return;
     try { await saveNavigationTrack(target.assessmentId, t); } catch { /* best effort while riding */ }
+    // The 60 s checkpoint for the office: the trail so far (polyline + thinned points).
+    const f = prevFix.current;
+    if (f && publisher.current) void publisher.current.checkpoint(liveFromFix(f, etaNow.current, headingRef.current), t.points, t.polyline);
   };
 
   // Preview the route as soon as we know where the assessor is (before Start).
@@ -315,6 +331,18 @@ export function QhpNavigation() {
     if (savesRide(target)) persistLocal();
     if (!routeRef.current) await refreshRoute([fix.lat, fix.lng], 'start');
     routeAtStart.current = routeRef.current;
+    if (savesRide(target) && target.assessmentId) {
+      // Tell the office the ride started (toast on the Leads page, chip on the journey).
+      publisher.current = new RoutePublisher(target.assessmentId);
+      const ra = routeAtStart.current;
+      const f0 = prevFix.current ?? fix;
+      void publisher.current.start(
+        liveFromFix(f0, etaNow.current, headingRef.current),
+        { planned_km: ra?.distanceKm ?? null, planned_min: ra?.durationMin ?? null, planned_polyline: ra?.polyline ?? null },
+        { lat: target.lat, lng: target.lng, captured_at: target.pinCapturedAt, method: target.pinMethod },
+        appVersionLabel(),
+      );
+    }
     const r = routeRef.current;
     const first = r?.steps?.[0];
     const pj = r ? projectOnRoute([fix.lat, fix.lng], r.points) : null;
@@ -338,6 +366,12 @@ export function QhpNavigation() {
         setSaveNote(res === 'queued' ? 'Ride saved on this phone; it syncs when you are back online.' : null);
         await AsyncStorage.removeItem(TRACK_KEY(target.assessmentId)).catch(() => {});
       }
+      // The permanent record for the office; ended() never throws (one retry inside).
+      if (t && publisher.current) {
+        const f = prevFix.current;
+        if (f) await publisher.current.ended(liveFromFix(f, etaNow.current, headingRef.current), t);
+      }
+      publisher.current = null;
       if (endedBy === 'arrived') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       navTargetRef.current = null;
       leave(target.kind);
@@ -544,6 +578,9 @@ export function QhpNavigation() {
             </Pressable>
           </View>
         )}
+        {navigating && savesRide(target) ? (
+          <Text style={{ fontFamily: F.body, fontSize: 11, color: G.muted, textAlign: 'center' }}>Sharing your position with the Odds office while this screen is open</Text>
+        ) : null}
         <Text style={{ fontFamily: F.body, fontSize: 9.5, color: '#9AA0A6', textAlign: 'center', marginTop: -2 }}>Map © OpenStreetMap contributors · OpenFreeMap{routeState === 'ok' && route ? ` · route ${routeAgo}` : ''}</Text>
       </View>
     </View>
