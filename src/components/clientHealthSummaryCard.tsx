@@ -262,6 +262,59 @@ export function ClientHealthSummaryCard({ clientId }: { clientId: string | null 
   );
 }
 
+/* ---------- compact strip for list cards (Essentials auction session cards, 15 Oct 2026) ----------
+   Owner: "in the Essentials card also show the client's weekly and long summary". A folded
+   row "Client summaries" that opens into the same two play rows as the card (device voice,
+   transcript, the listen trail), for the training day the card is about. */
+export function ClientSummaryStrip({ clientId, date, accent = GOLD }: { clientId: string | null | undefined; date?: string | null; accent?: string }) {
+  const { session } = useAuth();
+  const uid = session?.user?.id ?? null;
+  const [open, setOpen] = React.useState(false);
+  const q = useClientHealthSummary(clientId ?? null, true, date ?? null);
+  const logM = useLogSummaryListen(clientId ?? null);
+  const speech = useSpeech();
+  const [transcript, setTranscript] = React.useState<Which | null>(null);
+  const [err, setErr] = React.useState<string | null>(null);
+  const row = q.data ?? null;
+  React.useEffect(() => { if (!open) speech.stop(); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!clientId || q.isError) return null;
+  const hasWeekly = hasScript(row, 'weekly'), hasContext = hasScript(row, 'context');
+  const summaryLine = q.isLoading ? 'Loading…' : !row || (!hasWeekly && !hasContext) ? 'Nothing built yet for this day' : [hasWeekly ? `This week · ${durationText(row!.weekly_summary!.script)}` : null, hasContext ? `Health context · ${durationText(row!.context_summary!.script)}` : null].filter(Boolean).join('   ');
+  const play = (which: Which) => {
+    const s = summaryOf(row, which);
+    if (!s?.script) return;
+    if (speech.speakingId === which) { if (speech.canPause) { if (speech.paused) speech.resume(); else speech.pause(); } else speech.stop(); return; }
+    setErr(null);
+    logM.mutate(which, { onError: (e) => setErr((e as Error).message) });
+    speech.speak(which, s.script, { onError: (m) => { setTranscript(which); setErr(`This device cannot speak (${m}). The transcript is shown instead.`); } });
+  };
+  return (
+    <ReplayMask>
+      <View style={{ borderRadius: 14, backgroundColor: hexA(accent, 0.06), borderWidth: 1, borderColor: hexA(accent, open ? 0.4 : 0.22) }}>
+        <Pressable onPress={() => setOpen((o) => !o)} hitSlop={6} accessibilityRole="button" accessibilityState={{ expanded: open }} accessibilityLabel="Client summaries"
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 10, paddingHorizontal: 12 }}>
+          <Icon name="headphones" size={14} color={accent} strokeWidth={2.1} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontFamily: F.bodySemi, fontSize: 12.5, color: '#fff' }}>Client summaries</Text>
+            <Mono style={{ fontSize: 8, letterSpacing: 0.5, color: C.muted3, marginTop: 2 }} numberOfLines={1}>{summaryLine.toUpperCase()}</Mono>
+          </View>
+          <Icon name={open ? 'chevUp' : 'chevDown'} size={13} color={accent} strokeWidth={2.4} />
+        </Pressable>
+        {open ? (
+          <View style={{ paddingHorizontal: 10, paddingBottom: 10, gap: 8 }}>
+            {(['weekly', 'context'] as Which[]).map((which) => (
+              <SummaryRow key={which} which={which} row={row} uid={uid}
+                active={speech.speakingId === which} paused={speech.paused} transcriptOpen={transcript === which}
+                onPlay={() => play(which)} onStop={speech.stop} onToggleTranscript={() => setTranscript((t) => (t === which ? null : which))} />
+            ))}
+            {err ? <Body style={{ fontSize: 11, color: C.red }}>{err}</Body> : null}
+          </View>
+        ) : null}
+      </View>
+    </ReplayMask>
+  );
+}
+
 /* ---------- the mandatory listen gate (Today's Roster > add session) ----------
    Shown by the Workout form when the client's summaries are due. The trainer
    must hear each due summary to the end (or open its transcript when the device

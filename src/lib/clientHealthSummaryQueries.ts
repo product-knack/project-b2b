@@ -1,41 +1,63 @@
-/* Data for "Listen before the session" (9 Oct 2026). Read: the client's
-   client_health_summary row (RLS can_listen_client_summary: admin, the client's
-   trainers, any doctor or therapist, CRM and managers; an unauthorised user
-   simply gets no row). Write: the listen trail through log_summary_listen. */
+/* Data for "Listen before the session" (9 Oct 2026). Since 10 Oct 2026 the backend holds
+   one client_health_summary row per client per training day (hub-track migration
+   20261010160000), so the app reads the row in effect through the RPC
+   get_client_health_summary (RLS can_listen_client_summary: admin, the client's
+   trainers, any doctor or therapist, CRM and managers, and whoever the server lets
+   listen; an unauthorised user simply gets no row). The direct table read of 9 Oct
+   broke on 10 Oct (42703: weekly_generated_at no longer exists) and hid the card on
+   every client page until 15 Oct 2026. Write: the listen trail through log_summary_listen. */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from './supabase';
 import { withTimeout, NET_MS } from './withTimeout';
 import type { ClientHealthSummaryRow, ListenEntry, Which } from './clientHealthSummary';
 
 export const HEALTH_SUMMARY_KEY = 'client-health-summary';
-const SELECT = 'client_id, weekly_summary, weekly_generated_at, context_summary, context_generated_at, context_dirty, listen_history';
 
-export async function fetchClientHealthSummary(clientId: string): Promise<ClientHealthSummaryRow | null> {
+/** The RPC's row, mapped to the app's shape (the old generated_at columns now mirror the summaries). */
+const toRow = (d: any): ClientHealthSummaryRow => ({
+  client_id: d.client_id,
+  weekly_summary: d.weekly_summary ?? null,
+  weekly_generated_at: d.weekly_summary?.generated_at ?? null,
+  context_summary: d.context_summary ?? null,
+  context_generated_at: d.context_summary?.generated_at ?? null,
+  context_dirty: d.context_dirty ?? null,
+  listen_history: Array.isArray(d.listen_history) ? d.listen_history : [],
+  briefing_date: d.briefing_date ?? null,
+  status: d.status === 'ready' ? 'ready' : d.status === 'building' ? 'building' : null,
+  built_at: d.built_at ?? null,
+});
+
+/** The row in effect for a day (today by default): the latest row with briefing_date <= date.
+    Null when there is none, when the function is missing (PGRST202) or when the caller may not listen. */
+export async function fetchClientHealthSummary(clientId: string, date?: string | null): Promise<ClientHealthSummaryRow | null> {
   const { data, error } = await withTimeout(
-    Promise.resolve(supabase.from('client_health_summary').select(SELECT).eq('client_id', clientId).maybeSingle()),
+    Promise.resolve(supabase.rpc('get_client_health_summary', { p_client_id: clientId, p_date: date ?? null })),
     NET_MS, 'Client summary',
   );
   if (error) {
-    if (error.code === '42P01') return null; // table not there yet: "nothing yet"
+    if (error.code === 'PGRST202' || error.code === '42P01' || error.code === '42501') return null;
     throw new Error(error.message);
   }
-  return (data as ClientHealthSummaryRow | null) ?? null;
+  const row = Array.isArray(data) ? data[0] : data;
+  return row ? toRow(row) : null;
 }
 
-/** Key ['client-health-summary', clientId], 60 s stale (persisted under the client- prefix). */
-export function useClientHealthSummary(clientId: string | null | undefined, enabled: boolean = true) {
+/** Key ['client-health-summary', clientId, date | 'today'], 60 s stale (persisted under the client- prefix).
+    `date` (YYYY-MM-DD IST) asks for another training day's row, e.g. the auction's target day. */
+export function useClientHealthSummary(clientId: string | null | undefined, enabled: boolean = true, date?: string | null) {
   return useQuery({
-    queryKey: [HEALTH_SUMMARY_KEY, clientId ?? null],
+    queryKey: [HEALTH_SUMMARY_KEY, clientId ?? null, date ?? 'today'],
     enabled: !!clientId && enabled,
     staleTime: 60_000,
-    queryFn: () => fetchClientHealthSummary(clientId as string),
+    queryFn: () => fetchClientHealthSummary(clientId as string, date ?? null),
   });
 }
 
 const friendlyListenError = (e: { code?: string; message: string }): string =>
   e.code === 'PGRST202' ? 'The listen trail is not set up on the server yet.' : e.message;
 
-/** log_summary_listen(p_client_id, p_which): appends {at, by, by_name, role, which, version}. */
+/** log_summary_listen(p_client_id, p_which): appends {at, by, by_name, role, which, version, briefing_date}
+    to the row in effect today. */
 export function useLogSummaryListen(clientId: string | null | undefined) {
   const qc = useQueryClient();
   return useMutation({

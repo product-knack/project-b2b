@@ -54,11 +54,16 @@ export type ContextSummary = {
 export type ClientHealthSummaryRow = {
   client_id: string;
   weekly_summary: WeeklySummary | null;
+  /** since 10 Oct 2026 the row is one per training day; these two mirror the summaries' own generated_at */
   weekly_generated_at: string | null;
   context_summary: ContextSummary | null;
   context_generated_at: string | null;
   context_dirty: boolean | null;
   listen_history: ListenEntry[] | null;
+  /** the training day this row is for (YYYY-MM-DD IST); the row in effect for the date asked */
+  briefing_date?: string | null;
+  status?: 'building' | 'ready' | null;
+  built_at?: string | null;
 };
 
 export const TITLES: Record<Which, string> = { weekly: "This week's training", context: 'Health context' };

@@ -16,13 +16,14 @@ import {
 import { useAuctionConfig, useAuctionClientPhotos, useAuctionEta, useEssentialsAuction } from '../lib/essentialsAuctionQueries';
 import { AuctionQuizSheet } from '../components/auctionQuizSheet';
 import { AuctionResultsCards } from '../components/auctionResultsCards';
+import { ClientSummaryStrip } from '../components/clientHealthSummaryCard';
 
 /* ============ Essentials Auction (trainer sidebar page, 1 Oct 2026) ============
    Every Essentials by Odds client saves their own week in the client app
    (clients.weekly_protocol.slots). The day before each training the auction
    offers it to trainers. Since 10 Oct 2026 (hub-track migration 20261010120000)
    a trainer bids by answering the client's five questions, one attempt each; at
-   the close (4:00 PM IST) the highest score wins, equal scores the earlier bid,
+   the close (5:00 PM IST since 15 Oct 2026, from the database config) the highest score wins, equal scores the earlier bid,
    still equal the client's usual trainer, and the server writes the winner's
    session_schedule row, care-team note and My Crew entry. Everyone who bid sees
    the result on the dashboard for four hours. Port of the web page (hub-track
@@ -278,6 +279,10 @@ function LotCard({ lot, index, me, win, now, reduceMotion, photo, eta, onPhoto, 
             {photo ? <Mono style={{ fontSize: 7.5, letterSpacing: 0.8, color: C.muted3, marginTop: 2 }}>TAP THE PHOTO FOR THE QHP FRONT VIEW</Mono> : null}
           </View>
         </View>
+
+        {/* The client's spoken summaries for that training day (15 Oct 2026, owner): this week's
+            training and the health context, played by the device, transcript on tap. */}
+        <ClientSummaryStrip clientId={lot.client_id} date={lot.auction_date} accent={accent} />
 
         {/* bids so far and the size of the questionnaire */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
