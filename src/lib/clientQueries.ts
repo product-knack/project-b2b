@@ -348,6 +348,12 @@ export type LinkOutcome = { status: 'skipped' | 'linked' | 'unresolved'; attempt
 // not-yet-linked path, and is invisible on the happy path.
 const LINK_RETRY_MS = 500;
 
+/** The message a second log for an already-logged roster slot fails with (shown in Waiting to Sync). */
+export const ALREADY_LOGGED_MESSAGE = 'Already logged: this roster session was logged from another attempt, so this copy was not saved. Discard it.';
+// workout_exercises.schedule_session_id arrived on 15 Oct 2026 (migration 20261015100000);
+// until it is run live the insert is retried without it.
+let scheduleColumnMissing = false;
+
 /* Link the logged workout to its roster slot via link_workout_to_schedule — one
    transaction that sets training_sessions.schedule_session_id, handles the dedupe branch
    where no row was created, and flips session_schedule.workout_session_id. Replaces the
@@ -429,6 +435,18 @@ export async function submitWorkoutLog(args: WorkoutLogInput) {
     .limit(1);
   if (exErr) throw new Error(exErr.message);
   const alreadyInserted = (existing?.length ?? 0) > 0;
+
+  // Slot guard (15 Oct 2026): a roster slot takes ONE log. A queued log that reaches the
+  // server after another log already took the slot (the same slot logged twice while the
+  // first copy waited to sync) is refused here with a clear, non-transient message, so the
+  // outbox marks it failed and nothing is inserted. The same log retried (same id) passes.
+  if (!alreadyInserted && scheduleSessionId) {
+    const { data: slot, error: slotErr } = await supabase.from('session_schedule').select('workout_session_id').eq('id', scheduleSessionId).maybeSingle();
+    if (slotErr && /network|fetch|timeout|timed out|socket|ECONN|ENOTFOUND/i.test(String(slotErr.message ?? ''))) throw new Error(slotErr.message);
+    if (slot?.workout_session_id && slot.workout_session_id !== sessionId) {
+      throw new Error(ALREADY_LOGGED_MESSAGE);
+    }
+  }
 
   if (!alreadyInserted) {
     const rows: any[] = [];
@@ -525,8 +543,20 @@ export async function submitWorkoutLog(args: WorkoutLogInput) {
         });
       }
     }
-    const { error } = await supabase.from('workout_exercises').insert(rows);
-    if (error) throw new Error(error.message);
+    // The roster slot rides on every row (migration 20261015100000) so the server can refuse
+    // a second completed session for the same slot (DUPLICATE_SLOT). Until the column is
+    // live the insert is retried once without it (42703).
+    if (scheduleSessionId && !scheduleColumnMissing) rows.forEach((r) => { r.schedule_session_id = scheduleSessionId; });
+    let { error } = await supabase.from('workout_exercises').insert(rows);
+    if (error && (error as any).code === '42703' && scheduleSessionId && !scheduleColumnMissing) {
+      scheduleColumnMissing = true;
+      rows.forEach((r) => { delete r.schedule_session_id; });
+      ({ error } = await supabase.from('workout_exercises').insert(rows));
+    }
+    if (error) {
+      if (/DUPLICATE_SLOT/.test(String(error.message))) throw new Error(ALREADY_LOGGED_MESSAGE);
+      throw new Error(error.message);
+    }
   }
 
   // Web post-insert steps (non-fatal, idempotent):

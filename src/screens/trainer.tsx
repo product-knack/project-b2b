@@ -42,7 +42,7 @@ import { useAddOwnSession, useTodayRoster, useTrainerStats, useTrainerProfile, u
 import { PrevSet, useMyClients, useClientDetail, useClientSessions, useClientPlans, useClientGoals, useSaveWeeklyGoals, useDeleteWeeklyGoal, useZone2Week, useLogZone2Session, useWeeklyHealthSummary, PLAN_VALID_DAYS, useClientReports, useClientConsultAi, ClientConsultAi, useClientBioAge, useClientProgression, useCreateWorkoutSession, useModalityGate, useWorkoutTemplates, useSaveWorkoutTemplate, useDeleteWorkoutTemplate, useClientHealthCheck, useSaveHealthData, useExerciseDb, useSessionExercises, uuidv4, HealthDataInput, useWeeklyProgressionAll, ackWeeklyReport, WeeklyProgressionRow, useApprovedPlansForLogging, usePartnerInfo, usePreviousExerciseData, checkDuplicateWorkoutToday, PlanExerciseRow, useClientDailyStats, useSaveClientHomeLocation, PILATES_REFORMER_EXERCISES, usePlanEditValidation, normalizePlanModality, PLAN_EDIT_MAX_WORKOUTS } from '../lib/clientQueries';
 import * as Location from 'expo-location';
 import KvStorage from 'expo-sqlite/kv-store';
-import { enqueueOutbox, getIsOnline, useIsOnline, useOutbox, retryOutboxItem, removeOutboxItem, drainOutbox, submitItem, updateOutboxItem, getOutboxItem, WorkoutLogOutboxPayload, OutboxItem, useSyncedNotices, dismissSyncedNotice } from '../lib/offline';
+import { enqueueOutbox, getIsOnline, useIsOnline, useOutbox, retryOutboxItem, removeOutboxItem, drainOutbox, submitItem, updateOutboxItem, getOutboxItem, WorkoutLogOutboxPayload, OutboxItem, useSyncedNotices, dismissSyncedNotice, workoutQueueBySlot, queuedLine, pendingWorkoutForSlot, type QueuedWorkout } from '../lib/offline';
 import { useClientThreadsUnread } from '../lib/clientThreadQueries';
 import { ClientThreadsCard } from '../components/clientThreadsCard';
 import { ManagerTeamChatCard } from './managerChat';
@@ -1046,7 +1046,8 @@ export const approxTravel = (a: { lat: number; lng: number }, bLat: number, bLng
   return { km, min: Math.max(1, Math.round((km / 22) * 60)) };
 };
 
-function RosterCard({ row, trainerName, highlight, onAddWorkout, plans, devPos, cycle, onCycle, onVoice }: { row: RosterRow; trainerName: string; highlight?: boolean; onAddWorkout: () => void; plans?: PlanExpiry[]; devPos?: { lat: number; lng: number } | null; cycle?: ClientCycle | null; onCycle?: () => void; onVoice?: () => void }) {
+function RosterCard({ row, trainerName, highlight, onAddWorkout, plans, devPos, cycle, onCycle, onVoice, queued, onEditQueued }: { row: RosterRow; trainerName: string; highlight?: boolean; onAddWorkout: () => void; plans?: PlanExpiry[]; devPos?: { lat: number; lng: number } | null; cycle?: ClientCycle | null; onCycle?: () => void; onVoice?: () => void; /** a log for this slot waiting on this device (15 Oct 2026) */ queued?: QueuedWorkout | null; onEditQueued?: () => void }) {
+  const netOnline = useIsOnline();
   const cancelM = useCancelScheduledSession();
   const missedM = useAddMissedRemark();
   const [modal, setModal] = React.useState<null | 'cancel' | 'missed'>(null);
@@ -1281,7 +1282,28 @@ function RosterCard({ row, trainerName, highlight, onAddWorkout, plans, devPos, 
           The reschedule STATUS chips above stay: a request raised from CRM or web
           still has to be visible here. RescheduleSheet is left in the file so
           putting the button back is a one-line change. */}
-      {isCancelled || logged ? null : isOpenPast ? (
+      {/* A log for this slot is already waiting on this device (15 Oct 2026): no second
+          Log Workout, the queued one can be edited; it shows as logged once it syncs. */}
+      {!isCancelled && !logged && queued ? (() => {
+        const line = queuedLine(queued, netOnline);
+        const col = line.tone === 'red' ? C.red : line.tone === 'blue' ? C.blue : C.gold;
+        return (
+          <View style={{ gap: 8 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 9, paddingHorizontal: 11, borderRadius: 12, backgroundColor: hexA(col, 0.08), borderWidth: 1, borderColor: hexA(col, 0.35) }}>
+              {queued.status === 'syncing' ? <ActivityIndicator size="small" color={col} /> : <Icon name={queued.status === 'failed' ? 'alert' : 'checks'} size={13} color={col} strokeWidth={2.3} />}
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontFamily: F.bodySemi, fontSize: 12, color: col }}>Workout logged · {line.text}</Text>
+                {queued.status === 'failed' && queued.error ? <Body style={{ fontSize: 10.5, color: '#E0A090', marginTop: 2 }} numberOfLines={2}>{queued.error}</Body> : null}
+              </View>
+            </View>
+            {onEditQueued && queued.status !== 'syncing' ? (
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <Btn label="Edit queued log" icon="edit" color={C.gold} onPress={onEditQueued} />
+              </View>
+            ) : null}
+          </View>
+        );
+      })() : isCancelled || logged ? null : isOpenPast ? (
         <View style={{ flexDirection: 'row', gap: 8 }}>
           <Pulse active={!trainerHasMissedRemark}>
             <Btn label={trainerHasMissedRemark ? 'Remark Logged' : 'Missed Remark'} icon="alert" color={C.gold} disabled={trainerHasMissedRemark} onPress={() => { setText(''); setMissedCat(null); cancelM.reset(); missedM.reset(); setModal('missed'); }} />
@@ -1684,6 +1706,21 @@ export function Dashboard() {
   const netOnline = useIsOnline();
   // Screenshot-audit events sync silently — never shown in the Waiting to Sync UI.
   const outbox = useOutbox().filter((o) => o.kind !== 'screenshot-log');
+  // Roster slots with a workout log waiting on this device (15 Oct 2026): the card shows
+  // "logged, waiting to sync" instead of a second Log Workout, the live cause of duplicates.
+  const queuedBySlot = React.useMemo(() => workoutQueueBySlot(outbox, session?.user?.id ?? null), [outbox, session?.user?.id]);
+  const openQueuedLog = React.useCallback((o: OutboxItem) => {
+    const p = o.payload as WorkoutLogOutboxPayload & { clientName?: string };
+    const known = modalities.find((mm) => mm.toLowerCase() === (p.modality ?? '').toLowerCase());
+    set({
+      editingOutboxId: o.id,
+      selectedClientId: p.clientId,
+      selectedClientName: p.clientName ?? o.label.split(' · ')[0] ?? 'Client',
+      workoutScheduleId: p.scheduleSessionId ?? null,
+      modality: known ?? 'custom',
+    });
+    go('workout');
+  }, [set, go]);
   const [outboxOpen, setOutboxOpen] = React.useState(false);
   const outboxFailed = outbox.filter((o) => o.status === 'failed').length;
   // Opportunistic sync whenever the dashboard mounts (launch + reconnect already drain).
@@ -2375,7 +2412,9 @@ export function Dashboard() {
                     cycle={cycleOf(r)}
                     onCycle={() => { const c = cycleOf(r); if (c) setCycleFor({ name: r.client_name, cycle: c }); }}
                     onVoice={r.workout_session_id && r.client_id ? () => setVoiceFor({ workoutSessionId: r.workout_session_id!, clientId: r.client_id!, clientName: r.client_name, notes: r.voice_notes }) : undefined}
-                    onAddWorkout={() => { if (r.client_id) openWorkout(r.client_id, r.client_name, r.modality ?? r.session_type ?? 'strength', r.id); }}
+                    queued={queuedBySlot.get(r.id) ?? null}
+                    onEditQueued={() => { const o = outbox.find((x) => x.id === queuedBySlot.get(r.id)?.id); if (o) openQueuedLog(o); }}
+                    onAddWorkout={() => { const o = outbox.find((x) => x.id === queuedBySlot.get(r.id)?.id); if (o) { openQueuedLog(o); return; } if (r.client_id) openWorkout(r.client_id, r.client_name, r.modality ?? r.session_type ?? 'strength', r.id); }}
                   />
                 ))}
                 {attentionRows.length && todayRows.length ? (
@@ -2395,7 +2434,9 @@ export function Dashboard() {
                     cycle={cycleOf(r)}
                     onCycle={() => { const c = cycleOf(r); if (c) setCycleFor({ name: r.client_name, cycle: c }); }}
                     onVoice={r.workout_session_id && r.client_id ? () => setVoiceFor({ workoutSessionId: r.workout_session_id!, clientId: r.client_id!, clientName: r.client_name, notes: r.voice_notes }) : undefined}
-                    onAddWorkout={() => { if (r.client_id) openWorkout(r.client_id, r.client_name, r.modality ?? r.session_type ?? 'strength', r.id); }}
+                    queued={queuedBySlot.get(r.id) ?? null}
+                    onEditQueued={() => { const o = outbox.find((x) => x.id === queuedBySlot.get(r.id)?.id); if (o) openQueuedLog(o); }}
+                    onAddWorkout={() => { const o = outbox.find((x) => x.id === queuedBySlot.get(r.id)?.id); if (o) { openQueuedLog(o); return; } if (r.client_id) openWorkout(r.client_id, r.client_name, r.modality ?? r.session_type ?? 'strength', r.id); }}
                   />
                 ))}
                 {attentionRows.length && !todayRows.length ? (
@@ -7117,13 +7158,16 @@ export function Workout() {
       const submitExercises = exercisesRef.current.filter(exHasData);
       let itemId: string;
       let notesSessionId: string | null = null; // the workout_session_id the voice notes attach to
-      if (editingOutboxId) {
+      // Slot guard (15 Oct 2026): a log for this roster slot already waiting on this device
+      // is updated in place, never queued a second time (the live cause of duplicate sessions).
+      const reuseId = editingOutboxId ?? pendingWorkoutForSlot(workoutScheduleId)?.id ?? null;
+      if (reuseId) {
         // Edit-in-place: the queued item keeps its id, session id and ORIGINAL
         // sessionDate/createdAt — only the editable fields change.
-        const existing = getOutboxItem(editingOutboxId);
+        const existing = getOutboxItem(reuseId);
         const base = (existing?.payload ?? {}) as WorkoutLogOutboxPayload;
         notesSessionId = base.sessionId ?? null;
-        const updated = await updateOutboxItem(editingOutboxId, {
+        const updated = await updateOutboxItem(reuseId, {
           label,
           payload: { ...base, sessionName: sessionName.trim() || modLabel, modality: effectiveModality, exercises: submitExercises, remark, rpe, clientName },
         });
@@ -7134,7 +7178,7 @@ export function Workout() {
           Alert.alert('Already synced', 'This workout already reached the server — saved logs can no longer be edited.', [{ text: 'OK', onPress: () => (canGoBack ? back() : go('dashboard')) }]);
           return;
         }
-        itemId = editingOutboxId;
+        itemId = reuseId;
       } else {
         // Original device timestamp + pre-generated id: a late sync keeps THIS
         // moment as the log time, and retries can never duplicate the session.

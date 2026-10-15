@@ -184,6 +184,18 @@ export function getOutbox(): OutboxItem[] {
   return items;
 }
 
+/* ---- queued workout logs by roster slot (15 Oct 2026) ----
+   The roster card must know that a slot already has a log waiting on this device, or the
+   trainer logs it again (the live cause of duplicate sessions). The rule lives in
+   workoutQueue.ts (pure, tested); this is the live-queue lookup the submit guard uses. */
+export { workoutQueueBySlot, queuedLine } from './workoutQueue';
+export type { QueuedWorkout } from './workoutQueue';
+/** The queued log for a roster slot on this device, if any (pending, syncing or failed). */
+export function pendingWorkoutForSlot(scheduleSessionId: string | null | undefined): OutboxItem | undefined {
+  if (!scheduleSessionId) return undefined;
+  return items.find((i) => i.kind === 'workout-log' && mine(i) && i.payload?.scheduleSessionId === scheduleSessionId);
+}
+
 export function getOutboxItem(id: string): OutboxItem | undefined {
   return items.find((i) => i.id === id);
 }
