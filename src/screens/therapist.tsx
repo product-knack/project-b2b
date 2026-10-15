@@ -10,6 +10,7 @@ import { ClientHealthSummaryCard } from '../components/clientHealthSummaryCard';
 import { useStore } from '../store';
 import { ManagerTeamChatCard } from './managerChat';
 import { DoctorTodayRoster } from './doctor';
+import { useMyManagerTeam } from '../lib/managerChatQueries';
 import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import {
   useTherapistId, useTherapistClients, useTherapistTodayRoster, useTherapySessions,
@@ -131,8 +132,9 @@ function AddTherapySessionSheet({ open, clients, presetClient, onClose }: {
               <Icon name="heart" size={16} color={ACC} strokeWidth={2.1} />
             </View>
             <View style={{ flex: 1 }}>
-              <Serif style={{ fontSize: 20 }}>Add Session</Serif>
-              <Body style={{ fontSize: 11.5, color: C.muted2, marginTop: 2 }}>Logged at the current time, marked completed.</Body>
+              {/* From a roster row this LOGS the planned session; the free add reads "Add Session" (15 Oct 2026). */}
+              <Serif style={{ fontSize: 20 }}>{presetClient ? 'Log Session' : 'Add Session'}</Serif>
+              <Body style={{ fontSize: 11.5, color: C.muted2, marginTop: 2 }}>{presetClient ? `${presetClient.name} · logged at the current time, marked completed.` : 'Logged at the current time, marked completed.'}</Body>
             </View>
             <Pressable onPress={onClose} hitSlop={8} style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center', justifyContent: 'center' }}>
               <Icon name="close" size={14} color={C.muted} strokeWidth={2.3} />
@@ -320,12 +322,21 @@ export function TherapistDashboard() {
 }
 
 /* ============ B. My Clients ============ */
+/* A therapist in a current managers team gets sessions from the HOD's My Crew plan and logs
+   them from Today's Roster; the free Add Session stays only for a therapist in NO current
+   team (15 Oct 2026, user: "sessions come only from My Crew"; same rule as trainers and doctors). */
+function useTeamlessTherapist(): boolean {
+  const myTeamQ = useMyManagerTeam();
+  return !myTeamQ.isPending && !myTeamQ.data;
+}
+
 export function TherapistClients() {
   const { go, set, back, canGoBack } = useStore();
   const meId = useTherapistId();
   const clientsQ = useTherapistClients(meId);
   const clients = clientsQ.data ?? [];
   const [addOpen, setAddOpen] = React.useState(false);
+  const teamless = useTeamlessTherapist();
   return (
     <Page gap={16}>
       <BackLink label="Dashboard" onPress={() => (canGoBack ? back() : go('therapist-dashboard'))} />
@@ -333,12 +344,14 @@ export function TherapistClients() {
         <View style={{ flex: 1 }}>
           <TitleBlock title="My Clients" sub={`${clients.length} assigned client${clients.length === 1 ? '' : 's'}`} />
         </View>
-        <Pressable onPress={() => setAddOpen(true)} style={{ borderRadius: 12, overflow: 'hidden' }}>
-          <LinearGradient colors={[hexA(ACC, 0.95), '#6D4AE0']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 10, paddingHorizontal: 13 }}>
-            <Icon name="plus" size={13} color="#fff" strokeWidth={2.6} />
-            <Text style={{ fontFamily: F.bodyBold, fontSize: 12, color: '#fff' }}>Add Session</Text>
-          </LinearGradient>
-        </Pressable>
+        {teamless ? (
+          <Pressable onPress={() => setAddOpen(true)} style={{ borderRadius: 12, overflow: 'hidden' }}>
+            <LinearGradient colors={[hexA(ACC, 0.95), '#6D4AE0']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 10, paddingHorizontal: 13 }}>
+              <Icon name="plus" size={13} color="#fff" strokeWidth={2.6} />
+              <Text style={{ fontFamily: F.bodyBold, fontSize: 12, color: '#fff' }}>Add Session</Text>
+            </LinearGradient>
+          </Pressable>
+        ) : null}
       </View>
       {clientsQ.isPending ? (
         <ActivityIndicator color={ACC} style={{ paddingVertical: 22 }} />
@@ -362,6 +375,7 @@ export function TherapistClientDetail() {
   const me = (clientsQ.data ?? []).find((c) => c.clientId === selectedClientId) ?? null;
   const name = me?.name ?? selectedClientName ?? 'Client';
   const [addOpen, setAddOpen] = React.useState(false);
+  const teamless = useTeamlessTherapist();
   // Tabs (5 Oct 2026): the therapy sessions, and the client's medications from QHPs and doctor consultations.
   const [tab, setTab] = React.useState<'sessions' | 'medications'>('sessions');
   // Which session's voice notes are open (one player at a time).
@@ -380,12 +394,16 @@ export function TherapistClientDetail() {
           </View>
           <TherapyChip />
         </View>
-        <Pressable onPress={() => setAddOpen(true)} style={{ borderRadius: 12, overflow: 'hidden' }}>
-          <LinearGradient colors={[hexA(ACC, 0.95), '#6D4AE0']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 12 }}>
-            <Icon name="plus" size={14} color="#fff" strokeWidth={2.6} />
-            <Text style={{ fontFamily: F.bodyBold, fontSize: 13, color: '#fff' }}>Add Session</Text>
-          </LinearGradient>
-        </Pressable>
+        {teamless ? (
+          <Pressable onPress={() => setAddOpen(true)} style={{ borderRadius: 12, overflow: 'hidden' }}>
+            <LinearGradient colors={[hexA(ACC, 0.95), '#6D4AE0']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 12 }}>
+              <Icon name="plus" size={14} color="#fff" strokeWidth={2.6} />
+              <Text style={{ fontFamily: F.bodyBold, fontSize: 13, color: '#fff' }}>Add Session</Text>
+            </LinearGradient>
+          </Pressable>
+        ) : (
+          <Body style={{ fontSize: 11, color: C.muted3, lineHeight: 15 }}>Sessions come from your My Crew plan. Log them from Today's Roster.</Body>
+        )}
       </Card>
 
       {/* Listen before the session (9 Oct 2026): the spoken weekly + health context summaries */}

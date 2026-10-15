@@ -12,7 +12,7 @@ import { ManagerTeamChatCard } from './managerChat';
 import { EssentialsAuctionHomeCard } from '../components/essentialsAuctionCard';
 import { AuctionResultsCards } from '../components/auctionResultsCards';
 import { useStore } from '../store';
-import { TRAINER_MODALITIES, DOCTOR_MODALITIES } from '../lib/managerChatQueries';
+import { TRAINER_MODALITIES, DOCTOR_MODALITIES, useMyManagerTeam } from '../lib/managerChatQueries';
 
 /** A doctor's roster modalities: physio first, then every trainer workout modality. */
 const DOCTOR_ROSTER_MODALITIES = [...DOCTOR_MODALITIES, ...TRAINER_MODALITIES.filter((m) => !DOCTOR_MODALITIES.includes(m))];
@@ -283,6 +283,11 @@ export function DoctorTodayRoster({ accent = C.orange, onLog }: { accent?: strin
   const rosterQ = useDoctorTodayRoster();
   const [logFor, setLogFor] = React.useState<{ clientId: string; clientName: string; scheduleId?: string | null } | null>(null);
   const [addOpen, setAddOpen] = React.useState(false); // doctor: add today's / tomorrow's own session
+  // Same rule as the trainer dashboard (15 Oct 2026, user: "sessions come only from My Crew"):
+  // a doctor in a current managers team gets the roster from the HOD's day plan, so the direct
+  // Add Session shows only for a doctor in NO current team. Decided once the team has loaded.
+  const myTeamQ = useMyManagerTeam(!onLog && !!uid);
+  const teamlessDoctor = !onLog && !!uid && !myTeamQ.isPending && !myTeamQ.data;
   const [distFor, setDistFor] = React.useState<DoctorRosterRow | null>(null);
   // Cancel = the trainer's shared two-step flow (Cancel / Paid Cancellation, remark, photo).
   const [cancelFor, setCancelFor] = React.useState<DoctorRosterRow | null>(null);
@@ -352,8 +357,8 @@ export function DoctorTodayRoster({ accent = C.orange, onLog }: { accent?: strin
                 </View>
               </View>
             ) : null}
-            {/* Doctor: add an own session (physio or a workout), then log it from its card */}
-            {!onLog && uid ? (
+            {/* Doctor in no current team: add an own session (physio or a workout), then log it from its card */}
+            {teamlessDoctor ? (
               <Pressable
                 onPress={() => setAddOpen(true)}
                 accessibilityRole="button"
@@ -488,7 +493,7 @@ export function DoctorTodayRoster({ accent = C.orange, onLog }: { accent?: strin
       })}
 
       {/* Add Session (doctor) → the trainer's own-session sheet with physio + workout modalities */}
-      {!onLog && uid ? <AddOwnSessionSheet visible={addOpen} onClose={() => setAddOpen(false)} trainerId={uid} modalities={DOCTOR_ROSTER_MODALITIES} /> : null}
+      {teamlessDoctor ? <AddOwnSessionSheet visible={addOpen} onClose={() => setAddOpen(false)} trainerId={uid} modalities={DOCTOR_ROSTER_MODALITIES} /> : null}
 
       {/* Log Session → the physio session sheet, prefilled with this client */}
       {!onLog ? <PhysioSessionSheet visible={!!logFor} onClose={() => setLogFor(null)} clientId={logFor?.clientId} clientName={logFor?.clientName} scheduleId={logFor?.scheduleId ?? null} /> : null}
