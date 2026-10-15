@@ -1,5 +1,5 @@
 /* Essentials Auction home card (trainer dashboard, 1 Oct 2026). Shows only while
-   the auction window is open (11:30 AM to 2:00 PM IST, from
+   the auction window is open (1:00 PM to 5:00 PM IST since 15 Oct 2026, from
    essentials_auction_config) and tomorrow has at least one lot; outside that it
    renders nothing, so the home stays quiet 21 hours a day. Same bones as the
    My Crew card (top strip with a travelling light band, breathing glyph glow),
