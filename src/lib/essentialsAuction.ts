@@ -17,7 +17,7 @@ export type AuctionConfig = {
 
 /** Mirrors essentials_auction_config() in the database (1:00 PM to 4:00 PM IST since 1 Oct 2026, owner
     request); the hook reads the live one and falls back to this. */
-export const DEFAULT_AUCTION_CONFIG: AuctionConfig = { open: '13:00', close: '17:00', reserve_minutes: 30 }; // 1:00 PM to 5:00 PM IST since 15 Oct 2026 (was 4:00 PM)
+export const DEFAULT_AUCTION_CONFIG: AuctionConfig = { open: '13:00', close: '17:30', reserve_minutes: 30 }; // 1:00 PM to 5:30 PM IST since 15 Oct 2026 evening (5:00 PM earlier that day, 4:00 PM before)
 
 export type LotStatus = 'open' | 'reserved' | 'grabbed';
 
