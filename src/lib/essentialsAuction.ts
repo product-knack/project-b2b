@@ -79,6 +79,20 @@ export type BidResult = {
   correct: boolean[];
   submitted_at: string;
   bids_count: number;
+  /** Since 15 Oct 2026: a perfect score on an open round books the session at once and closes the round. */
+  instant_win: boolean;
+  session_id: string | null;
+  winner_name: string | null;
+  /** A perfect score whose instant booking the server refused (clash, two days in a row, already booked): the bid waits for the close. */
+  instant_blocked: string | null;
+};
+
+/** The banner after a bid: won on the spot, perfect but not bookable now, or the ordinary "decided at" line. */
+export const bidBannerText = (r: BidResult, closesAt: string): string => {
+  const when = `${formatLotDate(r.training_date)} at ${formatTime12(r.slot_time)}`;
+  if (r.instant_win) return `Perfect score! ${r.client_name}'s ${r.modality || 'session'} on ${when} is yours. It is on your roster.`;
+  if (r.instant_blocked) return `${pointsText(r.points, r.question_count)} correct, but the session could not be booked at once (${r.instant_blocked}). Decided at ${closesAt}.`;
+  return `Bid placed for ${r.client_name}: ${pointsText(r.points, r.question_count)} correct. Decided at ${closesAt}.`;
 };
 
 /** One row of get_my_auction_results: a decided round the caller bid in. */
@@ -282,7 +296,7 @@ export const describeGrabError = (e: unknown): string => {
 };
 
 /** True when a refused bid means the session is no longer open (booked, decided, or already answered). */
-export const isTakenError = (message: string) => /already booked|already has one|only 1 session per day|already answered|has been decided/i.test(message);
+export const isTakenError = (message: string) => /already booked|already has one|only 1 session per day|already answered|has been decided|already won by/i.test(message);
 
 /* ---------- ETA between the trainer's neighbouring sessions and the lot (1 Oct 2026) ----------
    Straight-line ≈ road distance (×1.35) + metro drive time (~22 km/h): the same instant,

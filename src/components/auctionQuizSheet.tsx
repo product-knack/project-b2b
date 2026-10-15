@@ -57,16 +57,25 @@ function Note({ text, tone = 'muted' }: { text: string; tone?: 'muted' | 'red' }
   );
 }
 
-/* After the submit: the score, one tick per question, what happens next. */
+/* After the submit: the score, one tick per question, what happens next. A perfect score on an
+   open round (15 Oct 2026) is booked on the spot: the sheet says so and the card turns YOURS. */
 function BidDone({ result, closesAt, onClose }: { result: BidResult; closesAt: string; onClose: () => void }) {
+  const won = result.instant_win;
+  const col = won ? C.green : C.gold;
+  const when = `${formatLotDate(result.training_date)} at ${formatTime12(result.slot_time)}`;
+  const next = won
+    ? `Booked for you at once: ${result.client_name} on ${when}. It is on your roster, and this session is closed to other bids.`
+    : result.instant_blocked
+      ? `A perfect score, but the session could not be booked at once (${result.instant_blocked}). It is decided at ${closesAt} as usual; you will see the result on your dashboard.`
+      : `${result.bids_count} bid${result.bids_count === 1 ? '' : 's'} so far. The session is decided at ${closesAt}: highest points wins, equal points the earlier bid. You will see the result on your dashboard.`;
   return (
     <View style={{ gap: 12 }}>
-      <View style={{ alignItems: 'center', gap: 4, padding: 16, borderRadius: 18, backgroundColor: hexA(C.gold, 0.08), borderWidth: 1, borderColor: hexA(C.gold, 0.45) }}>
-        <View style={{ width: 46, height: 46, borderRadius: 15, backgroundColor: hexA(C.gold, 0.16), borderWidth: 1, borderColor: hexA(C.gold, 0.45), alignItems: 'center', justifyContent: 'center' }}>
-          <Icon name="trophy" size={22} color={C.gold} strokeWidth={2.2} />
+      <View style={{ alignItems: 'center', gap: 4, padding: 16, borderRadius: 18, backgroundColor: hexA(col, 0.08), borderWidth: 1, borderColor: hexA(col, 0.45) }}>
+        <View style={{ width: 46, height: 46, borderRadius: 15, backgroundColor: hexA(col, 0.16), borderWidth: 1, borderColor: hexA(col, 0.45), alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name="trophy" size={22} color={col} strokeWidth={2.2} />
         </View>
         <Serif style={{ fontSize: 34, lineHeight: 38, marginTop: 4 }}>{pointsText(result.points, result.question_count)}</Serif>
-        <Mono style={{ fontSize: 8.5, letterSpacing: 1.4, color: C.gold }}>CORRECT · YOUR BID IS IN</Mono>
+        <Mono style={{ fontSize: 8.5, letterSpacing: 1.4, color: col }}>{won ? 'PERFECT SCORE · THE SESSION IS YOURS' : 'CORRECT · YOUR BID IS IN'}</Mono>
       </View>
       {result.question_count > 0 ? (
         <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 8 }}>
@@ -77,9 +86,7 @@ function BidDone({ result, closesAt, onClose }: { result: BidResult; closesAt: s
           ))}
         </View>
       ) : null}
-      <Body style={{ fontSize: 12.5, color: C.muted2, textAlign: 'center', lineHeight: 18 }}>
-        {result.bids_count} bid{result.bids_count === 1 ? '' : 's'} so far. The session is decided at {closesAt}: highest points wins, equal points the earlier bid. You will see the result on your dashboard.
-      </Body>
+      <Body style={{ fontSize: 12.5, color: won ? C.ink : C.muted2, textAlign: 'center', lineHeight: 18 }}>{next}</Body>
       <Pressable onPress={onClose} hitSlop={10} accessibilityRole="button" style={({ pressed }) => ({ alignItems: 'center', paddingVertical: 12, borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', backgroundColor: pressed ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.04)' })}>
         <Text style={{ fontFamily: F.bodySemi, fontSize: 13.5, color: '#fff' }}>Done</Text>
       </Pressable>
@@ -186,7 +193,7 @@ export function AuctionQuizSheet({ lot, physio, photo, closesAt, etaWarning, onC
                     <Image source={{ uri: photo }} onError={() => setPhotoFailed(true)} style={{ width: 34, height: 34, borderRadius: 11, borderWidth: 1, borderColor: hexA(C.gold, 0.6) }} resizeMode="cover" />
                   ) : <MiniAvatar initial={initials(lot.client_name)} colors={['#7C8FE8', '#9A7BEA']} size={34} />}
                   <Body style={{ flex: 1, fontSize: 11.5, color: C.ink3, lineHeight: 15 }}>
-                    One attempt on this {noun}: five questions about {lot.client_name.split(' ')[0]}, 1 point each. Highest points wins at {closesAt}; equal points, the earlier bid.
+                    One attempt on this {noun}: five questions about {lot.client_name.split(' ')[0]}, 1 point each. Answer all five correctly before anyone else and the {noun} is yours at once. Otherwise highest points wins at {closesAt}; equal points, the earlier bid.
                   </Body>
                 </View>
               </LinearGradient>
@@ -260,7 +267,7 @@ export function AuctionQuizSheet({ lot, physio, photo, closesAt, etaWarning, onC
                       })}
                     </View>
                     <DarkButton label={idx + 1 === total ? 'Lock the last answer' : 'Lock answer and continue'} disabled={picked == null} onPress={lockIn} />
-                    <Body style={{ fontSize: 10.5, color: C.muted3, textAlign: 'center', lineHeight: 15 }}>A locked answer cannot be changed. Highest points wins; equal points, the earlier bid.</Body>
+                    <Body style={{ fontSize: 10.5, color: C.muted3, textAlign: 'center', lineHeight: 15 }}>A locked answer cannot be changed. A perfect score wins on the spot; otherwise highest points wins at the close, equal points the earlier bid.</Body>
                   </View>
                 ) : (
                   <Note text="No questions came back for this session. Pull to refresh the auction and try again." />

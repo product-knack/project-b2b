@@ -11,7 +11,7 @@ import { serverNow } from '../lib/managerChatQueries';
 import { useReduceMotion } from '../lib/useReduceMotion';
 import {
   AuctionLot, BidResult, DEFAULT_AUCTION_CONFIG, WindowState, auctionTargetDate, bidsLine, canGrab, formatCountdown, formatLotDate,
-  formatTime12, istClock, lotNumber, lotResultLine, pointsText, windowState, EtaNeighbour, LotEta, formatMinutes,
+  formatTime12, istClock, lotNumber, lotResultLine, pointsText, windowState, EtaNeighbour, LotEta, formatMinutes, bidBannerText,
 } from '../lib/essentialsAuction';
 import { useAuctionConfig, useAuctionClientPhotos, useAuctionEta, useEssentialsAuction } from '../lib/essentialsAuctionQueries';
 import { AuctionQuizSheet } from '../components/auctionQuizSheet';
@@ -404,7 +404,7 @@ export function EssentialsAuction() {
   }, [lots, quizLot, me]);
 
   const onSubmitted = (r: BidResult) => {
-    setBanner({ kind: 'ok', text: `Bid placed for ${r.client_name}: ${pointsText(r.points, r.question_count)} correct. Decided at ${win.closesAt}.` });
+    setBanner({ kind: 'ok', text: bidBannerText(r, win.closesAt) });
     refetchLots();
   };
 

@@ -139,11 +139,18 @@ export function useSubmitEssentialsBid() {
         correct: Array.isArray(d.correct) ? d.correct.map(Boolean) : [],
         submitted_at: d.submitted_at ?? new Date().toISOString(),
         bids_count: num(d.bids_count) ?? 0,
+        instant_win: d.instant_win === true,
+        session_id: typeof d.session_id === 'string' ? d.session_id : null,
+        winner_name: typeof d.winner_name === 'string' ? d.winner_name : null,
+        instant_blocked: typeof d.instant_blocked === 'string' && d.instant_blocked ? d.instant_blocked : null,
       };
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['essentials-auction'] });
       qc.invalidateQueries({ queryKey: ['essentials-auction-quiz'] });
+      // An instant win is a decided round and a booked session: the won card and the roster must follow at once.
+      qc.invalidateQueries({ queryKey: ['essentials-auction-results'] });
+      qc.invalidateQueries({ queryKey: ['trainer-roster'] });
     },
   });
 }
