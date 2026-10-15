@@ -1,11 +1,13 @@
 /* "Listen before the session" (9 Oct 2026): two play buttons that read the
-   client's spoken overviews with the device voice (expo-speech), the listen
-   trail (who listened, when) and the mandatory listen gate shown before a
-   session is logged from Today's Roster. Mirrors the web ClientHealthSummaryCard
-   (hub-track src/components/trainer/ClientHealthSummaryCard.tsx); the backend is
-   shared and nothing is stored as audio. */
+   client's spoken overviews, the listen trail (who listened, when) and the
+   mandatory listen gate shown before a session is logged from Today's Roster.
+   Mirrors the web ClientHealthSummaryCard (hub-track
+   src/components/trainer/ClientHealthSummaryCard.tsx); the backend is shared.
+   Since 15 Oct 2026 the voice is Sarvam's, through the edge function
+   speak-client-summary (src/lib/summaryVoice.ts); the device voice (expo-speech)
+   is the fallback when the recording cannot be fetched or played. */
 import React from 'react';
-import { View, Text, Pressable, Modal, ScrollView, ActivityIndicator, Platform } from 'react-native';
+import { View, Text, Pressable, Modal, ScrollView, ActivityIndicator } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { C, F, hexA } from '../theme';
@@ -14,7 +16,7 @@ import { Serif, Mono, Body } from './primitives';
 import { ReplayMask } from './ReplayShield';
 import { useAuth } from '../auth';
 import { useClientHealthSummary, useLogSummaryListen } from '../lib/clientHealthSummaryQueries';
-import { useSpeech } from '../lib/useSpeech';
+import { useSummaryVoice, type SummaryVoice, type VoiceSource } from '../lib/summaryVoice';
 import {
   TITLES, type Which, type ClientHealthSummaryRow, type WeeklySummary, type ContextSummary,
   durationText, fmtStamp, historyOf, summaryOf, generatedAtOf, hasScript, lastListen, isNewSince,
@@ -38,19 +40,25 @@ const subLine = (row: ClientHealthSummaryRow | null, which: Which): string => {
   return `${n} document${n === 1 ? '' : 's'} · built ${built} · ${durationText(s.script)}`;
 };
 
-/* ---------- the round play / pause / stop control ---------- */
-function PlayButton({ which, active, paused, disabled, onPress, size = 44 }: { which: Which; active: boolean; paused: boolean; disabled: boolean; onPress: () => void; size?: number }) {
+/* ---------- the round play / pause / stop control ----------
+   busy: the recording is being fetched (a press stops). The recording pauses on both
+   platforms; the device-voice fallback only pauses on iOS (Android: stop). */
+function PlayButton({ which, active, paused, busy, canPause, disabled, onPress, size = 44 }: {
+  which: Which; active: boolean; paused: boolean; busy: boolean; canPause: boolean; disabled: boolean; onPress: () => void; size?: number;
+}) {
   const col = colorOf(which);
-  const label = active ? (Platform.OS === 'ios' ? (paused ? 'Resume' : 'Pause') : 'Stop') : `Play ${TITLES[which]}`;
+  const label = busy ? 'Preparing the voice' : active ? (canPause ? (paused ? 'Resume' : 'Pause') : 'Stop') : `Play ${TITLES[which]}`;
   return (
     <Pressable onPress={onPress} disabled={disabled} hitSlop={10} accessibilityRole="button" accessibilityLabel={label}
       style={{ width: size, height: size, borderRadius: size / 2, alignItems: 'center', justifyContent: 'center', backgroundColor: active ? col : hexA(col, 0.14), borderWidth: 1, borderColor: active ? col : hexA(col, 0.45), opacity: disabled ? 0.4 : 1 }}>
-      {active && Platform.OS === 'ios' && !paused ? (
+      {busy ? (
+        <ActivityIndicator size="small" color="#0c0808" />
+      ) : active && canPause && !paused ? (
         <View style={{ flexDirection: 'row', gap: 4 }}>
           <View style={{ width: 4, height: 15, borderRadius: 2, backgroundColor: '#0c0808' }} />
           <View style={{ width: 4, height: 15, borderRadius: 2, backgroundColor: '#0c0808' }} />
         </View>
-      ) : active && Platform.OS !== 'ios' ? (
+      ) : active && !canPause ? (
         <Icon name="stopSq" size={size * 0.38} color="#0c0808" strokeWidth={2.4} fill="#0c0808" />
       ) : (
         <Icon name="play" size={size * 0.42} color={active ? '#0c0808' : col} strokeWidth={2.2} fill={active ? '#0c0808' : col} />
@@ -58,6 +66,17 @@ function PlayButton({ which, active, paused, disabled, onPress, size = 44 }: { w
     </Pressable>
   );
 }
+
+/** A press on the row that is already active: stop while preparing, pause / resume where possible, else stop. */
+const tapActive = (v: SummaryVoice) => {
+  if (v.busyId) { v.stop(); return; }
+  if (v.canPause) { if (v.paused) v.resume(); else v.pause(); } else v.stop();
+};
+const rowVoiceProps = (v: SummaryVoice, which: Which) => ({
+  active: v.speakingId === which, paused: v.paused, busy: v.busyId === which, canPause: v.canPause,
+  source: v.speakingId === which ? v.source : null, part: v.part, parts: v.parts,
+});
+const BOTH_FAILED = (m: string) => `Neither the recording nor this device could speak (${m}). The transcript is shown instead.`;
 
 function Chip({ text, color }: { text: string; color: string }) {
   return (
@@ -96,6 +115,13 @@ type RowProps = {
   uid: string | null;
   active: boolean;
   paused: boolean;
+  /** The recording is being fetched. */
+  busy: boolean;
+  canPause: boolean;
+  /** What is speaking while active: the Sarvam recording or the device fallback. */
+  source: VoiceSource | null;
+  part: number;
+  parts: number;
   transcriptOpen: boolean;
   onPlay: () => void;
   onStop: () => void;
@@ -104,16 +130,17 @@ type RowProps = {
   status?: { text: string; color: string } | null;
   ordinal?: number;
 };
-function SummaryRow({ which, row, uid, active, paused, transcriptOpen, onPlay, onStop, onToggleTranscript, status, ordinal }: RowProps) {
+function SummaryRow({ which, row, uid, active, paused, busy, canPause, source, part, parts, transcriptOpen, onPlay, onStop, onToggleTranscript, status, ordinal }: RowProps) {
   const s = summaryOf(row, which);
   const col = colorOf(which);
   const has = hasScript(row, which);
   const last = lastListen(historyOf(row), which);
   const fresh = !status && isNewSince(row, which, uid);
+  const sub = busy ? 'Preparing the voice…' : active && source === 'sarvam' && parts > 1 ? `${subLine(row, which)} · part ${part} of ${parts}` : subLine(row, which);
   return (
     <View style={{ borderRadius: 16, padding: 12, backgroundColor: hexA(col, 0.05), borderWidth: 1, borderColor: hexA(col, active ? 0.5 : 0.2), gap: 8 }}>
       <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 11 }}>
-        <PlayButton which={which} active={active} paused={paused} disabled={!has} onPress={onPlay} />
+        <PlayButton which={which} active={active} paused={paused} busy={busy} canPause={canPause} disabled={!has} onPress={onPlay} />
         <View style={{ flex: 1, minWidth: 0 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
             {ordinal != null ? <Mono style={{ fontSize: 9.5, letterSpacing: 0.8, color: col }}>{String(ordinal).padStart(2, '0')}</Mono> : null}
@@ -122,8 +149,9 @@ function SummaryRow({ which, row, uid, active, paused, transcriptOpen, onPlay, o
             {fresh ? <Chip text="New since you listened" color={GOLD} /> : null}
             {status ? <Chip text={status.text} color={status.color} /> : null}
             {s?.fallback ? <Mono style={{ fontSize: 8, letterSpacing: 0.6, color: C.muted3 }}>PLAIN VERSION</Mono> : null}
+            {active && !busy && source === 'device' ? <Mono style={{ fontSize: 8, letterSpacing: 0.6, color: C.muted3 }}>DEVICE VOICE</Mono> : null}
           </View>
-          <Body style={{ fontSize: 11, color: C.muted2, marginTop: 3, lineHeight: 15 }}>{subLine(row, which)}</Body>
+          <Body style={{ fontSize: 11, color: C.muted2, marginTop: 3, lineHeight: 15 }}>{sub}</Body>
           {which === 'context' && s && (s as ContextSummary).exclusions_confirmed === false ? (
             <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 5, marginTop: 5 }}>
               <Icon name="alert" size={11} color={GOLD} strokeWidth={2.1} />
@@ -198,7 +226,7 @@ export function ClientHealthSummaryCard({ clientId }: { clientId: string | null 
   const uid = session?.user?.id ?? null;
   const q = useClientHealthSummary(clientId ?? null);
   const logM = useLogSummaryListen(clientId ?? null);
-  const speech = useSpeech();
+  const voice = useSummaryVoice();
   const [transcript, setTranscript] = React.useState<Which | null>(null);
   const [histOpen, setHistOpen] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
@@ -207,16 +235,13 @@ export function ClientHealthSummaryCard({ clientId }: { clientId: string | null 
 
   const play = (which: Which) => {
     const s = summaryOf(row, which);
-    if (!s?.script) return;
-    if (speech.speakingId === which) {
-      if (speech.canPause) { if (speech.paused) speech.resume(); else speech.pause(); } else speech.stop();
-      return;
-    }
+    if (!s?.script || !clientId) return;
+    if (voice.speakingId === which) { tapActive(voice); return; }
     setErr(null);
-    // The trail first: the RPC is the record of who listened, whatever the device does next.
+    // The trail first: the RPC is the record of who listened, whatever the voice does next.
     logM.mutate(which, { onError: (e) => setErr((e as Error).message) });
-    speech.speak(which, s.script, {
-      onError: (m) => { setTranscript(which); setErr(`This device cannot speak (${m}). The transcript is shown instead.`); },
+    voice.play(which, { clientId, which, script: s.script }, {
+      onError: (m) => { setTranscript(which); setErr(BOTH_FAILED(m)); },
     });
   };
 
@@ -231,7 +256,7 @@ export function ClientHealthSummaryCard({ clientId }: { clientId: string | null 
           </View>
           <View style={{ flex: 1 }}>
             <Serif style={{ fontSize: 17 }}>Listen before the session</Serif>
-            <Body style={{ fontSize: 11, color: C.muted2, marginTop: 2, lineHeight: 15 }}>Short spoken overviews, read by this device. Numbers come from the records; anything clinical is for the doctor consultation.</Body>
+            <Body style={{ fontSize: 11, color: C.muted2, marginTop: 2, lineHeight: 15 }}>Short spoken overviews in an Indian English voice. Numbers come from the records; anything clinical is for the doctor consultation.</Body>
           </View>
           {history.length > 0 ? (
             <Pressable onPress={() => setHistOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={`Who listened, ${history.length} entries`}
@@ -249,12 +274,12 @@ export function ClientHealthSummaryCard({ clientId }: { clientId: string | null 
         ) : (
           <View style={{ gap: 9 }}>
             {(['weekly', 'context'] as Which[]).map((which) => (
-              <SummaryRow key={which} which={which} row={row} uid={uid}
-                active={speech.speakingId === which} paused={speech.paused} transcriptOpen={transcript === which}
-                onPlay={() => play(which)} onStop={speech.stop} onToggleTranscript={() => setTranscript((t) => (t === which ? null : which))} />
+              <SummaryRow key={which} which={which} row={row} uid={uid} {...rowVoiceProps(voice, which)} transcriptOpen={transcript === which}
+                onPlay={() => play(which)} onStop={voice.stop} onToggleTranscript={() => setTranscript((t) => (t === which ? null : which))} />
             ))}
           </View>
         )}
+        {voice.notice ? <Body style={{ fontSize: 11, color: GOLD }}>{voice.notice}</Body> : null}
         {err ? <Body style={{ fontSize: 11.5, color: C.red }}>{err}</Body> : null}
       </LinearGradient>
       <HistorySheet visible={histOpen} onClose={() => setHistOpen(false)} row={row} />
@@ -264,29 +289,32 @@ export function ClientHealthSummaryCard({ clientId }: { clientId: string | null 
 
 /* ---------- compact strip for list cards (Essentials auction session cards, 15 Oct 2026) ----------
    Owner: "in the Essentials card also show the client's weekly and long summary". A folded
-   row "Client summaries" that opens into the same two play rows as the card (device voice,
-   transcript, the listen trail), for the training day the card is about. */
+   row "Client summaries" that opens into the same two play rows as the card (Sarvam voice,
+   transcript, the listen trail), for the training day the card is about: the recording
+   asked for is that day's. */
 export function ClientSummaryStrip({ clientId, date, accent = GOLD }: { clientId: string | null | undefined; date?: string | null; accent?: string }) {
   const { session } = useAuth();
   const uid = session?.user?.id ?? null;
   const [open, setOpen] = React.useState(false);
   const q = useClientHealthSummary(clientId ?? null, true, date ?? null);
   const logM = useLogSummaryListen(clientId ?? null);
-  const speech = useSpeech();
+  const voice = useSummaryVoice();
   const [transcript, setTranscript] = React.useState<Which | null>(null);
   const [err, setErr] = React.useState<string | null>(null);
   const row = q.data ?? null;
-  React.useEffect(() => { if (!open) speech.stop(); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  React.useEffect(() => { if (!open) voice.stop(); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!clientId || q.isError) return null;
   const hasWeekly = hasScript(row, 'weekly'), hasContext = hasScript(row, 'context');
   const summaryLine = q.isLoading ? 'Loading…' : !row || (!hasWeekly && !hasContext) ? 'Nothing built yet for this day' : [hasWeekly ? `This week · ${durationText(row!.weekly_summary!.script)}` : null, hasContext ? `Health context · ${durationText(row!.context_summary!.script)}` : null].filter(Boolean).join('   ');
   const play = (which: Which) => {
     const s = summaryOf(row, which);
     if (!s?.script) return;
-    if (speech.speakingId === which) { if (speech.canPause) { if (speech.paused) speech.resume(); else speech.pause(); } else speech.stop(); return; }
+    if (voice.speakingId === which) { tapActive(voice); return; }
     setErr(null);
     logM.mutate(which, { onError: (e) => setErr((e as Error).message) });
-    speech.speak(which, s.script, { onError: (m) => { setTranscript(which); setErr(`This device cannot speak (${m}). The transcript is shown instead.`); } });
+    voice.play(which, { clientId, which, script: s.script, date: row?.briefing_date ?? date ?? null }, {
+      onError: (m) => { setTranscript(which); setErr(BOTH_FAILED(m)); },
+    });
   };
   return (
     <ReplayMask>
@@ -303,10 +331,10 @@ export function ClientSummaryStrip({ clientId, date, accent = GOLD }: { clientId
         {open ? (
           <View style={{ paddingHorizontal: 10, paddingBottom: 10, gap: 8 }}>
             {(['weekly', 'context'] as Which[]).map((which) => (
-              <SummaryRow key={which} which={which} row={row} uid={uid}
-                active={speech.speakingId === which} paused={speech.paused} transcriptOpen={transcript === which}
-                onPlay={() => play(which)} onStop={speech.stop} onToggleTranscript={() => setTranscript((t) => (t === which ? null : which))} />
+              <SummaryRow key={which} which={which} row={row} uid={uid} {...rowVoiceProps(voice, which)} transcriptOpen={transcript === which}
+                onPlay={() => play(which)} onStop={voice.stop} onToggleTranscript={() => setTranscript((t) => (t === which ? null : which))} />
             ))}
+            {voice.notice ? <Body style={{ fontSize: 11, color: GOLD }}>{voice.notice}</Body> : null}
             {err ? <Body style={{ fontSize: 11, color: C.red }}>{err}</Body> : null}
           </View>
         ) : null}
@@ -337,39 +365,37 @@ export function ListenGateSheet({ visible, clientId, clientName, onContinue, onL
   const uid = session?.user?.id ?? null;
   const q = useClientHealthSummary(clientId, visible);
   const logM = useLogSummaryListen(clientId);
-  const speech = useSpeech();
+  const voice = useSummaryVoice();
   const row = q.data ?? null;
   const gate = listenGate(row, uid);
   const [heard, setHeard] = React.useState<Record<Which, boolean>>({ weekly: false, context: false });
   const [transcript, setTranscript] = React.useState<Which | null>(null);
   const [err, setErr] = React.useState<string | null>(null);
   React.useEffect(() => {
-    if (visible) { setHeard({ weekly: false, context: false }); setTranscript(null); setErr(null); } else speech.stop();
+    if (visible) { setHeard({ weekly: false, context: false }); setTranscript(null); setErr(null); } else voice.stop();
   }, [visible]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const need = (which: Which) => gate[which] === 'due' && !heard[which];
   const allDone = !need('weekly') && !need('context');
   const play = (which: Which) => {
     const s = summaryOf(row, which);
-    if (!s?.script) return;
-    if (speech.speakingId === which) {
-      if (speech.canPause) { if (speech.paused) speech.resume(); else speech.pause(); } else speech.stop();
-      return;
-    }
+    if (!s?.script || !clientId) return;
+    if (voice.speakingId === which) { tapActive(voice); return; }
     setErr(null);
     logM.mutate(which, { onError: (e) => setErr((e as Error).message) });
-    speech.speak(which, s.script, {
+    voice.play(which, { clientId, which, script: s.script }, {
+      // Heard to the end: the recording's last part, or the device voice when it stood in.
       onDone: () => setHeard((h) => ({ ...h, [which]: true })),
       onError: (m) => {
-        // The device cannot speak: the transcript stands in and counts as heard.
+        // Nothing could speak: the transcript stands in and counts as heard.
         setTranscript(which);
         setHeard((h) => ({ ...h, [which]: true }));
-        setErr(`This device cannot speak (${m}). Read the transcript instead.`);
+        setErr(`Neither the recording nor this device could speak (${m}). Read the transcript instead.`);
       },
     });
   };
-  const finish = () => { speech.stop(); onContinue(); };
-  const leave = () => { speech.stop(); onLeave(); };
+  const finish = () => { voice.stop(); onContinue(); };
+  const leave = () => { voice.stop(); onLeave(); };
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={leave}>
@@ -393,11 +419,11 @@ export function ListenGateSheet({ visible, clientId, clientName, onContinue, onL
                 <Body style={{ fontSize: 11.5, color: C.muted2 }}>Loading summaries…</Body>
               </View>
             ) : (['weekly', 'context'] as Which[]).map((which, i) => (
-              <SummaryRow key={which} which={which} row={row} uid={uid} ordinal={i + 1}
-                active={speech.speakingId === which} paused={speech.paused} transcriptOpen={transcript === which}
-                onPlay={() => play(which)} onStop={speech.stop} onToggleTranscript={() => setTranscript((t) => (t === which ? null : which))}
+              <SummaryRow key={which} which={which} row={row} uid={uid} ordinal={i + 1} {...rowVoiceProps(voice, which)} transcriptOpen={transcript === which}
+                onPlay={() => play(which)} onStop={voice.stop} onToggleTranscript={() => setTranscript((t) => (t === which ? null : which))}
                 status={gateStatus(which, gate[which], heard[which], row)} />
             ))}
+            {voice.notice ? <Body style={{ fontSize: 11, color: GOLD }}>{voice.notice}</Body> : null}
             {err ? <Body style={{ fontSize: 11.5, color: C.red }}>{err}</Body> : null}
             <Body style={{ fontSize: 10.5, color: C.muted3, lineHeight: 15 }}>Every play is recorded with your name and the time. Red items must be heard to the end before you can continue.</Body>
           </ScrollView>
