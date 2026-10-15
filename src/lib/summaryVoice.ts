@@ -77,6 +77,11 @@ export const CLOUD_UNAVAILABLE = (why: string) => `Cloud voice unavailable (${wh
 export const RECORDING_FAILED = (why: string) => `The recording could not play (${why}); using this device's voice.`;
 export const STALL_MS = 15_000;
 
+/* Every card, strip and gate owns a controller, so one voice at a time is enforced
+   here: a play stops whatever any other controller is speaking (user, 15 Oct 2026:
+   two summaries played together after pressing Play on a second card). */
+const speaking = new Set<() => void>();
+
 /* ---------- the controller ---------- */
 export function createSummaryVoice(deps: SummaryVoiceDeps, onState: (s: SummaryVoiceState) => void) {
   // Bumped on every play / stop / finish so callbacks of an older run are ignored.
@@ -98,6 +103,8 @@ export function createSummaryVoice(deps: SummaryVoiceDeps, onState: (s: SummaryV
   const releasePlayer = () => {
     clearStall();
     try { sub?.remove(); } catch { /* gone */ }
+    // Silence first: a released native player can keep sounding until it is collected.
+    try { player?.pause(); } catch { /* released */ }
     try { player?.remove(); } catch { /* released */ }
     sub = null;
     player = null;
@@ -105,18 +112,21 @@ export function createSummaryVoice(deps: SummaryVoiceDeps, onState: (s: SummaryV
 
   const stop = () => {
     run++;
+    speaking.delete(stop);
     releasePlayer();
     deps.deviceStop();
     emit({ ...IDLE_VOICE });
   };
+  /** A run ended on its own (heard to the end, or nothing could speak). */
+  const finished = () => { run++; speaking.delete(stop); };
 
   /** The device voice reads the script (the fallback); `notice` says why. */
   const speakDevice = (myRun: number, id: string, script: string, cb: PlayCallbacks | undefined, notice: string | null) => {
     releasePlayer();
     emit({ id, phase: 'playing', source: 'device', notice, part: 0, parts: 0 });
     deps.deviceSpeak(script, {
-      onDone: () => { if (myRun !== run) return; run++; emit({ ...IDLE_VOICE, notice }); cb?.onDone?.(); },
-      onError: (m) => { if (myRun !== run) return; run++; emit({ ...IDLE_VOICE, notice }); cb?.onError?.(m); },
+      onDone: () => { if (myRun !== run) return; finished(); emit({ ...IDLE_VOICE, notice }); cb?.onDone?.(); },
+      onError: (m) => { if (myRun !== run) return; finished(); emit({ ...IDLE_VOICE, notice }); cb?.onError?.(m); },
       onPause: () => { if (myRun === run) emit({ phase: 'paused' }); },
       onResume: () => { if (myRun === run) emit({ phase: 'playing' }); },
     });
@@ -152,7 +162,7 @@ export function createSummaryVoice(deps: SummaryVoiceDeps, onState: (s: SummaryV
           armStall(myRun, () => fallback('no sound'));
           try { p.replace({ uri: urls[i] }); p.play(); } catch (e) { fallback(msgOf(e)); }
         } else {
-          run++;
+          finished();
           releasePlayer();
           emit({ ...IDLE_VOICE });
           cb?.onDone?.();
@@ -164,7 +174,10 @@ export function createSummaryVoice(deps: SummaryVoiceDeps, onState: (s: SummaryV
   };
 
   const play = (id: string, req: PlayRequest, cb?: PlayCallbacks) => {
+    // One voice at a time across the app: silence every other controller, then our own run.
+    for (const other of Array.from(speaking)) if (other !== stop) other();
     stop();
+    speaking.add(stop);
     const myRun = run;
     emit({ id, phase: 'preparing', source: null, notice: null, part: 0, parts: 0 });
     deps.getAudio(req)
