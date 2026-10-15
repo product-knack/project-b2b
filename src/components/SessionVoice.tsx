@@ -34,7 +34,9 @@ const ACCENT = C.purple;
    again, and the box clears after every kept take so the next note is a fresh
    answer. The RPC stores it as `pain_discomfort` on the note element. */
 export const PAIN_TITLE = 'Please mention pain and discomfort if the client has any';
-export const PAIN_CHECKBOX = 'The client has pain or discomfort';
+export const PAIN_CHECKBOX = 'Does the client have pain or discomfort?';
+/* 15 Oct 2026 (owner): the answer is a Yes / No choice that MUST be made before a note can be
+   recorded; the record button stays off until one is picked. */
 
 function PainTag({ on, onPress, disabled }: { on: boolean; onPress?: () => void; disabled?: boolean }) {
   return (
@@ -62,18 +64,20 @@ export function VoiceNotesComposer({ takes, onAdd, onRemove, onToggleFlag, saved
   onRecordingChange?: (recording: boolean) => void;
 }) {
   const [busy, setBusy] = React.useState(false);
-  const [pain, setPain] = React.useState(false);
-  const painRef = React.useRef(false);
+  // null = not answered yet; the record button waits for Yes or No (15 Oct 2026).
+  const [pain, setPain] = React.useState<boolean | null>(null);
+  const painRef = React.useRef<boolean | null>(null);
   painRef.current = pain;
   const rec = useVoiceRecorder(async (f: RecordedVoice) => {
     setBusy(true);
     try {
-      onAdd(await persistTake(f.uri, f.durationMs, painRef.current));
-      setPain(false); // a fresh answer for the next note
+      onAdd(await persistTake(f.uri, f.durationMs, painRef.current === true));
+      setPain(null); // a fresh answer for the next note
     }
     catch (e: any) { Alert.alert("Couldn't keep the recording", e?.message ?? 'Try again.'); }
     finally { setBusy(false); }
   }, { maxMs: SESSION_VOICE_MAX_MS });
+  const answered = pain != null;
   React.useEffect(() => { onRecordingChange?.(rec.recording); }, [rec.recording]);
   const left = Math.max(0, SESSION_VOICE_MAX_NOTES - savedCount - takes.length);
   return (
@@ -94,19 +98,24 @@ export function VoiceNotesComposer({ takes, onAdd, onRemove, onToggleFlag, saved
       ))}
       {left > 0 ? (
         <>
-          <View style={{ gap: 7, padding: 11, borderRadius: 12, backgroundColor: hexA(C.red, pain ? 0.08 : 0.04), borderWidth: 1, borderColor: hexA(C.red, pain ? 0.4 : 0.18) }}>
+          <View style={{ gap: 9, padding: 11, borderRadius: 12, backgroundColor: hexA(pain === true ? C.red : answered ? C.green : C.gold, 0.06), borderWidth: 1, borderColor: hexA(pain === true ? C.red : answered ? C.green : C.gold, answered ? 0.4 : 0.3) }}>
             <Body style={{ fontSize: 12.5, fontFamily: F.bodySemi, color: '#fff', lineHeight: 17 }}>{PAIN_TITLE}</Body>
-            <Pressable onPress={() => setPain((p) => !p)} disabled={disabled || rec.recording} hitSlop={8} accessibilityRole="checkbox" accessibilityState={{ checked: pain }}
-              style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
-              <View style={{ width: 20, height: 20, borderRadius: 6, alignItems: 'center', justifyContent: 'center', borderWidth: pain ? 0 : 2, borderColor: 'rgba(255,255,255,0.3)', backgroundColor: pain ? C.red : 'transparent' }}>
-                {pain ? <Icon path="M20 6 9 17l-5-5" size={12} color="#fff" strokeWidth={3} /> : null}
-              </View>
-              <Body style={{ flex: 1, fontSize: 12, color: pain ? '#FF9B8F' : C.ink3 }}>{PAIN_CHECKBOX}</Body>
-            </Pressable>
-            <Body style={{ fontSize: 10, color: C.muted3, lineHeight: 14 }}>Tick it before you record; the answer is saved with that note.</Body>
+            <Body style={{ fontSize: 12, color: C.ink3 }}>{PAIN_CHECKBOX} <Text style={{ color: C.gold }}>Required</Text></Body>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              {([['Yes', true, C.red], ['No', false, C.green]] as const).map(([label, value, col]) => {
+                const on = pain === value;
+                return (
+                  <Pressable key={label} onPress={() => setPain(value)} disabled={disabled || rec.recording} hitSlop={6} accessibilityRole="radio" accessibilityState={{ selected: on }}
+                    style={{ flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 12, backgroundColor: on ? hexA(col, 0.18) : 'rgba(255,255,255,0.04)', borderWidth: 1.5, borderColor: on ? hexA(col, 0.7) : 'rgba(255,255,255,0.12)' }}>
+                    <Text style={{ fontFamily: F.bodyBold, fontSize: 13.5, color: on ? col : C.muted }}>{label}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <Body style={{ fontSize: 10, color: C.muted3, lineHeight: 14 }}>{answered ? 'Saved with the note you record next.' : 'Choose Yes or No, then record the note.'}</Body>
           </View>
           <VoiceTapButton recording={rec.recording} recMs={rec.recMs} maxMs={SESSION_VOICE_MAX_MS} onStart={rec.start} onStop={() => rec.finish(true)} accent={ACCENT}
-            label={takes.length || savedCount ? 'Record another note' : 'Record voice note'} disabled={disabled || busy} />
+            label={!answered && !rec.recording ? 'Answer Yes or No first' : takes.length || savedCount ? 'Record another note' : 'Record voice note'} disabled={disabled || busy || (!answered && !rec.recording)} />
         </>
       ) : (
         <Body style={{ fontSize: 11, color: C.muted3 }}>This session has the maximum of {SESSION_VOICE_MAX_NOTES} voice notes.</Body>

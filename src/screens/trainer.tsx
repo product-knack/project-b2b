@@ -7042,7 +7042,10 @@ export function Workout() {
   const incompleteExercises = isActivityModality ? [] : exercises.filter((e) => exHasData(e) && e.sets.some((s) => setIncomplete(e, s)));
   const allExercisesComplete = incompleteExercises.length === 0;
   const customNameMissing = isCustomModality && !customModalityName.trim();
-  const canSubmit = !!selectedClientId && !!trainerId && hasValidContent && allExercisesComplete && rpe != null && !customNameMissing && !saving && !gateBlocking && !healthLoading && !gateBlocked && !voiceRecording && !listenRequired;
+  // A voice note is required on every new log (15 Oct 2026, owner); editing a queued log is exempt
+  // because its notes already left the form for their own queue items at the first submit.
+  const voiceRequired = !editingOutboxId && voiceTakes.length === 0;
+  const canSubmit = !!selectedClientId && !!trainerId && hasValidContent && allExercisesComplete && rpe != null && !customNameMissing && !saving && !gateBlocking && !healthLoading && !gateBlocked && !voiceRecording && !listenRequired && !voiceRequired;
 
   // Post-save timers ("Saved ✓" → back, or → partner's leg) live in a ref so a
   // back tap inside the window, or an unmount, cancels them: an orphaned goBack()
@@ -7087,6 +7090,7 @@ export function Workout() {
       : !allExercisesComplete ? `Fill ${incompleteExercises[0].measurement === 'duration' ? 'duration' : 'reps'} for every set — “${incompleteExercises[0].name}” is incomplete (load is optional for bodyweight)`
       : customNameMissing ? 'Name your custom modality to submit'
       : rpe == null ? 'Set the session RPE to submit'
+      : voiceRequired ? 'Record a voice note about this session to submit (answer the pain question first)'
       : blankExercises.length ? `${blankExercises.length} blank exercise${blankExercises.length === 1 ? '' : 's'} (no values) will be removed when you submit`
       : !isOnline ? 'Offline — the log saves to this device and syncs automatically' : null)
     : null;
@@ -7726,7 +7730,7 @@ export function Workout() {
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <View style={{ flex: 1 }}>
               <Mono style={{ fontSize: 10, letterSpacing: 1.2, color: C.mono2 }}>VOICE NOTES</Mono>
-              <Body style={{ fontSize: 11, color: C.muted3, marginTop: 2 }}>Speak your notes about this session (optional)</Body>
+              <Body style={{ fontSize: 11, color: C.muted3, marginTop: 2 }}>Speak your notes about this session{editingOutboxId ? '' : ' (required: one note before you submit)'}</Body>
             </View>
             {voiceTakes.length ? <Badge text={`${voiceTakes.length} recorded`} color={C.purple} /> : null}
           </View>
