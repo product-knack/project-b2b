@@ -1,5 +1,5 @@
 /* Odds AI plan assistant panel (16 Oct 2026), shown at the top of Create Plan for an Essentials client
-   the trainer may plan for. 1. pick a split, 2. sessions a week (default: the client's weekly slots),
+   the trainer may plan for: pick a split (sessions a week = the client's weekly slots, no picker since 16 Oct 2026),
    an optional note, then "Generate workout plan": the edge function ai-plan-draft drafts the plan from
    the client's latest QHP, medical and blood reports and from our exercises; the parent drops the
    draft into the normal builder, where the trainer edits, adds and deletes anything before submitting.
@@ -27,7 +27,6 @@ export function AiPlanAssistant({ clientId, clientName, preview, onApply }: {
   const draftM = useAiPlanDraft();
   const [open, setOpen] = React.useState(true);
   const [split, setSplit] = React.useState<SplitKey | null>(null);
-  const [perWeek, setPerWeek] = React.useState(() => preview.sources?.suggested_sessions_per_week ?? 3);
   const [note, setNote] = React.useState('');
   const [result, setResult] = React.useState<AiPlanResult | null>(null);
   const [step, setStep] = React.useState(0);
@@ -47,9 +46,10 @@ export function AiPlanAssistant({ clientId, clientName, preview, onApply }: {
 
   const generate = async () => {
     if (!split || draftM.isPending) return;
-    trackEvent('AI Plan Generate Tapped', { client_id: clientId, split, sessions_per_week: perWeek, has_note: !!note.trim() });
+    trackEvent('AI Plan Generate Tapped', { client_id: clientId, split, has_note: !!note.trim() });
     try {
-      const r = await draftM.mutateAsync({ clientId, split, sessionsPerWeek: perWeek, note });
+      // Sessions a week: the server takes the client's weekly slot count (owner, 16 Oct 2026: no picker).
+      const r = await draftM.mutateAsync({ clientId, split, note });
       setResult(r);
       trackEvent('AI Plan Generated', { client_id: clientId, split, model: r.model, exercises: draftExerciseCount(r.draft), not_in_db: draftNewExercises(r.draft).length, dropped: r.dropped.length });
       onApply(r);
@@ -58,7 +58,6 @@ export function AiPlanAssistant({ clientId, clientName, preview, onApply }: {
     }
   };
 
-  const slots = (preview.sources?.weekly_slots ?? []).filter((s) => s.day);
   const src = sourcesLine(preview.sources);
 
   return (
@@ -86,7 +85,7 @@ export function AiPlanAssistant({ clientId, clientName, preview, onApply }: {
 
           {/* 1 · split */}
           <View style={{ gap: 8 }}>
-            <Mono style={{ fontSize: 9.5, letterSpacing: 1.3, color: AI }}>1 · CHOOSE A SPLIT</Mono>
+            <Mono style={{ fontSize: 9.5, letterSpacing: 1.3, color: AI }}>CHOOSE A SPLIT</Mono>
             {SPLITS.map((s) => {
               const active = split === s.key;
               return (
@@ -111,24 +110,6 @@ export function AiPlanAssistant({ clientId, clientName, preview, onApply }: {
             })}
           </View>
 
-          {/* 2 · sessions a week */}
-          <View style={{ gap: 8 }}>
-            <Mono style={{ fontSize: 9.5, letterSpacing: 1.3, color: AI }}>2 · SESSIONS A WEEK</Mono>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <Pressable onPress={() => setPerWeek((n) => Math.max(1, n - 1))} hitSlop={10} accessibilityRole="button" accessibilityLabel="One session fewer"
-                style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center', justifyContent: 'center' }}>
-                <Text style={{ fontFamily: F.bodyBold, fontSize: 18, color: C.ink }}>−</Text>
-              </Pressable>
-              <Serif style={{ fontSize: 24, minWidth: 24, textAlign: 'center' }}>{perWeek}</Serif>
-              <Pressable onPress={() => setPerWeek((n) => Math.min(6, n + 1))} hitSlop={10} accessibilityRole="button" accessibilityLabel="One session more"
-                style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center', justifyContent: 'center' }}>
-                <Icon name="plus" size={15} color={C.ink} strokeWidth={2.6} />
-              </Pressable>
-              <Body style={{ flex: 1, fontSize: 10.5, color: C.muted2, lineHeight: 14 }}>
-                {slots.length ? `Weekly slots: ${slots.map((s) => `${s.day} ${s.modality ?? ''}`.trim()).join(', ')}` : 'No weekly slots saved'}
-              </Body>
-            </View>
-          </View>
 
           <View style={{ gap: 6 }}>
             <Mono style={{ fontSize: 9.5, letterSpacing: 1.3, color: C.muted2 }}>NOTE FOR ODDS AI (OPTIONAL)</Mono>

@@ -56,12 +56,13 @@ export function useAiPlanPreview(clientId: string | null | undefined, enabled = 
   });
 }
 
-export type AiPlanRequest = { clientId: string; split: SplitKey; sessionsPerWeek: number; note?: string };
+/** sessionsPerWeek is optional: without it the server uses the client's weekly slot count (the app sends none since 16 Oct 2026). */
+export type AiPlanRequest = { clientId: string; split: SplitKey; sessionsPerWeek?: number; note?: string };
 /** One draft (20 to 40 s). Throws the server's sentence on refusal. */
 export function useAiPlanDraft() {
   return useMutation({
     mutationFn: async (r: AiPlanRequest): Promise<AiPlanResult> => {
-      const d = await callPlanFn({ client_id: r.clientId, split: r.split, sessions_per_week: r.sessionsPerWeek, note: r.note?.trim() || undefined }, AI_PLAN_MS);
+      const d = await callPlanFn({ client_id: r.clientId, split: r.split, sessions_per_week: r.sessionsPerWeek ?? undefined, note: r.note?.trim() || undefined }, AI_PLAN_MS);
       if (!d?.draft || !Array.isArray(d.draft.sections)) throw new Error('Odds AI returned no plan. Try Generate again.');
       return {
         draft: d.draft,
