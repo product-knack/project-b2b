@@ -11,6 +11,7 @@ import { ClientThreadsUnreadBanner } from '../components/clientThreadsCard';
 import { ManagerTeamChatCard } from './managerChat';
 import { EssentialsAuctionHomeCard } from '../components/essentialsAuctionCard';
 import { AuctionResultsCards } from '../components/auctionResultsCards';
+import { NucleusHomeCard } from './nucleus';
 import { useStore } from '../store';
 import { TRAINER_MODALITIES, DOCTOR_MODALITIES, useMyManagerTeam } from '../lib/managerChatQueries';
 
@@ -572,6 +573,8 @@ function PhysioDoctorDashboard() {
          Essentials clients, while the window is open (1 Oct 2026). */}
       {identity.data.isPhysio ? <AuctionResultsCards /> : null}
       {identity.data.isPhysio ? <EssentialsAuctionHomeCard /> : null}
+      {/* Odds Nucleus teaser (16 Oct 2026): the hero piece; nothing while the library is empty. */}
+      <NucleusHomeCard />
       {/* Emergency Leave — same global sheet the trainer dashboard uses; the
           leave_request row simply carries the doctor's own profile id. */}
       <Pressable onPress={() => openSheet('leave')} style={{ flexDirection: 'row', alignItems: 'center', gap: 11, padding: 12, borderRadius: 15, backgroundColor: hexA(C.red, 0.07), borderWidth: 1, borderColor: hexA(C.red, 0.3) }}>

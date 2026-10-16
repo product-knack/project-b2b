@@ -5,6 +5,7 @@ import { C, F, hexA, ORANGE_GRAD } from '../theme';
 import { Icon } from '../icons';
 import { Serif, Body, Mono, Card, ProgressBar } from '../components/primitives';
 import { Page, TitleBlock, BackLink, Badge, AnimChip } from './common';
+import { NucleusHomeCard } from './nucleus';
 import { ClientMedicationsTab } from '../components/clientMedications';
 import { ClientHealthSummaryCard } from '../components/clientHealthSummaryCard';
 import { useStore } from '../store';
@@ -278,6 +279,8 @@ export function TherapistDashboard() {
   return (
     <Page gap={18}>
       <TitleBlock title="Therapy Desk" sub="Your clients and today's sessions" />
+      {/* Odds Nucleus teaser (16 Oct 2026): the hero piece; nothing while the library is empty. */}
+      <NucleusHomeCard />
 
       {/* Assigned Clients count card */}
       <Card onPress={() => go('therapist-clients')} colors={['rgba(44,30,66,0.5)', 'rgba(18,14,22,0.55)']} border={hexA(ACC, 0.28)} radius={19} style={{ padding: 15 }}>

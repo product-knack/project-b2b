@@ -57,6 +57,8 @@ const PERSIST_PREFIXES = [
   'physio-hod-identity', 'doctor-', 'therapist-', 'therapy-', 'manager-', 'mgr-', 'hod-teams', 'app-version-requirement', 'play-store-version',
   'crm-client-list', 'crm-client-detail', 'crm-metrics', 'crm-journey-clients', 'crm-tasks', 'crm-my-tasks', 'coach-clients-overview', 'coach-overview-client',
   'academy-', 'admin-', 'ops-',
+  // Odds Nucleus (16 Oct 2026): the published pieces render offline from the persisted list.
+  'nucleus',
 ];
 const NEVER_PERSIST = new Set([
   'client-sessions', 'client-reports', 'prev-exercise-data', 'session-exercises', 'crm-month-roster', 'head-doctor-month-sessions', 'hod-feed-msgs', 'doctor-day-sessions',

@@ -73,6 +73,12 @@ export const ic = {
   history: 'M3.5 12a8.5 8.5 0 1 0 2.5-6M3 4v5h5M12 7.5V12l3 2',
   stethoscope: 'M6 3v6a4 4 0 0 0 8 0V3M4.5 3h3M12.5 3h3M10 13v3a5 5 0 0 0 10 0v-3M20 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4z',
   headphones: 'M4 18v-6a8 8 0 0 1 16 0v6M4 14h2a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H4zM20 14h-2a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h2z',
+  // Odds Nucleus (16 Oct 2026): the open book, the bookmark and the topic glyphs.
+  nucleus: 'M4 5a2 2 0 0 1 2-2h5v16H6a2 2 0 0 0-2 2zM20 5a2 2 0 0 0-2-2h-5v16h5a2 2 0 0 1 2 2zM12 3v16',
+  bookmark: 'M6 3h12v18l-6-4-6 4z',
+  moon: 'M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z',
+  leaf: 'M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.5 19 2c1 2 2 4.2 2 8 0 5.5-4.8 10-10 10zM2 21c0-3 1.9-5.5 5-7',
+  brain: 'M9 3a3 3 0 0 0-3 3v1a3 3 0 0 0-2 5 3 3 0 0 0 1 5.5A3 3 0 0 0 9 21h3V3zM15 3a3 3 0 0 1 3 3v1a3 3 0 0 1 2 5 3 3 0 0 1-1 5.5A3 3 0 0 1 15 21h-3V3z',
   // Essentials Auction bids (10 Oct 2026): the won card's trophy and the one-attempt lock.
   trophy: 'M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0zM7 6H4v2a3 3 0 0 0 3 3M17 6h3v2a3 3 0 0 1-3 3',
   lock: 'M5 11h14v10H5zM8 11V7a4 4 0 0 1 8 0v4M12 15v2',

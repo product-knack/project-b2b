@@ -57,6 +57,7 @@ import { QhpVoiceMemoButton, QhpVoiceMemoPlayer, QhpVoiceMemoDialog } from '../c
 import { QhpRefreshPendingCard } from '../components/qhpRefreshPending';
 import { EssentialsAuctionHomeCard } from '../components/essentialsAuctionCard';
 import { AuctionResultsCards } from '../components/auctionResultsCards';
+import { NucleusHomeCard } from './nucleus';
 import { DailyQuizModal } from '../components/dailyQuizModal';
 import { MyQuizScoreCard, QuizColumnCell } from '../components/quizCards';
 import { useTrainerQuiz, useQuizScoresByTrainer, quizMonthKey } from '../lib/trainerQuizQueries';
@@ -2005,6 +2006,9 @@ export function Dashboard() {
       {/* Essentials Auction won / lost cards (10 Oct 2026): 4 hours after the 4 PM decision */}
       <AuctionResultsCards />
       <EssentialsAuctionHomeCard />
+
+      {/* Odds Nucleus teaser (16 Oct 2026): the hero piece; nothing while the library is empty. */}
+      <NucleusHomeCard />
 
       {/* My Crew — team chat per manager_score competition row, directly after
          the Sessions This Month card. Renders nothing without a current team. */}

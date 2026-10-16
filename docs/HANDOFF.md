@@ -43,3 +43,8 @@ report-detail redesign, QHP score journeys, services drawer, session-handoff pop
 request-roster dialog, roster distance (Google Routes live), client threads v2 (dedicated
 tables + realtime + mentions + swipe-reply), offline warm-up, location gate, renewals history.
 Next likely direction: iOS build via EAS (eas.json not yet created).
+
+Update 2026-10-16: Odds Nucleus shipped in code (drawer group Learn for every role; read-only
+over longevity_resources; players for YouTube / Vimeo / files / article audio; saved, recent and
+positions on the device; feature doc docs/features/android/shared/odds-nucleus.md). Not yet in a
+signed build; device test pending.

@@ -5,6 +5,7 @@ import { C, F, hexA, ORANGE_GRAD } from '../theme';
 import { Icon, IconName } from '../icons';
 import { Serif, Body, Mono, Card, Avatar, ProgressBar } from '../components/primitives';
 import { Page, TitleBlock, GreetingHeader, Badge, HScroll, BackLink } from './common';
+import { NucleusHomeCard } from './nucleus';
 import { FeatureTour, COACH_TOUR, TourLauncher } from '../components/featureTour';
 import { useStore } from '../store';
 import { useAuth } from '../auth';
@@ -145,6 +146,8 @@ export function CoachDashboard() {
       <AccountSwitch />
       <ClientThreadsUnreadBanner />
       {(pendingPlans.data ?? 0) > 0 ? <PendingPlansAlert count={pendingPlans.data!} onPress={() => go('coach-programs')} /> : null}
+      {/* Odds Nucleus teaser (16 Oct 2026): the hero piece; nothing while the library is empty. */}
+      <NucleusHomeCard />
       <ErrorState q={q} />
       {q.isLoading || !d ? <Loading /> : (
         <>

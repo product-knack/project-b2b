@@ -327,6 +327,9 @@ export const trainerNav: NavGroup[] = [
     { label: 'Workout Analyst', icon: 'activity', route: 'workout-analyst' },
     { label: 'Trainer Roster', icon: 'map', route: 'managers' },
   ] },
+  { label: 'Learn', items: [
+    { label: 'Odds Nucleus', icon: 'nucleus', route: 'nucleus' },
+  ] },
   { label: 'Support', items: [
     { label: 'Tech Desk', icon: 'activity', route: 'tech-desk' },
   ] },
@@ -352,6 +355,9 @@ export const crmNav: NavGroup[] = [
     { label: 'Escalations', icon: 'alert', route: 'crm-esc' },
     { label: 'Tasks', icon: 'clipboard', route: 'crm-tasks' },
     { label: 'Tools', icon: 'grid', route: 'crm-tools' },
+  ] },
+  { label: 'Learn', items: [
+    { label: 'Odds Nucleus', icon: 'nucleus', route: 'nucleus' },
   ] },
   { label: 'Support', items: [
     { label: 'Tech Desk', icon: 'activity', route: 'tech-desk' },
@@ -382,6 +388,9 @@ export const coachNav: NavGroup[] = [
     { label: 'Workout Analyst', icon: 'dumbbell', route: 'workout-analyst' },
     { label: 'Plans Analyst', icon: 'activity', route: 'plans-analyst' },
   ] },
+  { label: 'Learn', items: [
+    { label: 'Odds Nucleus', icon: 'nucleus', route: 'nucleus' },
+  ] },
   { label: 'Support', items: [
     { label: 'Tech Desk', icon: 'activity', route: 'tech-desk' },
   ] },
@@ -408,6 +417,9 @@ export const opsNav: NavGroup[] = [
     { label: 'QHP Stats', icon: 'chart', route: 'qhp-stats' },
     { label: 'Escalations', icon: 'alert', route: 'ops-escalations' },
   ] },
+  { label: 'Learn', items: [
+    { label: 'Odds Nucleus', icon: 'nucleus', route: 'nucleus' },
+  ] },
   { label: 'Support', items: [
     { label: 'Tech Desk', icon: 'activity', route: 'tech-desk' },
   ] },
@@ -430,6 +442,9 @@ export const adminNav: NavGroup[] = [
     { label: 'Messenger', icon: 'chat', route: 'messenger' },
     { label: 'Client Threads', icon: 'atSign', route: 'client-threads' },
   ] },
+  { label: 'Learn', items: [
+    { label: 'Odds Nucleus', icon: 'nucleus', route: 'nucleus' },
+  ] },
   { label: 'Support', items: [
     { label: 'Tech Desk', icon: 'activity', route: 'tech-desk' },
   ] },
@@ -444,6 +459,9 @@ export const marketingNav: NavGroup[] = [
     { label: 'Leads', icon: 'userPlus', route: 'marketing-leads' },
     { label: 'Lead Analytics', icon: 'chart', route: 'marketing-lead-analytics' },
     { label: 'Messenger', icon: 'chat', route: 'messenger' },
+  ] },
+  { label: 'Learn', items: [
+    { label: 'Odds Nucleus', icon: 'nucleus', route: 'nucleus' },
   ] },
   { label: 'Support', items: [
     { label: 'Tech Desk', icon: 'activity', route: 'tech-desk' },
@@ -464,6 +482,9 @@ export const academyNav: NavGroup[] = [
     { label: 'B2C Reports', icon: 'file', route: 'b2c-reports' },
     { label: 'Messenger', icon: 'chat', route: 'messenger' },
     { label: 'Client Threads', icon: 'atSign', route: 'client-threads' },
+  ] },
+  { label: 'Learn', items: [
+    { label: 'Odds Nucleus', icon: 'nucleus', route: 'nucleus' },
   ] },
   { label: 'Support', items: [
     { label: 'Tech Desk', icon: 'activity', route: 'tech-desk' },
@@ -488,6 +509,9 @@ export const doctorNav: NavGroup[] = [
     { label: 'Roster', icon: 'calendar', route: 'doctor-roster' },
     { label: 'Protocol Approvals', icon: 'checks', route: 'doctor-protocol-approvals' },
   ] },
+  { label: 'Learn', items: [
+    { label: 'Odds Nucleus', icon: 'nucleus', route: 'nucleus' },
+  ] },
   { label: 'Support', items: [
     { label: 'Tech Desk', icon: 'activity', route: 'tech-desk' },
   ] },
@@ -502,6 +526,9 @@ export const consultantNav: NavGroup[] = [
     { label: 'Consultant Dashboard', icon: 'home', route: 'doctor-dashboard' },
     { label: 'All Calls', icon: 'calendar', route: 'doctor-consultant-calls' },
   ] },
+  { label: 'Learn', items: [
+    { label: 'Odds Nucleus', icon: 'nucleus', route: 'nucleus' },
+  ] },
 ];
 
 export const therapistNav: NavGroup[] = [
@@ -512,6 +539,9 @@ export const therapistNav: NavGroup[] = [
     { label: 'Messenger', icon: 'chat', route: 'messenger' },
     { label: 'Client Threads', icon: 'atSign', route: 'client-threads' },
   ] },
+  { label: 'Learn', items: [
+    { label: 'Odds Nucleus', icon: 'nucleus', route: 'nucleus' },
+  ] },
   { label: 'Support', items: [
     { label: 'Tech Desk', icon: 'activity', route: 'tech-desk' },
   ] },
@@ -520,6 +550,9 @@ export const therapistNav: NavGroup[] = [
 export const techNav: NavGroup[] = [
   { label: 'Workspace', items: [
     { label: 'Tech Desk', icon: 'activity', route: 'tech-desk-inbox' },
+  ] },
+  { label: 'Learn', items: [
+    { label: 'Odds Nucleus', icon: 'nucleus', route: 'nucleus' },
   ] },
 ];
 

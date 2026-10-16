@@ -80,6 +80,8 @@ type Store = {
   workoutTemplatesOpen: boolean; // sidebar "Workout Templates" → dashboard opens the sheet
   /** Tech Desk: which ticket the detail screens show. */
   selectedTicketId: string | null;
+  /** Odds Nucleus (16 Oct 2026): which piece the reader / player shows. */
+  nucleusPieceId: string | null;
 
   go: (r: string, reset?: boolean) => void;
   back: () => void;
@@ -151,6 +153,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     threadViewOpen: false,
     workoutTemplatesOpen: false,
     selectedTicketId: null as string | null,
+    nucleusPieceId: null as string | null,
   });
 
   const set = useCallback((patch: any) => setS((prev) => ({ ...prev, ...patch })), []);
@@ -218,7 +221,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       resetSession: () => setS((prev) => ({
         ...prev, history: [], drawerOpen: false, aiOpen: false, sheet: null, crmDialog: null,
         selectedClientId: null, selectedClientName: null, clientInitialTab: null, workoutScheduleId: null,
-        editingOutboxId: null, editingPlan: null, openChatId: null, crmSection: null, threadViewOpen: false, workoutTemplatesOpen: false, selectedTicketId: null,
+        editingOutboxId: null, editingPlan: null, openChatId: null, crmSection: null, threadViewOpen: false, workoutTemplatesOpen: false, selectedTicketId: null, nucleusPieceId: null,
       })),
       approve: (id: string) => setS((prev) => ({ ...prev, crmApproved: { ...prev.crmApproved, [id]: 'forwarded' }, crmDialog: null })),
       reject: (id: string) => setS((prev) => ({ ...prev, crmApproved: { ...prev.crmApproved, [id]: 'parked' }, crmDialog: null })),
