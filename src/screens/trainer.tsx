@@ -38,7 +38,7 @@ import { useAuth } from '../auth';
 import { supabase, DEV_TRAINER_ID } from '../lib/supabase';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { QhpAssessmentForm, CoachPresenceModal, fetchHasPriorCompletedQHP } from './qhpAssessmentForm';
-import { useAddOwnSession, useTodayRoster, useTrainerStats, useTrainerProfile, useTrainerMonthSessions, useTrainerLeaderboard, useManagerLeaderboard, useManagerTeam, useManagerTeamLeaves, useManagerTeamIncidents, useManagerTeamRetention, useManagerTeamLateLogs, useManagerTeamRoster, useManagerTeamPlanOverview, useManagerTeamAcks, useManagerTeamAppAdoption, useTrainerSessionBreakdown, useTrainerReferralBreakdown, useFirstSessionAlert, istTimeParts, istDayLabel, istDate, useCancelScheduledSession, useRequestReschedule, useAddMissedRemark, lbMonthBounds, lbMonthLabel, LbBounds, RosterRow, ManagerTeamMember, MgrMonthFilter, usePlanExpiryMap, PlanExpiry, useTrainerAckSummary, useRequestRoster, useRosterDistance, SESSION_MODALITIES, useMyMonthSessionBreakdown, usePilatesRunRate } from '../lib/trainerQueries';
+import { useAddOwnSession, useTodayRoster, useTrainerStats, useTrainerProfile, useTrainerMonthSessions, useTrainerLeaderboard, useTrainerLeaderboardEssentials, useManagerLeaderboard, useManagerTeam, useManagerTeamLeaves, useManagerTeamIncidents, useManagerTeamRetention, useManagerTeamLateLogs, useManagerTeamRoster, useManagerTeamPlanOverview, useManagerTeamAcks, useManagerTeamAppAdoption, useTrainerSessionBreakdown, useTrainerReferralBreakdown, useFirstSessionAlert, istTimeParts, istDayLabel, istDate, useCancelScheduledSession, useRequestReschedule, useAddMissedRemark, lbMonthBounds, lbMonthLabel, LbBounds, RosterRow, ManagerTeamMember, MgrMonthFilter, usePlanExpiryMap, PlanExpiry, useTrainerAckSummary, useRequestRoster, useRosterDistance, SESSION_MODALITIES, useMyMonthSessionBreakdown, usePilatesRunRate } from '../lib/trainerQueries';
 import { PrevSet, useMyClients, useClientDetail, useClientSessions, useClientPlans, useClientGoals, useSaveWeeklyGoals, useDeleteWeeklyGoal, useZone2Week, useLogZone2Session, useWeeklyHealthSummary, PLAN_VALID_DAYS, useClientReports, useClientConsultAi, ClientConsultAi, useClientBioAge, useClientProgression, useCreateWorkoutSession, useModalityGate, useWorkoutTemplates, useSaveWorkoutTemplate, useDeleteWorkoutTemplate, useClientHealthCheck, useSaveHealthData, useExerciseDb, useSessionExercises, uuidv4, HealthDataInput, useWeeklyProgressionAll, ackWeeklyReport, WeeklyProgressionRow, useApprovedPlansForLogging, usePartnerInfo, usePreviousExerciseData, checkDuplicateWorkoutToday, PlanExerciseRow, useClientDailyStats, useSaveClientHomeLocation, PILATES_REFORMER_EXERCISES, usePlanEditValidation, normalizePlanModality, PLAN_EDIT_MAX_WORKOUTS } from '../lib/clientQueries';
 import * as Location from 'expo-location';
 import KvStorage from 'expo-sqlite/kv-store';
@@ -2820,6 +2820,9 @@ export function TrainerLeaderboardContent() {
   const [periodId, setPeriodId] = React.useState('this');
   const sel = lbPeriods.find((p) => p.id === periodId) ?? lbPeriods[0];
   const leaderboardQ = useTrainerLeaderboard(sel.bounds);
+  // ESS column (16 Oct 2026, web parity): Essentials by Odds sessions for the same range ("3 Months"
+  // is one range, summed by the server). 0 while loading or on error; the board never waits on it.
+  const essQ = useTrainerLeaderboardEssentials(sel.bounds);
   // QUIZ column (23 Sep 2026): the daily quiz has no leaderboard of its own; each row shows
   // the trainer's quiz points and accuracy for the same period. Month keys come from the
   // period's IST month starts; "3 Months" adds the three months up.
@@ -2902,14 +2905,15 @@ export function TrainerLeaderboardContent() {
       {/* Full standings */}
       <View style={{ gap: 3 }}>
         <Mono style={{ fontSize: 12, letterSpacing: 2.1 }}>FULL STANDINGS</Mono>
-        <Mono style={{ fontSize: 8.5, letterSpacing: 0.5, color: C.muted3 }}>QUIZ = DAILY QUIZ POINTS AND ACCURACY · COUNTED FROM 25 SEP 2026 · HOLD FOR DETAILS</Mono>
+        <Mono style={{ fontSize: 8.5, letterSpacing: 0.5, color: C.muted3 }}>ESS = ESSENTIALS BY ODDS SESSIONS, KEPT OUT OF SESS · QUIZ = DAILY QUIZ POINTS AND ACCURACY · COUNTED FROM 25 SEP 2026 · HOLD FOR DETAILS</Mono>
       </View>
       {rows.map((l, i) => {
         const rank = i + 1;
         const top3 = rank <= 3;
         const col = l.medalColor || C.muted;
         return (
-          <RiseIn key={periodId + l.name} delay={Math.min(i, 10) * 55} style={{ flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 11, paddingHorizontal: 12, borderRadius: 14, borderWidth: 1, borderColor: top3 ? hexA(col, 0.3) : 'rgba(255,255,255,0.06)', backgroundColor: top3 ? hexA(col, 0.06) : 'rgba(0,0,0,0.2)' }}>
+          // gap 9 and REF / ESS at 30 (16 Oct 2026): four number cells still leave the name about 83 dp on a 360 dp phone.
+          <RiseIn key={periodId + l.name} delay={Math.min(i, 10) * 55} style={{ flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 11, paddingHorizontal: 12, borderRadius: 14, borderWidth: 1, borderColor: top3 ? hexA(col, 0.3) : 'rgba(255,255,255,0.06)', backgroundColor: top3 ? hexA(col, 0.06) : 'rgba(0,0,0,0.2)' }}>
             <View style={{ width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: top3 ? hexA(col, 0.16) : 'rgba(255,255,255,0.04)' }}>
               {l.medal ? <Icon path={l.medal} size={17} color={col} strokeWidth={1.8} /> : <Text style={{ fontFamily: F.mono, fontSize: 12.5, color: C.muted }}>{rank}</Text>}
             </View>
@@ -2919,13 +2923,21 @@ export function TrainerLeaderboardContent() {
                 <ProgressBar pct={Math.round((l.sess / maxSess) * 100)} height={4} fill={top3 ? col : hexA(C.orange, 0.55)} />
               </View>
             </View>
-            <View style={{ alignItems: 'center', minWidth: 34 }}>
+            <View style={{ alignItems: 'center', minWidth: 30 }}>
               <Mono style={{ fontSize: 8.5, letterSpacing: 1, color: C.faint }}>REF</Mono>
               <Text style={{ fontFamily: F.bodyBold, fontSize: 14, color: C.purple, marginTop: 1 }}>{l.ref}</Text>
             </View>
             <View style={{ alignItems: 'center', minWidth: 38 }}>
               <Mono style={{ fontSize: 8.5, letterSpacing: 1, color: C.faint }}>SESS</Mono>
               <CountUp value={l.sess} style={{ fontFamily: F.bodyBold, fontSize: 14, color: C.blue, marginTop: 1 }} />
+            </View>
+            {/* ESS: Essentials by Odds sessions for the same period, kept out of SESS. No CountUp, so a
+                late-arriving query never animates from a wrong number; lime literal (no theme token), web parity. */}
+            <View style={{ alignItems: 'center', minWidth: 30 }}>
+              <Mono style={{ fontSize: 8.5, letterSpacing: 1, color: C.faint }}>ESS</Mono>
+              <Text style={{ fontFamily: F.bodyBold, fontSize: 14, color: '#A3E635', marginTop: 1 }}>
+                {l.trainerId ? essQ.data?.[l.trainerId] ?? 0 : 0}
+              </Text>
             </View>
             {/* QUIZ: daily quiz points (accuracy under it) for the same period; "-" = no answers. */}
             <QuizColumnCell score={l.trainerId ? quizQ.data?.[l.trainerId] : null} periodLabel={quizPeriodLabel} />

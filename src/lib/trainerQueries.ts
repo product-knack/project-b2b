@@ -760,6 +760,30 @@ export function useTrainerLeaderboard(bounds?: LbBounds) {
   });
 }
 
+// ESS column (16 Oct 2026, web parity): Essentials by Odds sessions per trainer for the
+// leaderboard period (hub-track migration 20261016120000, get_trainer_leaderboard_essentials).
+// Separate from SESS: get_trainer_leaderboard counts only the paid Odds plans, so Essentials
+// sessions were never in SESS (checked live 16 Oct 2026); nothing is subtracted anywhere.
+export function useTrainerLeaderboardEssentials(bounds?: LbBounds) {
+  const b = bounds ?? { start: istMonthBounds().start, end: istMonthBounds().end };
+  return useQuery({
+    queryKey: ['trainer-leaderboard-essentials', b.start, b.end],
+    staleTime: 120_000,
+    retry: 1,
+    queryFn: async (): Promise<Record<string, number>> => {
+      const { data, error } = await withTimeout(
+        Promise.resolve((supabase.rpc as any)('get_trainer_leaderboard_essentials', { start_date: b.start, end_date: b.end })) as Promise<{ data: any; error: any }>,
+        NET_MS, 'leaderboard essentials');
+      if (error) throw new Error(error.message);
+      const out: Record<string, number> = {};
+      for (const r of (data ?? []) as { trainer_id: string; essentials_count: number | string }[]) {
+        out[r.trainer_id] = Number(r.essentials_count) || 0;
+      }
+      return out; // plain object, never a Map (persisted cache)
+    },
+  });
+}
+
 // Sessions chart — per-IST-day counts over a tenure window (15/30/90d), zero-filled.
 export function useSessionsChart(trainerId: string, tenureDays: number) {
   return useQuery({
