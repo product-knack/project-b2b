@@ -9,6 +9,7 @@ import { Body, Mono, Serif } from './primitives';
 import { ReplayMask } from './ReplayShield';
 import { useVoiceRecorder, VoiceTapButton, VoicePlayer, RecordedVoice } from './VoiceNote';
 import { clockOf } from '../lib/techDesk';
+import { claimAudioFocus, releaseAudioFocus, type AudioHolder } from '../lib/audioFocus';
 import {
   SessionVoiceNote, PendingVoiceTake, SESSION_VOICE_MAX_MS, SESSION_VOICE_MAX_NOTES, ClientLatestVoice,
   persistTake, discardTake, queueSessionVoiceNote, useSignedSessionVoiceUrls, useInvalidateSessionVoice,
@@ -145,15 +146,20 @@ function PlaylistInner({ urls, notes }: { urls: string[]; notes: SessionVoiceNot
   const playing = !!status?.playing;
   const finished = !!status?.didJustFinish && idx === notes.length - 1;
 
+  // One sound at a time (16 Oct 2026): another player starting pauses these notes.
+  const playlistRef = React.useRef(playlist); playlistRef.current = playlist;
+  const holder = React.useRef<AudioHolder>({ silence: () => { try { playlistRef.current.pause(); } catch { /* released */ } } }).current;
+  React.useEffect(() => () => { releaseAudioFocus(holder); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   React.useEffect(() => {
     // Back to the first note when the last one ends, ready for another listen.
-    if (finished) { try { playlist.pause(); playlist.skipTo(0); playlist.seekTo(0); } catch { /* released */ } }
-  }, [finished]);
+    if (finished) { releaseAudioFocus(holder); try { playlist.pause(); playlist.skipTo(0); playlist.seekTo(0); } catch { /* released */ } }
+  }, [finished]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggle = async () => {
     try {
       if (!started) { await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }); setStarted(true); }
-      if (playlist.playing) playlist.pause(); else playlist.play();
+      if (playlist.playing) { playlist.pause(); releaseAudioFocus(holder); } else { claimAudioFocus(holder); playlist.play(); }
     } catch (e: any) {
       Alert.alert('Playback failed', e?.message ?? 'Could not play these voice notes.');
     }

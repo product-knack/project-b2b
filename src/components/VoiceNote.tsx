@@ -6,6 +6,7 @@ import { C, hexA } from '../theme';
 import { Icon } from '../icons';
 import { Mono } from './primitives';
 import { clockOf } from '../lib/techDesk';
+import { claimAudioFocus, releaseAudioFocus, type AudioHolder } from '../lib/audioFocus';
 
 /* ============ Voice notes (record + play) ============
    One expo-audio implementation shared by the Tech Desk (ticket memos) and the
@@ -235,11 +236,14 @@ export function VoicePlayer({ url, accent = C.orange, label = 'VOICE', knownMs }
   const [playing, setPlaying] = React.useState(false);
   const [posMs, setPosMs] = React.useState(0);
   const [durMs, setDurMs] = React.useState(knownMs ?? 0);
+  // One sound at a time (16 Oct 2026): another player starting pauses this one.
+  const holder = React.useRef<AudioHolder>({ silence: () => { try { playerRef.current?.pause(); } catch { /* released */ } } }).current;
 
   React.useEffect(() => () => {
+    releaseAudioFocus(holder);
     try { subRef.current?.remove?.(); } catch { /* gone */ }
-    try { playerRef.current?.remove(); } catch { /* released */ }
-  }, []);
+    try { playerRef.current?.pause(); playerRef.current?.remove(); } catch { /* released */ }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onStatus = (st: any) => {
     if (!st?.isLoaded) return;
@@ -248,6 +252,7 @@ export function VoicePlayer({ url, accent = C.orange, label = 'VOICE', knownMs }
     setPlaying(!!st.playing);
     if (st.didJustFinish) {
       setPlaying(false); setPosMs(0);
+      releaseAudioFocus(holder);
       try { playerRef.current?.pause(); playerRef.current?.seekTo(0); } catch { /* released */ }
     }
   };
@@ -255,6 +260,7 @@ export function VoicePlayer({ url, accent = C.orange, label = 'VOICE', knownMs }
     if (!url) return;
     try {
       if (!playerRef.current) {
+        claimAudioFocus(holder);
         await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
         const p = createAudioPlayer({ uri: url });
         playerRef.current = p;
@@ -263,7 +269,7 @@ export function VoicePlayer({ url, accent = C.orange, label = 'VOICE', knownMs }
         return;
       }
       const p = playerRef.current;
-      if (p.playing) p.pause(); else p.play();
+      if (p.playing) { p.pause(); releaseAudioFocus(holder); } else { claimAudioFocus(holder); p.play(); }
     } catch (e: any) {
       Alert.alert('Playback failed', e?.message ?? 'Could not play this voice memo.');
     }

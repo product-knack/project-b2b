@@ -25,7 +25,7 @@ import { BloodReportSheet, QhpReportSheet, ConsultAiSheet } from './reportDetail
 import { useClientCycleStatus, ClientCycle } from '../lib/cycleQueries';
 import { CycleChip, CyclePopup, CyclePopupInfo, cycleColor } from '../components/cycleLabel';
 import { EssentialsBadge } from '../components/essentialsBadge';
-import { ClientHealthSummaryCard, ListenGateSheet } from '../components/clientHealthSummaryCard';
+import { ClientHealthSummaryCard, ListenGateSheet, ClientSummaryStrip } from '../components/clientHealthSummaryCard';
 import { useClientHealthSummary } from '../lib/clientHealthSummaryQueries';
 import { listenGate, gateDue } from '../lib/clientHealthSummary';
 import { VoiceNotesComposer, SessionVoicePlaylistPlayer, SessionVoiceSheet, SessionVoiceSheetInfo, LatestVoiceInline, toggleTakeFlag } from '../components/SessionVoice';
@@ -1249,6 +1249,16 @@ function RosterCard({ row, trainerName, highlight, onAddWorkout, plans, devPos, 
           <Body style={{ flex: 1, fontSize: 11.5, color: hexA(prime.color, 0.95) }}>{prime.hint}</Body>
         </View>
       ) : null}
+
+      {/* The client's two spoken summaries (16 Oct 2026, owner: "short summary and long summary also
+          able to listen in the Today's Roster section"): this week's training and the health context,
+          folded until tapped. Today's sessions read the row in effect today (the same cache as the
+          client page and the Add Workout listen gate); another day's card reads that day's row.
+          Every play is written to the listen trail, so hearing it here also clears the gate. */}
+      {row.client_id && !isCancelled ? (() => {
+        const day = istDate(new Date(row.scheduled_datetime));
+        return <ClientSummaryStrip clientId={row.client_id} date={day === istDate() ? null : day} accent={C.gold} />;
+      })() : null}
 
       {/* Distance strip — captured home + device fix → instant estimate; tap for live route */}
       {row.has_home_location && row.client_id && !isCancelled ? (() => {

@@ -21,6 +21,7 @@ import { createAudioPlayer, setAudioModeAsync } from 'expo-audio';
 import { supabase } from './supabase';
 import { invokeWithTimeout } from './withTimeout';
 import { splitForSpeech, type Which } from './clientHealthSummary';
+import { claimAudioFocus, releaseAudioFocus, type AudioHolder } from './audioFocus';
 
 export type VoiceSource = 'sarvam' | 'device';
 export type VoicePhase = 'idle' | 'preparing' | 'playing' | 'paused';
@@ -55,12 +56,20 @@ export type PlayerLike = {
   remove(): void;
   addListener(event: 'playbackStatusUpdate', cb: (st: PlayerStatus) => void): { remove(): void };
 };
-export type DeviceSpeechCallbacks = { onDone: () => void; onError: (message: string) => void; onPause?: () => void; onResume?: () => void };
+export type DeviceSpeechCallbacks = {
+  onDone: () => void;
+  onError: (message: string) => void;
+  onPause?: () => void;
+  onResume?: () => void;
+  /** Someone else stopped the device voice (it is one engine for the whole app). */
+  onStopped?: () => void;
+};
 export type SummaryVoiceDeps = {
   getAudio: (req: SummaryAudioRequest) => Promise<string[]>;
   makePlayer: (uri: string) => PlayerLike;
   prepareAudio: () => Promise<void>;
-  deviceSpeak: (text: string, cb: DeviceSpeechCallbacks) => void;
+  /** Starts reading; returns a cancel that stops this reading's sentence queue for good. */
+  deviceSpeak: (text: string, cb: DeviceSpeechCallbacks) => (() => void) | void;
   deviceStop: () => void;
   devicePause?: () => void;
   deviceResume?: () => void;
@@ -77,10 +86,10 @@ export const CLOUD_UNAVAILABLE = (why: string) => `Cloud voice unavailable (${wh
 export const RECORDING_FAILED = (why: string) => `The recording could not play (${why}); using this device's voice.`;
 export const STALL_MS = 15_000;
 
-/* Every card, strip and gate owns a controller, so one voice at a time is enforced
-   here: a play stops whatever any other controller is speaking (user, 15 Oct 2026:
-   two summaries played together after pressing Play on a second card). */
-const speaking = new Set<() => void>();
+/* Every card, strip and gate owns a controller. One sound at a time is the shared audio
+   focus (audioFocus.ts, 16 Oct 2026): a play claims it, which stops whatever any other
+   controller or player in the app is sounding (user, 15 and 16 Oct 2026: a second Play
+   must stop the first, also across the Today's Roster cards). */
 
 /* ---------- the controller ---------- */
 export function createSummaryVoice(deps: SummaryVoiceDeps, onState: (s: SummaryVoiceState) => void) {
@@ -90,6 +99,10 @@ export function createSummaryVoice(deps: SummaryVoiceDeps, onState: (s: SummaryV
   let player: PlayerLike | null = null;
   let sub: { remove(): void } | null = null;
   let stall: any = null;
+  // The device voice reading of this controller, if one is going: cancelling it ends its
+  // sentence queue so a stopped reading can never carry on with its next sentence.
+  let cancelDevice: (() => void) | null = null;
+  const holder: AudioHolder = { silence: () => stop() };
   const setT = deps.setTimer ?? ((fn: () => void, ms: number) => setTimeout(fn, ms));
   const clearT = deps.clearTimer ?? ((t: any) => clearTimeout(t));
   const stallMs = deps.stallMs ?? STALL_MS;
@@ -110,26 +123,38 @@ export function createSummaryVoice(deps: SummaryVoiceDeps, onState: (s: SummaryV
     player = null;
   };
 
+  /** End this controller's device reading, if it has one (never touches another controller's). */
+  const endDevice = () => {
+    if (!cancelDevice) return;
+    const c = cancelDevice;
+    cancelDevice = null;
+    try { c(); } catch { /* gone */ }
+    deps.deviceStop();
+  };
+
   const stop = () => {
     run++;
-    speaking.delete(stop);
+    releaseAudioFocus(holder);
     releasePlayer();
-    deps.deviceStop();
+    endDevice();
     emit({ ...IDLE_VOICE });
   };
   /** A run ended on its own (heard to the end, or nothing could speak). */
-  const finished = () => { run++; speaking.delete(stop); };
+  const finished = () => { run++; cancelDevice = null; releaseAudioFocus(holder); };
 
   /** The device voice reads the script (the fallback); `notice` says why. */
   const speakDevice = (myRun: number, id: string, script: string, cb: PlayCallbacks | undefined, notice: string | null) => {
     releasePlayer();
     emit({ id, phase: 'playing', source: 'device', notice, part: 0, parts: 0 });
-    deps.deviceSpeak(script, {
+    const cancel = deps.deviceSpeak(script, {
       onDone: () => { if (myRun !== run) return; finished(); emit({ ...IDLE_VOICE, notice }); cb?.onDone?.(); },
       onError: (m) => { if (myRun !== run) return; finished(); emit({ ...IDLE_VOICE, notice }); cb?.onError?.(m); },
       onPause: () => { if (myRun === run) emit({ phase: 'paused' }); },
       onResume: () => { if (myRun === run) emit({ phase: 'playing' }); },
+      // The engine was stopped from outside (another reader): this reading is over, not heard.
+      onStopped: () => { if (myRun !== run) return; finished(); emit({ ...IDLE_VOICE, notice }); },
     });
+    if (myRun === run) cancelDevice = typeof cancel === 'function' ? cancel : () => {};
   };
 
   /** The recording's parts, back to back on one player. */
@@ -174,10 +199,9 @@ export function createSummaryVoice(deps: SummaryVoiceDeps, onState: (s: SummaryV
   };
 
   const play = (id: string, req: PlayRequest, cb?: PlayCallbacks) => {
-    // One voice at a time across the app: silence every other controller, then our own run.
-    for (const other of Array.from(speaking)) if (other !== stop) other();
+    // Our own previous run first, then the focus: whatever else in the app is sounding stops.
     stop();
-    speaking.add(stop);
+    claimAudioFocus(holder);
     const myRun = run;
     emit({ id, phase: 'preparing', source: null, notice: null, part: 0, parts: 0 });
     deps.getAudio(req)
@@ -200,6 +224,8 @@ export function createSummaryVoice(deps: SummaryVoiceDeps, onState: (s: SummaryV
   };
   const resume = () => {
     if (state.phase !== 'paused') return;
+    // Resuming is playing again: take the focus back from whatever started meanwhile.
+    claimAudioFocus(holder);
     if (state.source === 'sarvam') { try { player?.play(); } catch { /* released */ } emit({ phase: 'playing' }); }
     else if (deps.deviceCanPause) { deps.deviceResume?.(); emit({ phase: 'playing' }); }
   };
@@ -239,25 +265,28 @@ async function fetchSummaryAudio(req: SummaryAudioRequest): Promise<string[]> {
 }
 
 const CHUNK_MAX = 3500;
-/** expo-speech, one utterance at a time; long scripts queued in sentence chunks (as useSpeech). */
-function deviceSpeak(text: string, cb: DeviceSpeechCallbacks) {
+/** expo-speech, one utterance at a time; long scripts queued in sentence chunks (as useSpeech).
+    Returns a cancel: once called, no callback of this reading fires and no next sentence starts,
+    whatever the engine reports for the utterance that was cut. */
+function deviceSpeak(text: string, cb: DeviceSpeechCallbacks): () => void {
   const nativeMax = typeof Speech.maxSpeechInputLength === 'number' && Speech.maxSpeechInputLength > 0 ? Speech.maxSpeechInputLength : CHUNK_MAX;
   const parts = splitForSpeech(text, Math.min(nativeMax, CHUNK_MAX));
-  if (!parts.length) { cb.onError('Nothing to read.'); return; }
-  let i = 0;
   let dead = false;
+  const cancel = () => { dead = true; };
+  if (!parts.length) { cb.onError('Nothing to read.'); return cancel; }
+  let i = 0;
   const next = () => {
     if (dead) return;
-    if (i >= parts.length) { cb.onDone(); return; }
+    if (i >= parts.length) { dead = true; cb.onDone(); return; }
     try {
       Speech.speak(parts[i++], {
         language: 'en-IN',
         rate: 1.0,
         onDone: next,
-        onStopped: () => { dead = true; },
-        onError: (e: any) => { dead = true; cb.onError(String(e?.message ?? e ?? 'The device could not speak.')); },
-        onPause: () => cb.onPause?.(),
-        onResume: () => cb.onResume?.(),
+        onStopped: () => { if (dead) return; dead = true; cb.onStopped?.(); },
+        onError: (e: any) => { if (dead) return; dead = true; cb.onError(String(e?.message ?? e ?? 'The device could not speak.')); },
+        onPause: () => { if (!dead) cb.onPause?.(); },
+        onResume: () => { if (!dead) cb.onResume?.(); },
       });
     } catch (e: any) {
       dead = true;
@@ -266,6 +295,7 @@ function deviceSpeak(text: string, cb: DeviceSpeechCallbacks) {
   };
   Speech.stop().catch(() => {});
   next();
+  return cancel;
 }
 
 const nativeDeps: SummaryVoiceDeps = {

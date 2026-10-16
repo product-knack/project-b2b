@@ -54,6 +54,7 @@ import { Page } from './common';
 import { SheetShell } from './reportDetail';
 import { supabase } from '../lib/supabase';
 import { invalidateDebounced } from '../lib/invalidateDebounced';
+import { claimAudioFocus, releaseAudioFocus, type AudioHolder } from '../lib/audioFocus';
 import { istTimeParts } from '../lib/trainerQueries';
 import { PanResponder } from 'react-native';
 import { backSwipeLock, backOverride } from '../gestureLock';
@@ -947,11 +948,14 @@ function VoiceBubble({ url, mine, pending, timeText, onLongPress, ticks }: { url
   const [loading, setLoading] = React.useState(false);
   const [posMs, setPosMs] = React.useState(0);
   const [durMs, setDurMs] = React.useState(0);
+  // One sound at a time (16 Oct 2026): another player starting pauses this bubble.
+  const holder = React.useRef<AudioHolder>({ silence: () => { try { playerRef.current?.pause(); } catch { /* released */ } } }).current;
 
   React.useEffect(() => () => {
+    releaseAudioFocus(holder);
     try { subRef.current?.remove?.(); } catch { /* already gone */ }
-    try { playerRef.current?.remove(); } catch { /* already released */ }
-  }, []);
+    try { playerRef.current?.pause(); playerRef.current?.remove(); } catch { /* already released */ }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // expo-audio status is in SECONDS; this UI works in milliseconds.
   const onStatus = (st: any) => {
@@ -963,6 +967,7 @@ function VoiceBubble({ url, mine, pending, timeText, onLongPress, ticks }: { url
     if (st.didJustFinish) {
       setPlaying(false);
       setPosMs(0);
+      releaseAudioFocus(holder);
       try { playerRef.current?.pause(); playerRef.current?.seekTo(0); } catch { /* released */ }
     }
   };
@@ -972,6 +977,7 @@ function VoiceBubble({ url, mine, pending, timeText, onLongPress, ticks }: { url
     try {
       if (!playerRef.current) {
         setLoading(true);
+        claimAudioFocus(holder);
         await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
         const p = createAudioPlayer({ uri: url });
         playerRef.current = p;
@@ -981,8 +987,8 @@ function VoiceBubble({ url, mine, pending, timeText, onLongPress, ticks }: { url
         return;
       }
       const p = playerRef.current;
-      if (p.playing) p.pause();
-      else p.play();
+      if (p.playing) { p.pause(); releaseAudioFocus(holder); }
+      else { claimAudioFocus(holder); p.play(); }
     } catch (e: any) {
       setLoading(false);
       Alert.alert('Playback failed', e?.message ?? 'Could not play this voice message.');

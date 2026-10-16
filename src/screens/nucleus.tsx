@@ -22,6 +22,7 @@ import { useStore } from '../store';
 import { useAuth } from '../auth';
 import { trackEvent } from '../lib/amplitude';
 import { getIsOnline } from '../lib/offline';
+import { claimAudioFocus, releaseAudioFocus, type AudioHolder } from '../lib/audioFocus';
 import { useNucleusPieces, useNucleusLocal, readPosition, type NucleusLocal } from '../lib/nucleusQueries';
 import {
   type NucleusPiece, type NucleusTopic, type NucleusPosition, type KindFilter, type BodyBlock,
@@ -424,6 +425,8 @@ function ListenBar({ piece, startAt, onPosition, onEnd }: { piece: NucleusPiece;
   const onEndRef = React.useRef(onEnd); onEndRef.current = onEnd;
 
   const store = () => { const p = playerRef.current; const t = p ? safeTime(p) : posRef.current; if (t > 0) onPosRef.current(t); };
+  // One sound at a time (16 Oct 2026): another player starting pauses the article audio.
+  const holder = React.useRef<AudioHolder>({ silence: () => { try { playerRef.current?.pause(); } catch { /* released */ } store(); } }).current;
   const ensure = async (): Promise<AudioPlayer> => {
     if (playerRef.current) return playerRef.current;
     if (!piece.audio_url) throw new Error('No audio on this piece.');
@@ -438,7 +441,7 @@ function ListenBar({ piece, startAt, onPosition, onEnd }: { piece: NucleusPiece;
       if (st.duration) setDur(st.duration);
       setPlaying(!!st.playing);
       if (st.error) { setErr(String(st.error)); setPlaying(false); }
-      if (st.didJustFinish) { setPlaying(false); setPos(0); onEndRef.current(); try { p.pause(); p.seekTo(0); } catch { /* released */ } }
+      if (st.didJustFinish) { setPlaying(false); setPos(0); releaseAudioFocus(holder); onEndRef.current(); try { p.pause(); p.seekTo(0); } catch { /* released */ } }
     });
     if (startAt > 0) { try { await p.seekTo(startAt); } catch { /* start from 0 */ } }
     return p;
@@ -447,12 +450,11 @@ function ListenBar({ piece, startAt, onPosition, onEnd }: { piece: NucleusPiece;
     if (!getIsOnline() && !playerRef.current) { setErr('Needs a connection.'); return; }
     try {
       setErr(null);
+      if (playerRef.current?.playing) { playerRef.current.pause(); store(); releaseAudioFocus(holder); return; }
+      claimAudioFocus(holder);
       const p = await ensure();
-      if (p.playing) { p.pause(); store(); }
-      else {
-        if (!playedRef.current) { playedRef.current = true; trackEvent('Nucleus Audio Played', { id: piece.id }); }
-        p.play();
-      }
+      if (!playedRef.current) { playedRef.current = true; trackEvent('Nucleus Audio Played', { id: piece.id }); }
+      p.play();
     } catch (e: any) { setLoading(false); setErr(e?.message ?? 'Could not play the audio.'); }
   };
   const cycleSpeed = () => {
@@ -480,6 +482,7 @@ function ListenBar({ piece, startAt, onPosition, onEnd }: { piece: NucleusPiece;
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   React.useEffect(() => () => {
     store();
+    releaseAudioFocus(holder);
     try { subRef.current?.remove(); } catch { /* gone */ }
     try { playerRef.current?.pause(); playerRef.current?.remove(); } catch { /* released */ }
     playerRef.current = null;
