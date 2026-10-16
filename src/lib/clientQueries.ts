@@ -1185,6 +1185,34 @@ export type DailyStatRow = { ymd: string; label: string; sleep: number | null; s
 const istYmdOfDate = (d: Date) =>
   new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
 
+/* WHOOP recovery (16 Oct 2026, doctor client page Progression tab, web WhoopRecoverySection parity):
+   daily_health_metrics rows with a recovery score, newest first, `limit` days (7 more on Load more).
+   Doctors and therapists read it through migration 20261016180000 (trainers and coaches already could). */
+export type WhoopRecoveryDay = { date: string; recovery: number | null; hrv: number | null; rhr: number | null; strain: number | null; sleep: number | null };
+export function useClientWhoopRecovery(clientId: string | null, limit = 7) {
+  return useQuery({
+    queryKey: ['client-whoop-recovery', clientId, limit],
+    enabled: !!clientId,
+    staleTime: 5 * 60_000,
+    placeholderData: (prev: WhoopRecoveryDay[] | undefined) => prev,
+    queryFn: async (): Promise<WhoopRecoveryDay[]> => {
+      const { data, error } = await withTimeout(
+        Promise.resolve(supabase.from('daily_health_metrics')
+          .select('metric_date, recovery_score, hrv_rmssd, resting_heart_rate, strain_score, sleep_score')
+          .eq('client_id', clientId as string)
+          .not('recovery_score', 'is', null)
+          .order('metric_date', { ascending: false })
+          .limit(limit)) as Promise<{ data: any; error: any }>,
+        NET_MS, 'WHOOP recovery');
+      if (error) throw new Error(error.message);
+      const num = (v: any) => (v == null || !Number.isFinite(Number(v)) ? null : Math.round(Number(v) * 10) / 10);
+      return ((data ?? []) as any[]).map((r) => ({
+        date: String(r.metric_date), recovery: num(r.recovery_score), hrv: num(r.hrv_rmssd), rhr: num(r.resting_heart_rate), strain: num(r.strain_score), sleep: num(r.sleep_score),
+      }));
+    },
+  });
+}
+
 export function useClientDailyStats(clientId: string | null) {
   return useQuery({
     queryKey: ['client-daily-stats', clientId],

@@ -37,6 +37,9 @@ import { PhysioSessionSheet } from './doctorSessions';
 import { SessionVoicePlaylistPlayer } from '../components/SessionVoice';
 import { parseVoiceNotes, hasPainNote } from '../lib/sessionVoiceTypes';
 import { ServicesButton } from '../components/servicesButton';
+// The trainer client page's Progression / Trends / Plan / Weekly Summary sections (16 Oct 2026). trainer.tsx
+// imports MedicalEntrySheet from this file too: the cycle is render-time only, never at module load.
+import { ClientProgressionSection, ClientRecoverySection, ClientTrendsSection, ClientPlansSection, AiWeeklyReportTab } from './trainer';
 
 /* ============ Doctor → Client Detail (web DoctorClientDetail.tsx port) ============
    Native tab set covers the doctor-specific surface: Sessions (protocols /
@@ -976,8 +979,13 @@ export function DoctorClientDetail() {
   const countsQ = useDoctorClientSessionCounts(clientId ? [clientId] : [], months, !!clientId);
   // The consultant's "View Reports" opens straight on the Medical tab (history +
   // lab reports); the hint is consumed on mount so a later open starts on Sessions.
-  type DetailTab = 'sessions' | 'medical' | 'reports' | 'notes';
-  const [tab, setTab] = React.useState<DetailTab>(() => (clientInitialTab === 'medical' || clientInitialTab === 'reports' || clientInitialTab === 'notes' ? clientInitialTab : 'sessions'));
+  // Progression, Plan and Weekly Summary (16 Oct 2026, owner): the trainer client page's tabs, shared
+  // components from trainer.tsx; Progression also carries WHOOP Recovery and the Trends week view.
+  type DetailTab = 'sessions' | 'progression' | 'plan' | 'weekly' | 'medical' | 'reports' | 'notes';
+  const [tab, setTab] = React.useState<DetailTab>(() => (
+    clientInitialTab === 'medical' || clientInitialTab === 'reports' || clientInitialTab === 'notes'
+    || clientInitialTab === 'progression' || clientInitialTab === 'plan' || clientInitialTab === 'weekly'
+      ? clientInitialTab : 'sessions'));
   React.useEffect(() => { if (clientInitialTab) setStore({ clientInitialTab: null }); }, []);
   React.useEffect(() => { trackClientTab('doctor-client-detail', tab, { id: clientId, name: selectedClientName }); }, [tab]);
   const [assignOpen, setAssignOpen] = React.useState(false);
@@ -1071,6 +1079,9 @@ export function DoctorClientDetail() {
 
   const TABS: { key: typeof tab; label: string; icon: any }[] = [
     { key: 'sessions', label: 'Sessions', icon: 'activity' },
+    { key: 'progression', label: 'Progression', icon: 'trend' },
+    { key: 'plan', label: 'Plan', icon: 'layers' },
+    { key: 'weekly', label: 'Weekly Summary', icon: 'calendar' },
     { key: 'medical', label: 'Medical', icon: 'heart' },
     { key: 'reports', label: 'Reports', icon: 'file' },
     { key: 'notes', label: 'Notes', icon: 'bubble' },
@@ -1158,23 +1169,38 @@ export function DoctorClientDetail() {
       {/* Listen before the session (9 Oct 2026): doctors and therapists may listen too */}
       <ClientHealthSummaryCard clientId={clientId} />
 
-      {/* tabs — segmented pill */}
-      <View style={{ flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: 999, padding: 3 }}>
+      {/* tabs — a scrolling pill row (7 tabs since 16 Oct 2026; the old 4-up segment no longer fits) */}
+      <HScroll gap={6}>
         {TABS.map((t) => {
           const active = tab === t.key;
           return active ? (
-            <LinearGradient key={t.key} colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 8, borderRadius: 999 }}>
+            <LinearGradient key={t.key} colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 9, paddingHorizontal: 14, borderRadius: 999 }}>
               <Icon name={t.icon} size={12} color="#fff" strokeWidth={2.2} />
-              <Text style={{ fontFamily: F.bodyBold, fontSize: 10.5, color: '#fff' }}>{t.label}</Text>
+              <Text style={{ fontFamily: F.bodyBold, fontSize: 11.5, color: '#fff' }}>{t.label}</Text>
             </LinearGradient>
           ) : (
-            <Pressable key={t.key} onPress={() => setTab(t.key)} style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 8, borderRadius: 999 }}>
+            <Pressable key={t.key} onPress={() => setTab(t.key)} hitSlop={6} accessibilityRole="tab" accessibilityState={{ selected: false }}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 9, paddingHorizontal: 14, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' }}>
               <Icon name={t.icon} size={12} color={C.muted3} strokeWidth={2} />
-              <Text style={{ fontFamily: F.bodySemi, fontSize: 10.5, color: C.muted }}>{t.label}</Text>
+              <Text style={{ fontFamily: F.bodySemi, fontSize: 11.5, color: C.muted }}>{t.label}</Text>
             </Pressable>
           );
         })}
-      </View>
+      </HScroll>
+
+      {/* ===== PROGRESSION / PLAN / WEEKLY SUMMARY (16 Oct 2026, the trainer client page's tabs) ===== */}
+      {tab === 'progression' && clientId ? (
+        <View style={{ gap: 16 }}>
+          <ClientProgressionSection clientId={clientId} />
+          <ClientRecoverySection clientId={clientId} />
+          <View style={{ gap: 10 }}>
+            <Mono style={{ fontSize: 10, letterSpacing: 1.4, color: C.mono2 }}>TRENDS</Mono>
+            <ClientTrendsSection clientId={clientId} canEdit={false} />
+          </View>
+        </View>
+      ) : null}
+      {tab === 'plan' && clientId ? <ClientPlansSection clientId={clientId} readOnly /> : null}
+      {tab === 'weekly' && clientId ? <AiWeeklyReportTab clientId={clientId} autoAck={false} /> : null}
 
       {/* ===== SESSIONS TAB ===== */}
       {tab === 'sessions' ? (

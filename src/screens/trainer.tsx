@@ -39,7 +39,7 @@ import { supabase, DEV_TRAINER_ID } from '../lib/supabase';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { QhpAssessmentForm, CoachPresenceModal, fetchHasPriorCompletedQHP } from './qhpAssessmentForm';
 import { useAddOwnSession, useTodayRoster, useTrainerStats, useTrainerProfile, useTrainerMonthSessions, useTrainerLeaderboard, useTrainerLeaderboardEssentials, useManagerLeaderboard, useManagerTeam, useManagerTeamLeaves, useManagerTeamIncidents, useManagerTeamRetention, useManagerTeamLateLogs, useManagerTeamRoster, useManagerTeamPlanOverview, useManagerTeamAcks, useManagerTeamAppAdoption, useTrainerSessionBreakdown, useTrainerReferralBreakdown, useFirstSessionAlert, istTimeParts, istDayLabel, istDate, useCancelScheduledSession, useRequestReschedule, useAddMissedRemark, lbMonthBounds, lbMonthLabel, LbBounds, RosterRow, ManagerTeamMember, MgrMonthFilter, usePlanExpiryMap, PlanExpiry, useTrainerAckSummary, useRequestRoster, useRosterDistance, SESSION_MODALITIES, useMyMonthSessionBreakdown, usePilatesRunRate } from '../lib/trainerQueries';
-import { PrevSet, useMyClients, useClientDetail, useClientSessions, useClientPlans, useClientGoals, useSaveWeeklyGoals, useDeleteWeeklyGoal, useZone2Week, useLogZone2Session, useWeeklyHealthSummary, PLAN_VALID_DAYS, useClientReports, useClientConsultAi, ClientConsultAi, useClientBioAge, useClientProgression, useCreateWorkoutSession, useModalityGate, useWorkoutTemplates, useSaveWorkoutTemplate, useDeleteWorkoutTemplate, useClientHealthCheck, useSaveHealthData, useExerciseDb, useSessionExercises, uuidv4, HealthDataInput, useWeeklyProgressionAll, ackWeeklyReport, WeeklyProgressionRow, useApprovedPlansForLogging, usePartnerInfo, usePreviousExerciseData, checkDuplicateWorkoutToday, PlanExerciseRow, useClientDailyStats, useSaveClientHomeLocation, PILATES_REFORMER_EXERCISES, usePlanEditValidation, normalizePlanModality, PLAN_EDIT_MAX_WORKOUTS } from '../lib/clientQueries';
+import { PrevSet, useMyClients, useClientDetail, useClientSessions, useClientPlans, useClientGoals, useSaveWeeklyGoals, useDeleteWeeklyGoal, useZone2Week, useLogZone2Session, useWeeklyHealthSummary, PLAN_VALID_DAYS, useClientReports, useClientConsultAi, ClientConsultAi, useClientBioAge, useClientProgression, useCreateWorkoutSession, useModalityGate, useWorkoutTemplates, useSaveWorkoutTemplate, useDeleteWorkoutTemplate, useClientHealthCheck, useSaveHealthData, useExerciseDb, useSessionExercises, uuidv4, HealthDataInput, useWeeklyProgressionAll, ackWeeklyReport, WeeklyProgressionRow, useApprovedPlansForLogging, usePartnerInfo, usePreviousExerciseData, checkDuplicateWorkoutToday, PlanExerciseRow, useClientDailyStats, useClientWhoopRecovery, useSaveClientHomeLocation, PILATES_REFORMER_EXERCISES, usePlanEditValidation, normalizePlanModality, PLAN_EDIT_MAX_WORKOUTS } from '../lib/clientQueries';
 import * as Location from 'expo-location';
 import KvStorage from 'expo-sqlite/kv-store';
 import { enqueueOutbox, getIsOnline, useIsOnline, useOutbox, retryOutboxItem, removeOutboxItem, drainOutbox, submitItem, updateOutboxItem, getOutboxItem, WorkoutLogOutboxPayload, OutboxItem, useSyncedNotices, dismissSyncedNotice, workoutQueueBySlot, queuedLine, pendingWorkoutForSlot, type QueuedWorkout } from '../lib/offline';
@@ -3649,9 +3649,11 @@ function WkDetailBlock({ label, body }: { label: string; body: string }) {
     </View>
   );
 }
-function AiWeeklyReportTab({ clientId }: { clientId: string | null }) {
+/** autoAck: the trainer's first view marks the weekly report acknowledged (web parity); the doctor
+    client page passes false so a doctor reading it never counts as the trainer (16 Oct 2026). */
+export function AiWeeklyReportTab({ clientId, autoAck = true }: { clientId: string | null; autoAck?: boolean }) {
   const { session } = useAuth();
-  const trainerUid = session?.user?.id ?? null;
+  const trainerUid = autoAck ? (session?.user?.id ?? null) : null;
   const qc = useQueryClient();
   const q = useWeeklyProgressionAll(clientId);
   const [cmpTab, setCmpTab] = React.useState<'1W' | '4W' | '12W'>('1W');
@@ -4096,73 +4098,19 @@ function PlanEditAction({ plan, clientId, isMostRecent, onEdit }: { plan: any; c
   );
 }
 
-export function ClientDetail() {
-  const { go, set, selectedClientId, selectedClientName, clientInitialTab } = useStore();
-  const { session } = useAuth();
-  const myTrainerId = session?.user?.id ?? null;
-  const clientId = selectedClientId;
+
+/* ============ Shared client tab sections (16 Oct 2026) ============
+   Progression, Trends and Plan, lifted out of ClientDetail unchanged so the doctor client page
+   (doctorClientDetail.tsx) shows the same tabs (owner: "the progression tab of the trainer client
+   page is missing on the doctor dashboard; add it the same, plan and weekly summary too, and in
+   progression also show recovery and trend"). The trainer page renders them exactly as before;
+   the doctor page passes canEdit = false / readOnly = true (no health-data edit, no Create Plan,
+   no plan edit). */
+export function ClientProgressionSection({ clientId }: { clientId: string | null }) {
   const detailQ = useClientDetail(clientId);
-  const sessionsQ = useClientSessions(clientId);
-  const plansQ = useClientPlans(clientId);
-  const goalsQ = useClientGoals(clientId);
-  const reportsQ = useClientReports(clientId);
-  const consultQ = useClientConsultAi(clientId);
-  // Cycle phase (25 Sep 2026): eligible women under 50 with a period log only.
-  const cycleQ = useClientCycleStatus(clientId ? [clientId] : []);
-  const cycle = clientId ? cycleQ.data?.[clientId] ?? null : null;
-  const [cycleOpen, setCycleOpen] = React.useState(false);
   const bioQ = useClientBioAge(clientId);
   const progQ = useClientProgression(clientId);
   const dailyQ = useClientDailyStats(clientId);
-
-  // Capture client's home location (only offered while clients.brb_location is null)
-  const saveLocM = useSaveClientHomeLocation();
-  const [capturingLoc, setCapturingLoc] = React.useState(false);
-  const captureHomeLocation = async () => {
-    if (!clientId) return;
-    setCapturingLoc(true);
-    try {
-      const perm = await Location.requestForegroundPermissionsAsync();
-      if (!perm.granted) {
-        Alert.alert('Permission needed', "Allow location access to capture the client's home location.");
-        return;
-      }
-      const pos = await withTimeout(Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }), GPS_MS, 'GPS fix');
-      await saveLocM.mutateAsync({ clientId, lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy ?? null });
-      Alert.alert('Location saved', `${clientName}'s home location has been captured.`);
-    } catch (e: any) {
-      Alert.alert('Could not capture', e?.message ?? 'Turn on GPS and try again.');
-    } finally {
-      setCapturingLoc(false);
-    }
-  };
-  const confirmCaptureLocation = () =>
-    Alert.alert(
-      "Capture client's home location?",
-      `Do you want to capture the location of ${clientName}'s home? Your current position will be saved — make sure you are at the client's home right now.`,
-      [{ text: 'Cancel', style: 'cancel' }, { text: 'OK, Capture', onPress: captureHomeLocation }]
-    );
-  const client = detailQ.data?.client;
-  const clientName = client ? `${client.first_name ?? ''} ${client.last_name ?? ''}`.replace(/\s+/g, ' ').trim() : (selectedClientName ?? 'Client');
-  const clientAge = React.useMemo(() => {
-    if (!client?.date_of_birth) return null;
-    const dob = new Date(client.date_of_birth);
-    const now = new Date();
-    let a = now.getFullYear() - dob.getFullYear();
-    if (now.getMonth() < dob.getMonth() || (now.getMonth() === dob.getMonth() && now.getDate() < dob.getDate())) a--;
-    return a;
-  }, [client?.date_of_birth]);
-  const bi = detailQ.data?.basicInfo ?? null;
-  const infoFields: { label: string; value: string; icon: any; tone?: string }[] = [
-    { label: 'AGE', value: clientAge != null ? `${clientAge} yrs` : (bi?.clientAge ? `${bi.clientAge}` : 'N/A'), icon: 'user', tone: clientAge == null && !bi?.clientAge ? 'na' : undefined },
-    { label: 'GENDER', value: bi?.clientGender ?? (client?.client_type ?? 'N/A'), icon: 'user', tone: bi?.clientGender ? undefined : 'na' },
-    { label: 'HEIGHT', value: bi?.clientHeight ? `${bi.clientHeight} cm` : 'N/A', icon: 'activity', tone: bi?.clientHeight ? undefined : 'na' },
-    { label: 'WEIGHT', value: bi?.clientWeight ? `${bi.clientWeight} kg` : 'N/A', icon: 'activity', tone: bi?.clientWeight ? undefined : 'na' },
-    { label: 'WAIST', value: bi?.clientWaist ? `${bi.clientWaist} cm` : 'N/A', icon: 'activity', tone: bi?.clientWaist ? undefined : 'na' },
-    { label: 'VO2 MAX', value: detailQ.data?.vo2max != null ? (typeof detailQ.data.vo2max === 'number' ? `${detailQ.data.vo2max} ml/kg/min` : `${detailQ.data.vo2max}`) : 'N/A', icon: 'heart', tone: detailQ.data?.vo2max != null ? undefined : 'na' },
-    { label: 'CRM', value: detailQ.data?.crm?.name ?? 'N/A', icon: 'userCircle', tone: detailQ.data?.crm ? undefined : 'na' },
-    { label: 'CRM PHONE', value: detailQ.data?.crm?.phone ?? 'N/A', icon: 'phone', tone: detailQ.data?.crm?.phone ? undefined : 'na' },
-  ];
   // Progression — biological age
   const bioRows: any[] = bioQ.data ?? [];
   const latestBio = bioRows[0];
@@ -4175,91 +4123,6 @@ export function ClientDetail() {
     return `${d >= 0 ? '+' : '−'}${Math.abs(d)} vs chrono`;
   };
   const bioUpdated = latestBio?.calculation_date ? istDayLabel(latestBio.calculation_date) : '—';
-
-  // Weekly goals from DB
-  const dbGoals = (goalsQ.data ?? []).map((g: any) => ({
-    id: g.id,
-    range: `${g.week_start_date ? istDayLabel(g.week_start_date) : ''}${g.week_end_date ? ' – ' + istDayLabel(g.week_end_date) : ''}`.trim() || 'Week',
-    recommendation: g.recommendation ?? null,
-    steps: g.steps_target != null ? `${g.steps_target}` : '—',
-    sleep: g.sleep_target_hours != null ? `${g.sleep_target_hours}` : '—',
-    nutrition: g.nutrition_target != null ? `${g.nutrition_target}` : '—',
-    cardio: g.z2c_target != null ? `${g.z2c_target}` : '—',
-    recovery: !!g.recommendation,
-  }));
-
-  // Plan-tab summary line (counts by status).
-  const planList: any[] = plansQ.data ?? [];
-  const planActive = planList.filter((p) => (p.status ?? 'approved') === 'approved' && !p.expired).length;
-  const planPending = planList.filter((p) => p.status === 'pending_review').length;
-  const planAttention = planList.filter((p) => p.status === 'rejected' || p.status === 'needs_revision').length;
-  const planSummary = plansQ.isLoading
-    ? 'Loading…'
-    : planList.length === 0
-    ? 'No plans yet'
-    : [
-        `${planList.length} plan${planList.length === 1 ? '' : 's'}`,
-        planActive ? `${planActive} active` : null,
-        planPending ? `${planPending} in review` : null,
-        planAttention ? `${planAttention} need attention` : null,
-      ].filter(Boolean).join(' · ');
-
-  const [showInfo, setShowInfo] = React.useState(false);
-  const [clientTab, setClientTab] = React.useState<'sessions' | 'plan' | 'goals' | 'reports' | 'progression' | 'trends' | 'weekly'>((clientInitialTab as any) || 'progression');
-  // Analytics: which tab of which client is being viewed (fires on open + every switch).
-  React.useEffect(() => { trackClientTab('client', clientTab, { id: selectedClientId, name: selectedClientName }); }, [clientTab]);
-  const [cmpRange, setCmpRange] = React.useState('1W');
-  const [reportsTab, setReportsTab] = React.useState<'qhp' | 'blood' | 'medical' | 'consult'>('qhp');
-  const [consultDetail, setConsultDetail] = React.useState<ClientConsultAi | null>(null);
-  const [bloodDetail, setBloodDetail] = React.useState<any | null>(null);
-  const [qhpDetail, setQhpDetail] = React.useState<{ row: any; label: string } | null>(null);
-  // Classify reports into the three buckets once, so sub-tabs can show counts
-  // and we can auto-open the first tab that actually has reports. `raw` carries
-  // the full row so tapping opens the right in-app detail sheet.
-  type RItem = { key: string; name: string; date: string; type: string | null; metabolic: number | null; longevity: number | null; status?: string; kind: 'qhp' | 'health'; raw: any };
-  const reportBuckets = React.useMemo(() => {
-    const health = reportsQ.data?.health ?? [];
-    const qhpReports = reportsQ.data?.qhp ?? []; // qhp_details rows (ascending → chrono index)
-    const classify = (type: string): 'blood' | 'medical' => {
-      const t = (type || '').toLowerCase();
-      if (/mri|cect|dexa|ultrasound|imaging|x-?ray|\bct\b|ct |scan|angiograph|coronary|spine|neck|echo|medical/.test(t)) return 'medical';
-      return 'blood';
-    };
-    const b: Record<'qhp' | 'blood' | 'medical', RItem[]> = { qhp: [], blood: [], medical: [] };
-    (health as any[]).forEach((h) => {
-      b[classify(h.report_type)].push({
-        key: h.id, name: h.report_name || h.report_type || 'Health Report',
-        date: h.test_date ? istDayLabel(h.test_date) : (h.upload_date ? istDayLabel(h.upload_date) : '—'),
-        type: h.report_type ?? null, metabolic: h.metabolic_score ?? null, longevity: h.longevity_score ?? null,
-        kind: 'health', raw: h,
-      });
-    });
-    // Structured QHP reports — chrono label: index 0 = Baseline, else Refresh N. Newest first in the list.
-    (qhpReports as any[]).forEach((a, i) => {
-      b.qhp.push({
-        key: `qhp-${a.id}`,
-        name: i === 0 ? 'QHP Baseline' : `QHP Refresh ${i}`,
-        date: a.created_at ? istDayLabel(a.created_at) : '—',
-        type: 'QHP Assessment', metabolic: null, longevity: null,
-        status: a.approved ? 'Approved' : 'Draft',
-        kind: 'qhp', raw: a,
-      });
-    });
-    b.qhp.reverse(); // newest QHP report on top
-    return b;
-  }, [reportsQ.data]);
-  // On first load / new client, jump to the first sub-tab that has reports.
-  const reportsAutoPicked = React.useRef(false);
-  React.useEffect(() => { reportsAutoPicked.current = false; }, [clientId]);
-  React.useEffect(() => {
-    if (!reportsQ.data || reportsAutoPicked.current) return;
-    reportsAutoPicked.current = true;
-    if (reportsTab !== 'consult' && reportBuckets[reportsTab].length === 0) {
-      const first = (['blood', 'medical', 'qhp'] as const).find((k) => reportBuckets[k].length > 0);
-      if (first) setReportsTab(first);
-    }
-  }, [reportsQ.data, reportBuckets]);
-  const consultRows = consultQ.data ?? [];
   const [bioRange, setBioRange] = React.useState('3M');
   const [ageSeries, setAgeSeries] = React.useState<'axion' | 'maq'>('axion');
   const [loadRange, setLoadRange] = React.useState('M');
@@ -4286,9 +4149,243 @@ export function ClientDetail() {
   const loadSeries = React.useMemo(() => buildProgSeries(progRows, loadRange, 'session_load', 'avg'), [progRows, loadRange]);
   const rmSeries = React.useMemo(() => buildProgSeries(progRows, rmRange, 'max_1rm', 'max'), [progRows, rmRange]);
   const rangeLabel = (r: string) => (r === 'W' ? 'Last 7 days' : r === 'M' ? 'Last 30 days' : 'Last 6 months');
+  return (
+        <>
+          {/* Age Scores — twin gauges + toggleable trend */}
+          <Card colors={['rgba(64,38,22,0.5)', 'rgba(18,14,14,0.55)']} border="rgba(255,150,90,0.14)" style={{ padding: 18, gap: 16 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <Icon name="activity" size={20} color={C.orange} strokeWidth={1.9} />
+              <Serif style={{ flex: 1, fontSize: 19 }}>Age Scores</Serif>
+              <Mono style={{ fontSize: 10, color: C.muted3 }}>Updated {bioUpdated}</Mono>
+            </View>
+
+            {bioRows.length === 0 ? (
+              <Body style={{ color: C.muted2, textAlign: 'center', paddingVertical: 16 }}>No biological age data yet.</Body>
+            ) : (
+            <View style={{ flexDirection: 'row', gap: 12 }}>
+              <AgeGauge
+                value={latestBio?.metabolic_age != null ? `${latestBio.metabolic_age}` : '—'}
+                label="Axion · Metabolic"
+                delta={fmtDelta(latestBio?.metabolic_age, latestBio?.chronological_age)}
+                deltaColor={(latestBio?.metabolic_age ?? 0) > (latestBio?.chronological_age ?? 0) ? C.gold : C.green}
+                color={C.blue}
+              />
+              <View style={{ width: 1, backgroundColor: 'rgba(255,255,255,0.06)' }} />
+              <AgeGauge
+                value={latestBio?.mechanical_age != null ? `${latestBio.mechanical_age}` : '—'}
+                label="MAQ · Mechanical"
+                delta={fmtDelta(latestBio?.mechanical_age, latestBio?.chronological_age)}
+                deltaColor={(latestBio?.mechanical_age ?? 0) > (latestBio?.chronological_age ?? 0) ? C.gold : C.green}
+                color={C.red}
+              />
+            </View>
+            )}
+
+            {/* series toggle + range */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <View style={{ flex: 1, flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: 999, padding: 3 }}>
+                {([['axion', 'Axion', C.blue], ['maq', 'MAQ', C.red]] as const).map(([id, label, col]) => {
+                  const active = ageSeries === id;
+                  return (
+                    <Pressable key={id} onPress={() => setAgeSeries(id)} style={{ flex: 1, alignItems: 'center', paddingVertical: 7, borderRadius: 999, backgroundColor: active ? hexA(col, 0.18) : 'transparent', borderWidth: 1, borderColor: active ? hexA(col, 0.45) : 'transparent' }}>
+                      <Text style={{ fontFamily: active ? F.bodyBold : F.bodySemi, fontSize: 12, color: active ? col : C.muted }}>{label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <RangeChips options={['3M', 'All']} value={bioRange} onChange={setBioRange} accent={ageSeries === 'axion' ? C.blue : C.red} />
+            </View>
+
+            {ageSeries === 'axion' ? (
+              axionPtsF.length >= 2 ? <AreaLine id="axion" points={axionPtsF} color={C.blue} labels={axionLbls} /> : <Body style={{ color: C.muted3, textAlign: 'center', paddingVertical: 10 }}>{bioRange === '3M' && axionPts.length >= 2 ? 'No entries in the last 3 months.' : 'Not enough data for a trend.'}</Body>
+            ) : (
+              maqPtsF.length >= 2 ? <AreaLine id="maq" points={maqPtsF} color={C.red} labels={maqLbls} /> : <Body style={{ color: C.muted3, textAlign: 'center', paddingVertical: 10 }}>{bioRange === '3M' && maqPts.length >= 2 ? 'No entries in the last 3 months.' : 'Not enough data for a trend.'}</Body>
+            )}
+          </Card>
+
+          {/* Daily habits — sleep / steps / nutrition (last 5 days) + latest VO₂ max */}
+          <Card colors={['rgba(46,28,18,0.4)', 'rgba(18,14,14,0.5)']} border="rgba(255,150,90,0.09)" style={{ padding: 16, gap: 12 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <View style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: hexA(C.purple, 0.13), borderWidth: 1, borderColor: hexA(C.purple, 0.28), alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name="clock" size={17} color={C.purple} strokeWidth={1.9} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Serif style={{ fontSize: 18 }}>Daily Habits</Serif>
+                <Body style={{ fontSize: 11, color: C.muted3 }}>Sleep · Steps · Nutrition — last 5 days</Body>
+              </View>
+              {detailQ.data?.vo2max != null ? (
+                <View style={{ alignItems: 'flex-end' }}>
+                  <Text style={{ fontFamily: F.bodyBold, fontSize: 17, color: C.red }}>
+                    {typeof detailQ.data.vo2max === 'number' ? detailQ.data.vo2max : String(detailQ.data.vo2max).replace(/\s*ml\/kg\/min\s*/i, '')}
+                  </Text>
+                  <Mono style={{ fontSize: 7.5, letterSpacing: 0.6, color: C.muted3 }}>VO₂ MAX</Mono>
+                </View>
+              ) : null}
+            </View>
+            {dailyQ.isLoading ? (
+              <View style={{ alignItems: 'center', paddingVertical: 16 }}><ActivityIndicator color={C.purple} /></View>
+            ) : (
+              <View style={{ borderRadius: 13, borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)', overflow: 'hidden' }}>
+                <View style={{ flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.04)', paddingVertical: 8, paddingHorizontal: 12 }}>
+                  <Mono style={{ flex: 1.3, fontSize: 8.5, letterSpacing: 0.6, color: C.muted3 }}>DAY</Mono>
+                  <Mono style={{ flex: 1, fontSize: 8.5, letterSpacing: 0.6, color: C.muted3, textAlign: 'center' }}>SLEEP</Mono>
+                  <Mono style={{ flex: 1, fontSize: 8.5, letterSpacing: 0.6, color: C.muted3, textAlign: 'center' }}>STEPS</Mono>
+                  <Mono style={{ flex: 1, fontSize: 8.5, letterSpacing: 0.6, color: C.muted3, textAlign: 'right' }}>NUTRITION</Mono>
+                </View>
+                {(dailyQ.data ?? []).map((r, i) => (
+                  <View key={r.ymd} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 12, borderTopWidth: i === 0 ? 0 : 1, borderTopColor: 'rgba(255,255,255,0.05)', backgroundColor: i === 0 ? hexA(C.purple, 0.05) : 'transparent' }}>
+                    <Body style={{ flex: 1.3, fontSize: 12.5, color: i === 0 ? '#fff' : C.ink3, fontFamily: i === 0 ? F.bodySemi : undefined }}>{r.label}</Body>
+                    <Text style={{ flex: 1, textAlign: 'center', fontFamily: F.bodySemi, fontSize: 12.5, color: r.sleep != null ? C.blue : C.muted3 }}>{r.sleep != null ? `${r.sleep}h` : '—'}</Text>
+                    <Text style={{ flex: 1, textAlign: 'center', fontFamily: F.bodySemi, fontSize: 12.5, color: r.steps != null ? C.green : C.muted3 }}>{r.steps != null ? r.steps.toLocaleString('en-IN') : '—'}</Text>
+                    <Text style={{ flex: 1, textAlign: 'right', fontFamily: F.bodySemi, fontSize: 12.5, color: r.nutrition != null ? C.orange : C.muted3 }}>{r.nutrition != null ? `${r.nutrition}/10` : '—'}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+          </Card>
+
+          {/* Session Load */}
+          <Card colors={['rgba(46,28,18,0.4)', 'rgba(18,14,14,0.5)']} border="rgba(255,150,90,0.09)" style={{ padding: 16, gap: 13 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <View style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: hexA(C.orange, 0.13), borderWidth: 1, borderColor: hexA(C.orange, 0.28), alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name="bars" size={17} color={C.orange} strokeWidth={1.9} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Serif style={{ fontSize: 18 }}>Session Load</Serif>
+                <Mono style={{ fontSize: 9.5, color: C.muted3 }}>{rangeLabel(loadRange)} · {loadSeries.count} session{loadSeries.count === 1 ? '' : 's'}</Mono>
+              </View>
+              <View style={{ alignItems: 'flex-end' }}>
+                <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 4 }}>
+                  <Serif style={{ fontSize: 26, color: C.orange }}>{loadSeries.headline.toLocaleString()}</Serif>
+                  <Body style={{ fontSize: 11.5, color: C.muted2, marginBottom: 4 }}>kg avg</Body>
+                </View>
+              </View>
+            </View>
+            <RangeChips options={['W', 'M', '6M']} value={loadRange} onChange={setLoadRange} />
+            {progQ.isLoading ? (
+              <Body style={{ color: C.muted3, textAlign: 'center', paddingVertical: 18, fontSize: 12.5 }}>Loading…</Body>
+            ) : (
+              <ProgChart range={loadRange} id="load" data={loadSeries.data} labels={loadSeries.labels} color={C.orange} avg={loadSeries.headline || undefined} />
+            )}
+          </Card>
+
+          {/* Max 1RM Progress */}
+          <Card colors={['rgba(46,28,18,0.4)', 'rgba(18,14,14,0.5)']} border="rgba(255,150,90,0.09)" style={{ padding: 16, gap: 13 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <View style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: hexA(C.green, 0.13), borderWidth: 1, borderColor: hexA(C.green, 0.28), alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name="trend" size={17} color={C.green} strokeWidth={1.9} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Serif style={{ fontSize: 18 }}>Max 1RM Progress</Serif>
+                <Mono style={{ fontSize: 9.5, color: C.muted3 }}>{rangeLabel(rmRange)} · {rmSeries.count} session{rmSeries.count === 1 ? '' : 's'}</Mono>
+              </View>
+              <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 4 }}>
+                  <Serif style={{ fontSize: 26, color: C.green }}>{rmSeries.headline}</Serif>
+                  <Body style={{ fontSize: 11.5, color: C.muted2, marginBottom: 4 }}>kg max</Body>
+                </View>
+              </View>
+            </View>
+            <RangeChips options={['W', 'M', '6M']} value={rmRange} onChange={setRmRange} accent={C.green} />
+            {progQ.isLoading ? (
+              <Body style={{ color: C.muted3, textAlign: 'center', paddingVertical: 18, fontSize: 12.5 }}>Loading…</Body>
+            ) : (
+              <ProgChart range={rmRange} id="rm" data={rmSeries.data} labels={rmSeries.labels} color={C.green} />
+            )}
+          </Card>
+        </>
+  );
+}
+
+/* WHOOP recovery (16 Oct 2026, owner: "in progression also show recovery"): web WhoopRecoverySection
+   parity on the doctor client page. One row per day with a recovery score, newest first; recovery %
+   green from 67, amber from 34, red below (WHOOP bands); HRV, resting HR, strain, sleep score. */
+const recoveryColor = (v: number | null) => (v == null ? C.muted2 : v >= 67 ? C.green : v >= 34 ? C.gold : C.red);
+export function ClientRecoverySection({ clientId }: { clientId: string | null }) {
+  const [limit, setLimit] = React.useState(7);
+  React.useEffect(() => { setLimit(7); }, [clientId]);
+  const q = useClientWhoopRecovery(clientId, limit);
+  const rows = q.data ?? [];
+  const latest = rows[0];
+  const dayLabel = (ymd: string) => {
+    const d = new Date(`${ymd}T00:00:00Z`);
+    return `${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getUTCDay()]} ${d.getUTCDate()} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()]}`;
+  };
+  const stat = (label: string, value: string) => (
+    <View key={label} style={{ flex: 1, minWidth: '22%' }}>
+      <Mono style={{ fontSize: 8, letterSpacing: 0.6, color: C.muted3 }}>{label}</Mono>
+      <Text style={{ fontFamily: F.bodySemi, fontSize: 12.5, color: C.ink, marginTop: 2 }}>{value}</Text>
+    </View>
+  );
+  return (
+    <Card colors={['rgba(46,28,18,0.4)', 'rgba(18,14,14,0.5)']} border="rgba(255,150,90,0.09)" style={{ padding: 16, gap: 12 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+        <View style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: hexA(C.green, 0.13), borderWidth: 1, borderColor: hexA(C.green, 0.28), alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name="heart" size={17} color={C.green} strokeWidth={1.9} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Serif style={{ fontSize: 18 }}>Recovery</Serif>
+          <Body style={{ fontSize: 11, color: C.muted3 }}>WHOOP · recovery, HRV, resting HR, strain, sleep</Body>
+        </View>
+        {latest?.recovery != null ? (
+          <View style={{ alignItems: 'flex-end' }}>
+            <Serif style={{ fontSize: 26, color: recoveryColor(latest.recovery) }}>{latest.recovery}%</Serif>
+            <Mono style={{ fontSize: 7.5, letterSpacing: 0.6, color: C.muted3 }}>LATEST</Mono>
+          </View>
+        ) : null}
+      </View>
+      {q.isLoading ? (
+        <View style={{ alignItems: 'center', paddingVertical: 16 }}><ActivityIndicator color={C.green} /></View>
+      ) : q.isError ? (
+        <Body style={{ fontSize: 12, color: C.muted2, textAlign: 'center', paddingVertical: 10 }}>Could not load WHOOP recovery: {(q.error as Error)?.message}</Body>
+      ) : rows.length === 0 ? (
+        <Body style={{ fontSize: 12, color: C.muted2, textAlign: 'center', paddingVertical: 10 }}>No WHOOP recovery data for this client.</Body>
+      ) : (
+        <View style={{ gap: 8 }}>
+          {rows.map((r) => (
+            <View key={r.date} style={{ padding: 11, borderRadius: 12, backgroundColor: 'rgba(0,0,0,0.22)', borderWidth: 1, borderColor: hexA(recoveryColor(r.recovery), 0.22), gap: 8 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Body style={{ flex: 1, fontSize: 12.5, fontFamily: F.bodySemi, color: '#fff' }}>{dayLabel(r.date)}</Body>
+                <Text style={{ fontFamily: F.bodyBold, fontSize: 14, color: recoveryColor(r.recovery) }}>{r.recovery != null ? `${r.recovery}% recovery` : '-'}</Text>
+              </View>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                {stat('HRV', r.hrv != null ? `${r.hrv} ms` : '-')}
+                {stat('RESTING HR', r.rhr != null ? `${r.rhr} bpm` : '-')}
+                {stat('STRAIN', r.strain != null ? `${r.strain}` : '-')}
+                {stat('SLEEP', r.sleep != null ? `${r.sleep}%` : '-')}
+              </View>
+            </View>
+          ))}
+          {rows.length >= limit ? (
+            <Pressable onPress={() => setLimit((n) => n + 7)} disabled={q.isFetching} hitSlop={10} accessibilityRole="button"
+              style={{ alignSelf: 'center', paddingVertical: 8, paddingHorizontal: 16, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }}>
+              <Text style={{ fontFamily: F.bodySemi, fontSize: 12, color: C.muted }}>{q.isFetching ? 'Loading…' : 'Load 7 more days'}</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      )}
+    </Card>
+  );
+}
+
+export function ClientTrendsSection({ clientId, scrollRef, scrollOffsetRef, canEdit = true }: {
+  clientId: string | null;
+  /** The page's ScrollView and offset (Page ref / scrollOffsetRef), for scroll-to-day; optional. */
+  scrollRef?: React.RefObject<ScrollView | null>;
+  scrollOffsetRef?: React.MutableRefObject<number>;
+  /** Add / edit health data on the last 7 days (trainers); false on the doctor page. */
+  canEdit?: boolean;
+}) {
+  const { session } = useAuth();
+  const myTrainerId = session?.user?.id ?? null;
+  const ownScrollRef = React.useRef<ScrollView>(null);
+  const ownOffsetRef = React.useRef(0);
+  const trendScrollRef = scrollRef ?? ownScrollRef;
+  const trendOffsetRef = scrollOffsetRef ?? ownOffsetRef;
   const [selWeek, setSelWeek] = React.useState(0);
   const [selDay, setSelDay] = React.useState(0);
-
+  // Trends opens on this week for every client; the day is seeded to its latest day.
+  React.useEffect(() => { setSelWeek(0); }, [clientId]);
   /* Trends: add / edit a client's sleep, nutrition and steps (24 Sep 2026, iOS parity).
      - The selected day defaults to the latest non-future day of the selected week (today
        for this week, Sunday for a past week), seeded once per (client, week) so a
@@ -4296,8 +4393,6 @@ export function ClientDetail() {
      - Tapping a day square scrolls the page to the day summary (90 px headroom).
      - Days within the last 7 (today and the 6 before, local) get an Add / Edit health data
        button; the sheet writes through submitHealthData with logDate = that day. */
-  const trendScrollRef = React.useRef<ScrollView>(null);
-  const trendOffsetRef = React.useRef(0);
   const daySummaryRef = React.useRef<View>(null);
   const seededTrendWeekRef = React.useRef<string | null>(null);
   // The weekly summary query is declared further down; its latest data is mirrored here.
@@ -4365,7 +4460,6 @@ export function ClientDetail() {
       Alert.alert("Couldn't save health data", e?.message ?? 'Try again.');
     } finally { hdBusyRef.current = false; setHdSaving(false); }
   };
-
   // 7-slot arrays (Mon..Sun), built LIVE from useWeeklyHealthSummary (web
   // WeeklyHealthSummary parity: workout_analysis counts, nutrition_tracker,
   // daily_health_metrics sleep with daily_sleep_logs fallback, daily_goals
@@ -4401,22 +4495,670 @@ export function ClientDetail() {
     z2cTarget: w.goal.z2cTarget,
     z2cDone: w.goal.z2cDone,
   })), [weeklyQ.data]);
+  return (
+    <>
+        weeklyQ.isLoading ? (
+          <Card colors={['rgba(46,28,18,0.4)', 'rgba(18,14,14,0.5)']} border="rgba(255,150,90,0.09)" style={{ padding: 20 }}>
+            <Body style={{ color: C.muted2, textAlign: 'center', paddingVertical: 14 }}>Loading trends…</Body>
+          </Card>
+        ) : weeklyQ.isError || trendWeeks.length === 0 ? (
+          <Card colors={['rgba(46,28,18,0.4)', 'rgba(18,14,14,0.5)']} border="rgba(255,150,90,0.09)" style={{ padding: 20 }}>
+            <Body style={{ color: weeklyQ.isError ? C.red : C.muted2, textAlign: 'center', paddingVertical: 14 }}>
+              {weeklyQ.isError ? "Couldn't load trends." : 'No trend data yet.'}
+            </Body>
+          </Card>
+        ) : (
+        <>
+          {/* Week selector */}
+          <HScroll>
+            {trendWeeks.map((w, wi) => {
+              const active = selWeek === wi;
+              return active ? (
+                <LinearGradient key={w.range} colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ paddingVertical: 9, paddingHorizontal: 16, borderRadius: 12, alignItems: 'center' }}>
+                  <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: '#fff' }}>{w.range}</Text>
+                  <Text style={{ fontFamily: F.body, fontSize: 9.5, color: 'rgba(255,255,255,0.8)', marginTop: 1 }}>{w.label}</Text>
+                </LinearGradient>
+              ) : (
+                <Pressable key={w.range} onPress={() => setSelWeek(wi)} style={{ paddingVertical: 9, paddingHorizontal: 16, borderRadius: 12, alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)' }}>
+                  <Text style={{ fontFamily: F.bodySemi, fontSize: 12.5, color: C.muted }}>{w.range}</Text>
+                  <Text style={{ fontFamily: F.body, fontSize: 9.5, color: C.muted3, marginTop: 1 }}>{w.label}</Text>
+                </Pressable>
+              );
+            })}
+          </HScroll>
+
+          {(() => {
+            const w = trendWeeks[selWeek];
+            const gc = w.done ? C.green : C.gold;
+            const doneN = w.workout.filter((x) => x === 'done').length;
+            const planned = w.workout.filter((x) => x !== null).length;
+            const avg = (arr: (number | null)[]) => {
+              const v = arr.filter((x): x is number => x !== null);
+              return v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0;
+            };
+            const cellW = { width: 30, alignItems: 'center' as const };
+            const barCell = (val: number | null, maxV: number, col: string) => (
+              <View style={[cellW, { height: 34, justifyContent: 'flex-end' }]}>
+                {val === null ? (
+                  <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.12)', marginBottom: 2 }} />
+                ) : (
+                  <View style={{ width: 9, height: Math.max(4, (val / maxV) * 32), borderRadius: 5, backgroundColor: col, opacity: 0.4 + 0.6 * (val / maxV) }} />
+                )}
+              </View>
+            );
+            return (
+              <Card colors={['rgba(46,28,18,0.4)', 'rgba(18,14,14,0.5)']} border="rgba(255,150,90,0.09)" style={{ padding: 16, gap: 15 }}>
+                {/* header */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                  <View style={{ flex: 1 }}>
+                    <Serif style={{ fontSize: 21 }}>{w.range}</Serif>
+                    <Body style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>{w.label} · {doneN}/{planned} workouts done</Body>
+                  </View>
+                  <View style={{ alignItems: 'center', gap: 3 }}>
+                    <View style={{ width: 54, height: 54, borderRadius: 27, borderWidth: 4, borderColor: hexA(gc, 0.9), alignItems: 'center', justifyContent: 'center', backgroundColor: hexA(gc, 0.08) }}>
+                      <Text style={{ fontFamily: F.bodyBold, fontSize: 13, color: gc }}>{w.goals}</Text>
+                    </View>
+                    <Mono style={{ fontSize: 8, color: C.muted3 }}>GOALS</Mono>
+                  </View>
+                </View>
+
+                {/* 7-day matrix */}
+                <View style={{ padding: 13, borderRadius: 15, backgroundColor: 'rgba(0,0,0,0.25)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)', gap: 11 }}>
+                  {/* day letters + workout status squares */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <View style={{ width: 74 }}>
+                      <Mono style={{ fontSize: 9, letterSpacing: 0.8, color: C.mono2 }}>WORKOUT</Mono>
+                    </View>
+                    <View style={{ flex: 1, flexDirection: 'row', justifyContent: 'space-between' }}>
+                      {w.workout.map((st, i) => {
+                        const col = st === 'done' ? C.green : st === 'missed' ? C.red : null;
+                        const sel = selDay === i;
+                        return (
+                          <Pressable key={i} onPress={() => { setSelDay(i); scrollToDaySummary(); }} hitSlop={6} style={cellW}>
+                            <View style={{ width: 24, height: 24, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: col ? hexA(col, 0.16) : 'rgba(255,255,255,0.04)', borderWidth: sel ? 2 : 1, borderColor: sel ? C.orange : col ? hexA(col, 0.45) : 'rgba(255,255,255,0.08)' }}>
+                              {col ? (
+                                <Icon path={st === 'done' ? 'M20 6 9 17l-5-5' : 'M6 6l12 12M18 6 6 18'} size={11} color={col} strokeWidth={2.8} />
+                              ) : null}
+                            </View>
+                            <Mono style={{ fontSize: 8.5, color: sel ? C.orange : C.muted3, marginTop: 4 }}>{['M', 'T', 'W', 'T', 'F', 'S', 'S'][i]}</Mono>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </View>
+
+                  {/* metric bar rows */}
+                  {([
+                    ['STEPS', w.steps, C.blue, `${avg(w.steps).toFixed(1)}k avg`, 10],
+                    ['NUTRITION', w.nutrition, C.gold, `${avg(w.nutrition).toFixed(0)}/10 avg`, 10],
+                    ['SLEEP', w.sleep, C.purple, `${avg(w.sleep).toFixed(1)}h avg`, 10],
+                  ] as const).map(([lab, arr, col, avgLabel, maxV]) => (
+                    <View key={lab} style={{ flexDirection: 'row', alignItems: 'flex-end' }}>
+                      <View style={{ width: 74 }}>
+                        <Mono style={{ fontSize: 9, letterSpacing: 0.8, color: C.mono2 }}>{lab}</Mono>
+                        <Text style={{ fontFamily: F.bodyBold, fontSize: 11.5, color: col, marginTop: 2 }}>{avgLabel}</Text>
+                      </View>
+                      <View style={{ flex: 1, flexDirection: 'row', justifyContent: 'space-between' }}>
+                        {arr.map((v, i) => (
+                          <React.Fragment key={i}>{barCell(v, maxV, col)}</React.Fragment>
+                        ))}
+                      </View>
+                    </View>
+                  ))}
+                </View>
+
+                {/* Daily summary — selected day */}
+                {(() => {
+                  const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+                  const st = w.workout[selDay];
+                  const wc = st === 'done' ? C.green : st === 'missed' ? C.red : C.muted2;
+                  const stepsV = w.steps[selDay];
+                  const nutV = w.nutrition[selDay];
+                  const sleepV = w.sleep[selDay];
+                  const metric = (label: string, val: number | null, goal: number, unit: string, col: string) => (
+                    <View key={label} style={{ gap: 6 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+                        <Mono style={{ flex: 1, fontSize: 9, letterSpacing: 0.8, color: C.muted3 }}>{label}</Mono>
+                        <Text style={{ fontFamily: F.bodyBold, fontSize: 14, color: val === null ? C.muted3 : col }}>
+                          {val === null ? '—' : `${val}${unit}`}
+                        </Text>
+                        <Body style={{ fontSize: 10, color: C.muted3, marginLeft: 4 }}>/ {goal}{unit}</Body>
+                      </View>
+                      <ProgressBar pct={val === null ? 0 : Math.min(100, (val / goal) * 100)} height={5} fill={col} />
+                    </View>
+                  );
+                  // Add / edit health data: only the last 7 days (today and the 6 before), never the future.
+                  const rawDay = weeklyQ.data?.[selWeek]?.days[selDay];
+                  const dayYmd = rawDay?.date ?? null;
+                  const todayYmd = localToday();
+                  const canEditHealth = canEdit && !!dayYmd && dayYmd <= todayYmd && dayYmd >= ymdMinusDays(todayYmd, 6);
+                  const hasAllHealth = stepsV != null && nutV != null && sleepV != null;
+                  const openHealthSheet = () => {
+                    if (!dayYmd) return;
+                    setHdSleep(rawDay?.sleepHours != null ? String(rawDay.sleepHours) : '');
+                    setHdRating(rawDay?.nutrition ?? null);
+                    setHdSteps(rawDay?.steps != null ? String(Math.round(rawDay.steps)) : ''); // raw count, not the "8.2k" shown in the bars
+                    saveHdM.reset();
+                    setHd({ ymd: dayYmd, sub: `${dayNames[selDay]} · ${w.dates[selDay]}`, edit: hasAllHealth });
+                  };
+                  return (
+                    <View ref={daySummaryRef} collapsable={false} style={{ padding: 14, borderRadius: 15, backgroundColor: hexA(wc === C.muted2 ? '#888888' : wc, 0.06), borderWidth: 1, borderColor: hexA(wc === C.muted2 ? '#888888' : wc, 0.22), gap: 12 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                        <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: hexA(wc === C.muted2 ? '#888888' : wc, 0.15), borderWidth: 1.5, borderColor: hexA(wc === C.muted2 ? '#888888' : wc, 0.45), alignItems: 'center', justifyContent: 'center' }}>
+                          {st ? (
+                            <Icon path={st === 'done' ? 'M20 6 9 17l-5-5' : 'M6 6l12 12M18 6 6 18'} size={16} color={wc} strokeWidth={2.6} />
+                          ) : (
+                            <Icon name="calendar" size={15} color={C.muted2} strokeWidth={2} />
+                          )}
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Serif style={{ fontSize: 17 }}>{dayNames[selDay]}</Serif>
+                          <Mono style={{ fontSize: 9.5, color: C.muted3, marginTop: 1 }}>{w.dates[selDay]}</Mono>
+                        </View>
+                        <Badge
+                          text={st === 'done' ? 'Workout done' : st === 'missed' ? 'Workout missed' : 'No workout'}
+                          color={wc === C.muted2 ? '#999189' : wc}
+                        />
+                      </View>
+                      {metric('STEPS', stepsV, w.stepsGoalK, 'k', C.blue)}
+                      {metric('NUTRITION', nutV, w.nutritionGoal, '', C.gold)}
+                      {metric('SLEEP', sleepV, w.sleepGoal, 'h', C.purple)}
+                      {canEditHealth ? (
+                        <Pressable onPress={openHealthSheet} hitSlop={6} accessibilityRole="button" accessibilityLabel={hasAllHealth ? 'Edit health data' : 'Add health data'}
+                          style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 11, borderRadius: 12, borderWidth: 1.2, borderStyle: 'dashed', borderColor: hexA(C.orange, 0.6), backgroundColor: hexA(C.orange, pressed ? 0.12 : 0.06) })}>
+                          <Icon name={hasAllHealth ? 'clipboard' : 'plus'} size={14} color={C.orange} strokeWidth={2.3} />
+                          <Text style={{ fontFamily: F.bodyBold, fontSize: 13, color: C.orange }}>{hasAllHealth ? 'Edit health data' : 'Add health data'}</Text>
+                        </Pressable>
+                      ) : null}
+                      {w.z2cTarget != null ? (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 2 }}>
+                          <Mono style={{ flex: 1, fontSize: 9, letterSpacing: 0.8, color: C.muted3 }}>ZONE 2 CARDIO</Mono>
+                          {w.z2Min[selDay] != null ? (
+                            <Badge text={w.z2Min[selDay] ? `Done · ${w.z2Min[selDay]}m` : 'Done'} color={C.green} />
+                          ) : null}
+                          <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: w.z2cDone >= w.z2cTarget ? C.green : C.gold }}>{w.z2cDone}/{w.z2cTarget} this week</Text>
+                        </View>
+                      ) : null}
+
+                      {/* Daily Meals — what the client logged in the B2C app that day
+                          (nutrition_tracker.meals_analysis). */}
+                      {(() => {
+                        const meals = [...(w.meals[selDay] ?? [])].sort((a: any, b: any) => String(a?.timestamp ?? '').localeCompare(String(b?.timestamp ?? '')));
+                        const n1 = (v: any) => { const n = Number(v); return isFinite(n) ? Math.round(n * 10) / 10 : 0; };
+                        const tot = meals.reduce((acc: any, m: any) => ({ cal: acc.cal + n1(m?.calories), p: acc.p + n1(m?.protein), c: acc.c + n1(m?.carbs), f: acc.f + n1(m?.fats) }), { cal: 0, p: 0, c: 0, f: 0 });
+                        return (
+                          <View style={{ gap: 7, paddingTop: 4, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)' }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                              <Mono style={{ flex: 1, fontSize: 9, letterSpacing: 0.8, color: C.muted3 }}>DAILY MEALS{meals.length ? ` · ${meals.length}` : ''}</Mono>
+                              {meals.length ? (
+                                <Text style={{ fontFamily: F.bodyBold, fontSize: 11, color: C.gold }}>{Math.round(tot.cal)} kcal</Text>
+                              ) : null}
+                            </View>
+                            {meals.length === 0 ? (
+                              <Body style={{ fontSize: 11.5, color: C.muted3 }}>No meals logged this day.</Body>
+                            ) : (
+                              <>
+                                {meals.map((m: any, mi: number) => (
+                                  <View key={m?.id ?? mi} style={{ padding: 10, borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.03)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)', gap: 5 }}>
+                                    {/* Full meal description, never truncated (user request 25 Sep 2026): the
+                                        client types it in the B2C app and the trainer needs all of it. */}
+                                    <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
+                                      <Body style={{ flex: 1, fontSize: 12.5, lineHeight: 18, fontFamily: F.bodySemi, color: '#fff' }}>{m?.meal_name || 'Meal'}</Body>
+                                      {m?.timestamp ? (
+                                        <Mono style={{ fontSize: 8.5, color: C.muted3, marginTop: 3 }}>{istTimeParts(m.timestamp).time} {istTimeParts(m.timestamp).ampm}</Mono>
+                                      ) : null}
+                                    </View>
+                                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 5 }}>
+                                      {([
+                                        [`${Math.round(n1(m?.calories))} kcal`, C.gold],
+                                        [`P ${n1(m?.protein)}g`, C.green],
+                                        [`C ${n1(m?.carbs)}g`, C.blue],
+                                        [`F ${n1(m?.fats)}g`, C.orange],
+                                        ...(m?.fiber != null && n1(m.fiber) > 0 ? [[`Fb ${n1(m.fiber)}g`, C.purple] as [string, string]] : []),
+                                      ] as [string, string][]).map(([lab, col]) => (
+                                        <View key={lab} style={{ paddingVertical: 2.5, paddingHorizontal: 8, borderRadius: 999, backgroundColor: hexA(col, 0.09), borderWidth: 1, borderColor: hexA(col, 0.28) }}>
+                                          <Text style={{ fontFamily: F.bodySemi, fontSize: 9.5, color: col }}>{lab}</Text>
+                                        </View>
+                                      ))}
+                                    </View>
+                                  </View>
+                                ))}
+                                <Body style={{ fontSize: 10.5, color: C.muted2 }}>Day total: {Math.round(tot.cal)} kcal · P {Math.round(tot.p * 10) / 10}g · C {Math.round(tot.c * 10) / 10}g · F {Math.round(tot.f * 10) / 10}g</Body>
+                              </>
+                            )}
+                          </View>
+                        );
+                      })()}
+                    </View>
+                  );
+                })()}
+
+                {/* legend */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 14 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                    <View style={{ width: 9, height: 9, borderRadius: 3, backgroundColor: hexA(C.green, 0.7) }} />
+                    <Mono style={{ fontSize: 9, color: C.muted2 }}>Done</Mono>
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                    <View style={{ width: 9, height: 9, borderRadius: 3, backgroundColor: hexA(C.red, 0.7) }} />
+                    <Mono style={{ fontSize: 9, color: C.muted2 }}>Missed</Mono>
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                    <View style={{ width: 9, height: 9, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.12)' }} />
+                    <Mono style={{ fontSize: 9, color: C.muted2 }}>No data</Mono>
+                  </View>
+                </View>
+              </Card>
+            );
+          })()}
+
+          {/* Add / edit health data sheet (one Modal; backdrop is a sibling; keyboard-aware) */}
+          <Modal visible={!!hd} transparent animationType="slide" onRequestClose={() => { if (!hdSaving) closeHd(); }}>
+            <View style={{ flex: 1, justifyContent: 'flex-end' }}>
+              <Pressable onPress={() => { if (!hdSaving) closeHd(); }} accessibilityRole="button" accessibilityLabel="Close" importantForAccessibility="no-hide-descendants"
+                style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.62)' }} />
+              <View accessibilityViewIsModal style={{ maxHeight: hdKb > 0 ? '95%' : '88%', backgroundColor: C.sheetBg, borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: hexA(C.orange, 0.2), paddingHorizontal: 18, paddingTop: 14, paddingBottom: 16 + hdKb }}>
+                <View style={{ width: 40, height: 4, borderRadius: 99, backgroundColor: 'rgba(255,255,255,0.2)', alignSelf: 'center', marginBottom: 12 }} />
+                <Serif style={{ fontSize: 19 }}>{hd?.edit ? 'Edit health data' : 'Add health data'}</Serif>
+                <Body style={{ fontSize: 12, color: C.muted2, marginTop: 3, marginBottom: 12 }}>{hd?.sub} · saved values can be corrected here.</Body>
+                <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={{ flexShrink: 1 }} contentContainerStyle={{ gap: 14, paddingBottom: 6 }}>
+                  <View style={{ gap: 6 }}>
+                    <Mono style={{ fontSize: 9, letterSpacing: 0.8, color: C.muted3 }}>SLEEP (HOURS)</Mono>
+                    <TextInput value={hdSleep} onChangeText={setHdSleep} placeholder="e.g. 7.5" placeholderTextColor={C.muted3} keyboardType="decimal-pad" accessibilityLabel="Sleep hours"
+                      style={{ fontFamily: F.body, fontSize: 14, color: '#fff', paddingVertical: 11, paddingHorizontal: 12, borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }} />
+                  </View>
+                  <View style={{ gap: 6 }}>
+                    <Mono style={{ fontSize: 9, letterSpacing: 0.8, color: C.muted3 }}>NUTRITION (1-10)</Mono>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                      {Array.from({ length: 10 }, (_, k) => k + 1).map((n) => {
+                        const on = hdRating === n;
+                        return (
+                          <Pressable key={n} onPress={() => setHdRating(on ? null : n)} hitSlop={4} accessibilityRole="button" accessibilityState={{ selected: on }}
+                            style={{ width: 44, paddingVertical: 9, borderRadius: 10, alignItems: 'center', backgroundColor: on ? hexA(C.gold, 0.18) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: on ? hexA(C.gold, 0.55) : 'rgba(255,255,255,0.09)' }}>
+                            <Text style={{ fontFamily: on ? F.bodyBold : F.bodySemi, fontSize: 13, color: on ? C.gold : C.ink }}>{n}</Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </View>
+                  <View style={{ gap: 6 }}>
+                    <Mono style={{ fontSize: 9, letterSpacing: 0.8, color: C.muted3 }}>STEPS (COUNT)</Mono>
+                    <TextInput value={hdSteps} onChangeText={(t) => setHdSteps(t.replace(/[^0-9]/g, ''))} placeholder="e.g. 8500" placeholderTextColor={C.muted3} keyboardType="number-pad" accessibilityLabel="Steps count"
+                      style={{ fontFamily: F.body, fontSize: 14, color: '#fff', paddingVertical: 11, paddingHorizontal: 12, borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }} />
+                  </View>
+                </ScrollView>
+                <View style={{ flexDirection: 'row', gap: 10, paddingTop: 12 }}>
+                  <Pressable onPress={() => { if (!hdSaving) closeHd(); }} disabled={hdSaving} accessibilityRole="button"
+                    style={{ flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', opacity: hdSaving ? 0.5 : 1 }}>
+                    <Text style={{ fontFamily: F.bodySemi, fontSize: 13, color: C.muted }}>Cancel</Text>
+                  </Pressable>
+                  <Pressable onPress={saveHd} disabled={hdSaving} accessibilityRole="button" accessibilityLabel="Save health data"
+                    style={{ flex: 1.4, borderRadius: 12, overflow: 'hidden', opacity: hdSaving ? 0.6 : 1 }}>
+                    <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ minHeight: 46, alignItems: 'center', justifyContent: 'center' }}>
+                      {hdSaving ? <ActivityIndicator size="small" color="#fff" /> : <Text style={{ fontFamily: F.bodyBold, fontSize: 13.5, color: '#fff' }}>Save</Text>}
+                    </LinearGradient>
+                  </Pressable>
+                </View>
+              </View>
+            </View>
+          </Modal>
+        </>
+        )
+    </>
+  );
+}
+
+export function ClientPlansSection({ clientId, readOnly = false }: { clientId: string | null; readOnly?: boolean }) {
+  const { go, set } = useStore();
+  const { session } = useAuth();
+  const myTrainerId = session?.user?.id ?? null;
+  const plansQ = useClientPlans(clientId);
+  const [openPlan, setOpenPlan] = React.useState<string | null>(null);
+  const [openExercise, setOpenExercise] = React.useState<string | null>(null);
+  React.useEffect(() => { setOpenPlan(null); setOpenExercise(null); }, [clientId]);
+  // Plan-tab summary line (counts by status).
+  const planList: any[] = plansQ.data ?? [];
+  const planActive = planList.filter((p) => (p.status ?? 'approved') === 'approved' && !p.expired).length;
+  const planPending = planList.filter((p) => p.status === 'pending_review').length;
+  const planAttention = planList.filter((p) => p.status === 'rejected' || p.status === 'needs_revision').length;
+  const planSummary = plansQ.isLoading
+    ? 'Loading…'
+    : planList.length === 0
+    ? 'No plans yet'
+    : [
+        `${planList.length} plan${planList.length === 1 ? '' : 's'}`,
+        planActive ? `${planActive} active` : null,
+        planPending ? `${planPending} in review` : null,
+        planAttention ? `${planAttention} need attention` : null,
+      ].filter(Boolean).join(' · ');
+  return (
+        <Card colors={['rgba(46,28,18,0.4)', 'rgba(18,14,14,0.5)']} border="rgba(255,150,90,0.09)" style={{ padding: 16, gap: 14 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <Icon name="file" size={20} color={C.gold} strokeWidth={1.9} />
+            <View style={{ flex: 1 }}>
+              <Serif style={{ fontSize: 19 }}>Training Plans</Serif>
+              <Body style={{ fontSize: 11.5, color: C.muted, marginTop: 1 }}>{planSummary}</Body>
+            </View>
+            {!readOnly ? (
+            <Pressable onPress={() => { set({ editingPlan: null }); go('create-plan'); }}>
+              <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 9, paddingHorizontal: 13, borderRadius: 999 }}>
+                <Icon name="plus" size={13} color="#fff" strokeWidth={2.8} />
+                <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: '#fff' }}>Create Plan</Text>
+              </LinearGradient>
+            </Pressable>
+            ) : null}
+          </View>
+          {plansQ.isLoading ? (
+            <Body style={{ color: C.muted2, textAlign: 'center', paddingVertical: 20 }}>Loading plans…</Body>
+          ) : (plansQ.data?.length ?? 0) === 0 ? (
+            <Body style={{ color: C.muted2, textAlign: 'center', paddingVertical: 20 }}>{readOnly ? 'No plans yet.' : 'No plans yet. Create one above.'}</Body>
+          ) : (
+            (plansQ.data ?? []).map((p: any, i: number) => {
+              const stat = (p.status ?? 'approved') as string;
+              const statMeta =
+                stat === 'approved'
+                  ? p.expired ? { label: 'Expired', color: C.gold } : { label: 'Active', color: C.green }
+                  : stat === 'pending_review' ? { label: 'Pending review', color: C.blue }
+                  : stat === 'rejected' ? { label: 'Rejected', color: C.red }
+                  : stat === 'needs_revision' ? { label: 'Needs revision', color: C.gold }
+                  : { label: stat, color: C.muted };
+              const c = statMeta.color;
+              const weeks = p.plan_duration_weeks ? `${p.plan_duration_weeks} weeks` : null;
+              const exCount = p.exercises?.length ?? 0;
+              const meta = [weeks, p.modality, exCount ? `${exCount} exercises` : null].filter(Boolean).join(' · ') || 'Training plan';
+              const isOpen = openPlan === p.plan_id;
+              // Group exercises by body part for display
+              const groups: Record<string, any[]> = {};
+              for (const ex of (p.exercises ?? [])) {
+                const key = ex.body_part || 'General';
+                (groups[key] = groups[key] || []).push(ex);
+              }
+              // Edit gating (web parity): "most recent plan for this modality"
+              // is judged among MY plans only — plans are already newest-first.
+              const modKey = normalizePlanModality(p.modality);
+              const isMostRecent =
+                (plansQ.data ?? []).find((x: any) => x.mine && normalizePlanModality(x.modality) === modKey)?.plan_id === p.plan_id;
+              const startEdit = () => {
+                const myRows = (p.exercises ?? [])
+                  .filter((ex: any) => ex.trainer_id === myTrainerId)
+                  .sort((a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0));
+                set({
+                  editingPlan: {
+                    planId: p.plan_id,
+                    planName: p.plan_name ?? '',
+                    planDescription: p.plan_description ?? '',
+                    durationWeeks: p.plan_duration_weeks ?? 6,
+                    modality: p.modality ?? 'Strength Training',
+                    rows: myRows,
+                  },
+                });
+                go('create-plan');
+              };
+              // Coach asked for changes: the trainer must see WHY and get a
+              // one-tap Edit without hunting inside the expanded card (web
+              // shows both directly on the Training Programs card).
+              const myStat = (p.my_status ?? p.status ?? '') as string;
+              const quickEditable = !readOnly && p.mine && !!clientId && (myStat === 'pending_review' || myStat === 'needs_revision' || myStat === 'rejected');
+              const feedback = p.my_feedback ?? p.coach_feedback;
+              return (
+                <View key={p.plan_id ?? i} style={{ borderRadius: 14, backgroundColor: 'rgba(0,0,0,0.25)', borderWidth: 1, borderColor: hexA(c, 0.2), overflow: 'hidden' }}>
+                  <Pressable onPress={() => setOpenPlan(isOpen ? null : p.plan_id)} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 13 }}>
+                    <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: hexA(c, 0.13), alignItems: 'center', justifyContent: 'center' }}>
+                      <Icon name="layers" size={18} color={c} strokeWidth={1.9} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Body style={{ fontSize: 14.5, fontFamily: F.bodySemi, color: '#fff' }}>{p.plan_name || 'Training Plan'}</Body>
+                      <Body style={{ fontSize: 11.5, color: C.muted2, marginTop: 1 }}>{meta}</Body>
+                      {(() => {
+                        // Created + expiry dates (expiry = approved_at + 42d, the shared rule).
+                        const created = p.created_at ? `Created ${istDayLabel(p.created_at)}` : null;
+                        const expiry = p.approved_at
+                          ? `${p.expired ? 'Expired' : 'Expires'} ${istDayLabel(new Date(new Date(p.approved_at).getTime() + PLAN_VALID_DAYS * 864e5).toISOString())}`
+                          : stat === 'approved' ? null : 'Expires 42d after approval';
+                        const line = [created, expiry].filter(Boolean).join(' · ');
+                        return line ? (
+                          <Body style={{ fontSize: 10, color: p.expired ? C.gold : C.muted3, marginTop: 2 }}>{line}</Body>
+                        ) : null;
+                      })()}
+                    </View>
+                    <Badge text={statMeta.label} color={c} />
+                    {quickEditable ? (
+                      <Pressable onPress={startEdit} hitSlop={6} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 999, backgroundColor: hexA(C.orange, 0.12), borderWidth: 1, borderColor: hexA(C.orange, 0.45) }}>
+                        <Icon path="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" size={11} color={C.orange} strokeWidth={2.2} />
+                        <Text style={{ fontFamily: F.bodyBold, fontSize: 11, color: C.orange }}>Edit</Text>
+                      </Pressable>
+                    ) : null}
+                    <Icon name={isOpen ? 'chevUp' : 'chevDown'} size={16} color={C.muted} strokeWidth={2.2} />
+                  </Pressable>
+                  {feedback && (myStat === 'needs_revision' || myStat === 'rejected') ? (
+                    <View style={{ flexDirection: 'row', gap: 8, marginHorizontal: 13, marginBottom: isOpen ? 10 : 13, padding: 10, borderRadius: 11, backgroundColor: hexA(C.red, 0.07), borderWidth: 1, borderColor: hexA(C.red, 0.28) }}>
+                      <Icon name="alert" size={13} color={C.red} strokeWidth={2.1} />
+                      <Body style={{ flex: 1, fontSize: 12, color: '#E0A090', lineHeight: 17 }}>
+                        <Text style={{ fontFamily: F.bodyBold, color: C.red }}>Coach feedback: </Text>{feedback}
+                      </Body>
+                    </View>
+                  ) : null}
+                  {isOpen ? (
+                    <View style={{ paddingHorizontal: 13, paddingBottom: 13, gap: 12, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)', paddingTop: 12 }}>
+                      {p.plan_description ? <Body style={{ fontSize: 12.5, color: C.muted2 }}>{p.plan_description}</Body> : null}
+                      {!readOnly && p.mine && clientId ? (
+                        <PlanEditAction plan={p} clientId={clientId} isMostRecent={isMostRecent} onEdit={startEdit} />
+                      ) : !p.mine && p.shared ? (
+                        <Body style={{ fontSize: 10.5, color: C.muted3 }}>Added by another trainer. Only the trainer who added these exercises can edit them.</Body>
+                      ) : null}
+                      {exCount === 0 ? (
+                        <Body style={{ fontSize: 12.5, color: C.muted3 }}>No exercises in this plan.</Body>
+                      ) : (
+                        Object.entries(groups).map(([bp, exs]) => (
+                          <View key={bp} style={{ gap: 8 }}>
+                            <Mono style={{ fontSize: 9.5, letterSpacing: 1, color: c }}>{bp.toUpperCase()}</Mono>
+                            {exs.map((ex: any, j: number) => {
+                              const exKey = `${p.plan_id}:${ex.id ?? j}`;
+                              const exOpen = openExercise === exKey;
+                              const setCount = ex.set_number != null && `${ex.set_number}`.trim() !== '' ? `${ex.set_number}` : null;
+                              const detail: [string, string][] = [
+                                ['SETS', setCount ?? '—'],
+                                ...(ex.reps_target != null ? [['TARGET REPS', `${ex.reps_target}`] as [string, string]] : []),
+                                ...(ex.load_target != null ? [['LOAD', `${ex.load_target} kg`] as [string, string]] : []),
+                                ...(ex.rm_percentage != null ? [['RM %', `${ex.rm_percentage}%`] as [string, string]] : []),
+                                ...(ex.tempo ? [['TEMPO', `${ex.tempo}`] as [string, string]] : []),
+                                ...(ex.rest_period != null ? [['REST', `${ex.rest_period}s`] as [string, string]] : []),
+                                ...(ex.duration ? [['DURATION', `${ex.duration}`] as [string, string]] : []),
+                              ];
+                              return (
+                                <View key={exKey} style={{ borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.03)', borderWidth: 1, borderColor: exOpen ? hexA(c, 0.3) : 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
+                                  <Pressable onPress={() => setOpenExercise(exOpen ? null : exKey)} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, padding: 11 }}>
+                                    <View style={{ flex: 1 }}>
+                                      <Body style={{ fontSize: 13.5, fontFamily: F.bodySemi, color: '#fff' }}>{ex.exercise_name || ex.sub_activity || 'Exercise'}</Body>
+                                      <Mono style={{ fontSize: 10, color: C.muted3, marginTop: 2 }}>{setCount ? `${setCount} sets` : 'Tap for details'}</Mono>
+                                    </View>
+                                    {ex.super_set_group ? <Badge text={`SS ${ex.super_set_group}`} color={C.purple} /> : null}
+                                    <Icon name={exOpen ? 'chevUp' : 'chevDown'} size={14} color={C.muted} strokeWidth={2.2} />
+                                  </Pressable>
+                                  {exOpen ? (
+                                    <View style={{ paddingHorizontal: 11, paddingBottom: 11, gap: 8, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)', paddingTop: 10 }}>
+                                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                                        {detail.map(([lab, val]) => (
+                                          <View key={lab} style={{ minWidth: '30%', flexGrow: 1, paddingVertical: 7, paddingHorizontal: 10, borderRadius: 9, backgroundColor: 'rgba(0,0,0,0.25)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' }}>
+                                            <Mono style={{ fontSize: 8.5, letterSpacing: 0.6, color: C.muted3 }}>{lab}</Mono>
+                                            <Text style={{ fontFamily: F.bodyBold, fontSize: 13.5, color: C.ink, marginTop: 2 }}>{val}</Text>
+                                          </View>
+                                        ))}
+                                      </View>
+                                      {ex.exercise_notes ? (
+                                        <View>
+                                          <Mono style={{ fontSize: 8.5, letterSpacing: 0.6, color: C.muted3, marginBottom: 3 }}>NOTES</Mono>
+                                          <Body style={{ fontSize: 12, color: C.muted2 }}>{ex.exercise_notes}</Body>
+                                        </View>
+                                      ) : null}
+                                    </View>
+                                  ) : null}
+                                </View>
+                              );
+                            })}
+                          </View>
+                        ))
+                      )}
+                    </View>
+                  ) : null}
+                </View>
+              );
+            })
+          )}
+        </Card>
+  );
+}
+
+export function ClientDetail() {
+  const { go, set, selectedClientId, selectedClientName, clientInitialTab } = useStore();
+  const { session } = useAuth();
+  const myTrainerId = session?.user?.id ?? null;
+  const clientId = selectedClientId;
+  const detailQ = useClientDetail(clientId);
+  const sessionsQ = useClientSessions(clientId);
+  const goalsQ = useClientGoals(clientId);
+  const reportsQ = useClientReports(clientId);
+  const consultQ = useClientConsultAi(clientId);
+  // Cycle phase (25 Sep 2026): eligible women under 50 with a period log only.
+  const cycleQ = useClientCycleStatus(clientId ? [clientId] : []);
+  const cycle = clientId ? cycleQ.data?.[clientId] ?? null : null;
+  const [cycleOpen, setCycleOpen] = React.useState(false);
+
+  // Capture client's home location (only offered while clients.brb_location is null)
+  const saveLocM = useSaveClientHomeLocation();
+  const [capturingLoc, setCapturingLoc] = React.useState(false);
+  const captureHomeLocation = async () => {
+    if (!clientId) return;
+    setCapturingLoc(true);
+    try {
+      const perm = await Location.requestForegroundPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert('Permission needed', "Allow location access to capture the client's home location.");
+        return;
+      }
+      const pos = await withTimeout(Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }), GPS_MS, 'GPS fix');
+      await saveLocM.mutateAsync({ clientId, lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy ?? null });
+      Alert.alert('Location saved', `${clientName}'s home location has been captured.`);
+    } catch (e: any) {
+      Alert.alert('Could not capture', e?.message ?? 'Turn on GPS and try again.');
+    } finally {
+      setCapturingLoc(false);
+    }
+  };
+  const confirmCaptureLocation = () =>
+    Alert.alert(
+      "Capture client's home location?",
+      `Do you want to capture the location of ${clientName}'s home? Your current position will be saved — make sure you are at the client's home right now.`,
+      [{ text: 'Cancel', style: 'cancel' }, { text: 'OK, Capture', onPress: captureHomeLocation }]
+    );
+  const client = detailQ.data?.client;
+  const clientName = client ? `${client.first_name ?? ''} ${client.last_name ?? ''}`.replace(/\s+/g, ' ').trim() : (selectedClientName ?? 'Client');
+  const clientAge = React.useMemo(() => {
+    if (!client?.date_of_birth) return null;
+    const dob = new Date(client.date_of_birth);
+    const now = new Date();
+    let a = now.getFullYear() - dob.getFullYear();
+    if (now.getMonth() < dob.getMonth() || (now.getMonth() === dob.getMonth() && now.getDate() < dob.getDate())) a--;
+    return a;
+  }, [client?.date_of_birth]);
+  const bi = detailQ.data?.basicInfo ?? null;
+  const infoFields: { label: string; value: string; icon: any; tone?: string }[] = [
+    { label: 'AGE', value: clientAge != null ? `${clientAge} yrs` : (bi?.clientAge ? `${bi.clientAge}` : 'N/A'), icon: 'user', tone: clientAge == null && !bi?.clientAge ? 'na' : undefined },
+    { label: 'GENDER', value: bi?.clientGender ?? (client?.client_type ?? 'N/A'), icon: 'user', tone: bi?.clientGender ? undefined : 'na' },
+    { label: 'HEIGHT', value: bi?.clientHeight ? `${bi.clientHeight} cm` : 'N/A', icon: 'activity', tone: bi?.clientHeight ? undefined : 'na' },
+    { label: 'WEIGHT', value: bi?.clientWeight ? `${bi.clientWeight} kg` : 'N/A', icon: 'activity', tone: bi?.clientWeight ? undefined : 'na' },
+    { label: 'WAIST', value: bi?.clientWaist ? `${bi.clientWaist} cm` : 'N/A', icon: 'activity', tone: bi?.clientWaist ? undefined : 'na' },
+    { label: 'VO2 MAX', value: detailQ.data?.vo2max != null ? (typeof detailQ.data.vo2max === 'number' ? `${detailQ.data.vo2max} ml/kg/min` : `${detailQ.data.vo2max}`) : 'N/A', icon: 'heart', tone: detailQ.data?.vo2max != null ? undefined : 'na' },
+    { label: 'CRM', value: detailQ.data?.crm?.name ?? 'N/A', icon: 'userCircle', tone: detailQ.data?.crm ? undefined : 'na' },
+    { label: 'CRM PHONE', value: detailQ.data?.crm?.phone ?? 'N/A', icon: 'phone', tone: detailQ.data?.crm?.phone ? undefined : 'na' },
+  ];
+
+  // Weekly goals from DB
+  const dbGoals = (goalsQ.data ?? []).map((g: any) => ({
+    id: g.id,
+    range: `${g.week_start_date ? istDayLabel(g.week_start_date) : ''}${g.week_end_date ? ' – ' + istDayLabel(g.week_end_date) : ''}`.trim() || 'Week',
+    recommendation: g.recommendation ?? null,
+    steps: g.steps_target != null ? `${g.steps_target}` : '—',
+    sleep: g.sleep_target_hours != null ? `${g.sleep_target_hours}` : '—',
+    nutrition: g.nutrition_target != null ? `${g.nutrition_target}` : '—',
+    cardio: g.z2c_target != null ? `${g.z2c_target}` : '—',
+    recovery: !!g.recommendation,
+  }));
+
+
+  const [showInfo, setShowInfo] = React.useState(false);
+  const [clientTab, setClientTab] = React.useState<'sessions' | 'plan' | 'goals' | 'reports' | 'progression' | 'trends' | 'weekly'>((clientInitialTab as any) || 'progression');
+  // Analytics: which tab of which client is being viewed (fires on open + every switch).
+  React.useEffect(() => { trackClientTab('client', clientTab, { id: selectedClientId, name: selectedClientName }); }, [clientTab]);
+  const [cmpRange, setCmpRange] = React.useState('1W');
+  const [reportsTab, setReportsTab] = React.useState<'qhp' | 'blood' | 'medical' | 'consult'>('qhp');
+  const [consultDetail, setConsultDetail] = React.useState<ClientConsultAi | null>(null);
+  const [bloodDetail, setBloodDetail] = React.useState<any | null>(null);
+  const [qhpDetail, setQhpDetail] = React.useState<{ row: any; label: string } | null>(null);
+  // Classify reports into the three buckets once, so sub-tabs can show counts
+  // and we can auto-open the first tab that actually has reports. `raw` carries
+  // the full row so tapping opens the right in-app detail sheet.
+  type RItem = { key: string; name: string; date: string; type: string | null; metabolic: number | null; longevity: number | null; status?: string; kind: 'qhp' | 'health'; raw: any };
+  const reportBuckets = React.useMemo(() => {
+    const health = reportsQ.data?.health ?? [];
+    const qhpReports = reportsQ.data?.qhp ?? []; // qhp_details rows (ascending → chrono index)
+    const classify = (type: string): 'blood' | 'medical' => {
+      const t = (type || '').toLowerCase();
+      if (/mri|cect|dexa|ultrasound|imaging|x-?ray|\bct\b|ct |scan|angiograph|coronary|spine|neck|echo|medical/.test(t)) return 'medical';
+      return 'blood';
+    };
+    const b: Record<'qhp' | 'blood' | 'medical', RItem[]> = { qhp: [], blood: [], medical: [] };
+    (health as any[]).forEach((h) => {
+      b[classify(h.report_type)].push({
+        key: h.id, name: h.report_name || h.report_type || 'Health Report',
+        date: h.test_date ? istDayLabel(h.test_date) : (h.upload_date ? istDayLabel(h.upload_date) : '—'),
+        type: h.report_type ?? null, metabolic: h.metabolic_score ?? null, longevity: h.longevity_score ?? null,
+        kind: 'health', raw: h,
+      });
+    });
+    // Structured QHP reports — chrono label: index 0 = Baseline, else Refresh N. Newest first in the list.
+    (qhpReports as any[]).forEach((a, i) => {
+      b.qhp.push({
+        key: `qhp-${a.id}`,
+        name: i === 0 ? 'QHP Baseline' : `QHP Refresh ${i}`,
+        date: a.created_at ? istDayLabel(a.created_at) : '—',
+        type: 'QHP Assessment', metabolic: null, longevity: null,
+        status: a.approved ? 'Approved' : 'Draft',
+        kind: 'qhp', raw: a,
+      });
+    });
+    b.qhp.reverse(); // newest QHP report on top
+    return b;
+  }, [reportsQ.data]);
+  // On first load / new client, jump to the first sub-tab that has reports.
+  const reportsAutoPicked = React.useRef(false);
+  React.useEffect(() => { reportsAutoPicked.current = false; }, [clientId]);
+  React.useEffect(() => {
+    if (!reportsQ.data || reportsAutoPicked.current) return;
+    reportsAutoPicked.current = true;
+    if (reportsTab !== 'consult' && reportBuckets[reportsTab].length === 0) {
+      const first = (['blood', 'medical', 'qhp'] as const).find((k) => reportBuckets[k].length > 0);
+      if (first) setReportsTab(first);
+    }
+  }, [reportsQ.data, reportBuckets]);
+  const consultRows = consultQ.data ?? [];
+
+  // Trends: the page ScrollView refs stay here (Page ref); ClientTrendsSection uses them for scroll-to-day.
+  const trendScrollRef = React.useRef<ScrollView>(null);
+  const trendOffsetRef = React.useRef(0);
+
   const [openClientSession, setOpenClientSession] = React.useState<number | null>(null);
   const [openClientAi, setOpenClientAi] = React.useState<number | null>(null);
   const [openClientVoice, setOpenClientVoice] = React.useState<number | null>(null); // one voice player open at a time
-  const [openPlan, setOpenPlan] = React.useState<string | null>(null);
-  const [openExercise, setOpenExercise] = React.useState<string | null>(null);
   // Sessions tab pagination — 10 at a time, reset when switching clients.
   const [sessionsShown, setSessionsShown] = React.useState(10);
   // Reset per-client state when switching clients (the component stays mounted),
   // and always land on the requested tab — default Progression, never a stale tab.
   React.useEffect(() => {
     setClientTab((clientInitialTab as any) || 'progression');
-    setSelWeek(0); // Trends opens on this week; the day is seeded to its latest day
     setSessionsShown(10);
     setOpenClientSession(null);
     setOpenClientAi(null);
-    setOpenPlan(null);
   }, [clientId, clientInitialTab]);
 
   // Weekly goals — real Monday-start IST weeks: the CURRENT week + the next 3
@@ -4686,458 +5428,9 @@ export function ClientDetail() {
       {clientTab === 'weekly' ? (
         <AiWeeklyReportTab clientId={clientId} />
       ) : clientTab === 'trends' ? (
-        weeklyQ.isLoading ? (
-          <Card colors={['rgba(46,28,18,0.4)', 'rgba(18,14,14,0.5)']} border="rgba(255,150,90,0.09)" style={{ padding: 20 }}>
-            <Body style={{ color: C.muted2, textAlign: 'center', paddingVertical: 14 }}>Loading trends…</Body>
-          </Card>
-        ) : weeklyQ.isError || trendWeeks.length === 0 ? (
-          <Card colors={['rgba(46,28,18,0.4)', 'rgba(18,14,14,0.5)']} border="rgba(255,150,90,0.09)" style={{ padding: 20 }}>
-            <Body style={{ color: weeklyQ.isError ? C.red : C.muted2, textAlign: 'center', paddingVertical: 14 }}>
-              {weeklyQ.isError ? "Couldn't load trends." : 'No trend data yet.'}
-            </Body>
-          </Card>
-        ) : (
-        <>
-          {/* Week selector */}
-          <HScroll>
-            {trendWeeks.map((w, wi) => {
-              const active = selWeek === wi;
-              return active ? (
-                <LinearGradient key={w.range} colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ paddingVertical: 9, paddingHorizontal: 16, borderRadius: 12, alignItems: 'center' }}>
-                  <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: '#fff' }}>{w.range}</Text>
-                  <Text style={{ fontFamily: F.body, fontSize: 9.5, color: 'rgba(255,255,255,0.8)', marginTop: 1 }}>{w.label}</Text>
-                </LinearGradient>
-              ) : (
-                <Pressable key={w.range} onPress={() => setSelWeek(wi)} style={{ paddingVertical: 9, paddingHorizontal: 16, borderRadius: 12, alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)' }}>
-                  <Text style={{ fontFamily: F.bodySemi, fontSize: 12.5, color: C.muted }}>{w.range}</Text>
-                  <Text style={{ fontFamily: F.body, fontSize: 9.5, color: C.muted3, marginTop: 1 }}>{w.label}</Text>
-                </Pressable>
-              );
-            })}
-          </HScroll>
-
-          {(() => {
-            const w = trendWeeks[selWeek];
-            const gc = w.done ? C.green : C.gold;
-            const doneN = w.workout.filter((x) => x === 'done').length;
-            const planned = w.workout.filter((x) => x !== null).length;
-            const avg = (arr: (number | null)[]) => {
-              const v = arr.filter((x): x is number => x !== null);
-              return v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0;
-            };
-            const cellW = { width: 30, alignItems: 'center' as const };
-            const barCell = (val: number | null, maxV: number, col: string) => (
-              <View style={[cellW, { height: 34, justifyContent: 'flex-end' }]}>
-                {val === null ? (
-                  <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.12)', marginBottom: 2 }} />
-                ) : (
-                  <View style={{ width: 9, height: Math.max(4, (val / maxV) * 32), borderRadius: 5, backgroundColor: col, opacity: 0.4 + 0.6 * (val / maxV) }} />
-                )}
-              </View>
-            );
-            return (
-              <Card colors={['rgba(46,28,18,0.4)', 'rgba(18,14,14,0.5)']} border="rgba(255,150,90,0.09)" style={{ padding: 16, gap: 15 }}>
-                {/* header */}
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                  <View style={{ flex: 1 }}>
-                    <Serif style={{ fontSize: 21 }}>{w.range}</Serif>
-                    <Body style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>{w.label} · {doneN}/{planned} workouts done</Body>
-                  </View>
-                  <View style={{ alignItems: 'center', gap: 3 }}>
-                    <View style={{ width: 54, height: 54, borderRadius: 27, borderWidth: 4, borderColor: hexA(gc, 0.9), alignItems: 'center', justifyContent: 'center', backgroundColor: hexA(gc, 0.08) }}>
-                      <Text style={{ fontFamily: F.bodyBold, fontSize: 13, color: gc }}>{w.goals}</Text>
-                    </View>
-                    <Mono style={{ fontSize: 8, color: C.muted3 }}>GOALS</Mono>
-                  </View>
-                </View>
-
-                {/* 7-day matrix */}
-                <View style={{ padding: 13, borderRadius: 15, backgroundColor: 'rgba(0,0,0,0.25)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)', gap: 11 }}>
-                  {/* day letters + workout status squares */}
-                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    <View style={{ width: 74 }}>
-                      <Mono style={{ fontSize: 9, letterSpacing: 0.8, color: C.mono2 }}>WORKOUT</Mono>
-                    </View>
-                    <View style={{ flex: 1, flexDirection: 'row', justifyContent: 'space-between' }}>
-                      {w.workout.map((st, i) => {
-                        const col = st === 'done' ? C.green : st === 'missed' ? C.red : null;
-                        const sel = selDay === i;
-                        return (
-                          <Pressable key={i} onPress={() => { setSelDay(i); scrollToDaySummary(); }} hitSlop={6} style={cellW}>
-                            <View style={{ width: 24, height: 24, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: col ? hexA(col, 0.16) : 'rgba(255,255,255,0.04)', borderWidth: sel ? 2 : 1, borderColor: sel ? C.orange : col ? hexA(col, 0.45) : 'rgba(255,255,255,0.08)' }}>
-                              {col ? (
-                                <Icon path={st === 'done' ? 'M20 6 9 17l-5-5' : 'M6 6l12 12M18 6 6 18'} size={11} color={col} strokeWidth={2.8} />
-                              ) : null}
-                            </View>
-                            <Mono style={{ fontSize: 8.5, color: sel ? C.orange : C.muted3, marginTop: 4 }}>{['M', 'T', 'W', 'T', 'F', 'S', 'S'][i]}</Mono>
-                          </Pressable>
-                        );
-                      })}
-                    </View>
-                  </View>
-
-                  {/* metric bar rows */}
-                  {([
-                    ['STEPS', w.steps, C.blue, `${avg(w.steps).toFixed(1)}k avg`, 10],
-                    ['NUTRITION', w.nutrition, C.gold, `${avg(w.nutrition).toFixed(0)}/10 avg`, 10],
-                    ['SLEEP', w.sleep, C.purple, `${avg(w.sleep).toFixed(1)}h avg`, 10],
-                  ] as const).map(([lab, arr, col, avgLabel, maxV]) => (
-                    <View key={lab} style={{ flexDirection: 'row', alignItems: 'flex-end' }}>
-                      <View style={{ width: 74 }}>
-                        <Mono style={{ fontSize: 9, letterSpacing: 0.8, color: C.mono2 }}>{lab}</Mono>
-                        <Text style={{ fontFamily: F.bodyBold, fontSize: 11.5, color: col, marginTop: 2 }}>{avgLabel}</Text>
-                      </View>
-                      <View style={{ flex: 1, flexDirection: 'row', justifyContent: 'space-between' }}>
-                        {arr.map((v, i) => (
-                          <React.Fragment key={i}>{barCell(v, maxV, col)}</React.Fragment>
-                        ))}
-                      </View>
-                    </View>
-                  ))}
-                </View>
-
-                {/* Daily summary — selected day */}
-                {(() => {
-                  const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-                  const st = w.workout[selDay];
-                  const wc = st === 'done' ? C.green : st === 'missed' ? C.red : C.muted2;
-                  const stepsV = w.steps[selDay];
-                  const nutV = w.nutrition[selDay];
-                  const sleepV = w.sleep[selDay];
-                  const metric = (label: string, val: number | null, goal: number, unit: string, col: string) => (
-                    <View key={label} style={{ gap: 6 }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
-                        <Mono style={{ flex: 1, fontSize: 9, letterSpacing: 0.8, color: C.muted3 }}>{label}</Mono>
-                        <Text style={{ fontFamily: F.bodyBold, fontSize: 14, color: val === null ? C.muted3 : col }}>
-                          {val === null ? '—' : `${val}${unit}`}
-                        </Text>
-                        <Body style={{ fontSize: 10, color: C.muted3, marginLeft: 4 }}>/ {goal}{unit}</Body>
-                      </View>
-                      <ProgressBar pct={val === null ? 0 : Math.min(100, (val / goal) * 100)} height={5} fill={col} />
-                    </View>
-                  );
-                  // Add / edit health data: only the last 7 days (today and the 6 before), never the future.
-                  const rawDay = weeklyQ.data?.[selWeek]?.days[selDay];
-                  const dayYmd = rawDay?.date ?? null;
-                  const todayYmd = localToday();
-                  const canEditHealth = !!dayYmd && dayYmd <= todayYmd && dayYmd >= ymdMinusDays(todayYmd, 6);
-                  const hasAllHealth = stepsV != null && nutV != null && sleepV != null;
-                  const openHealthSheet = () => {
-                    if (!dayYmd) return;
-                    setHdSleep(rawDay?.sleepHours != null ? String(rawDay.sleepHours) : '');
-                    setHdRating(rawDay?.nutrition ?? null);
-                    setHdSteps(rawDay?.steps != null ? String(Math.round(rawDay.steps)) : ''); // raw count, not the "8.2k" shown in the bars
-                    saveHdM.reset();
-                    setHd({ ymd: dayYmd, sub: `${dayNames[selDay]} · ${w.dates[selDay]}`, edit: hasAllHealth });
-                  };
-                  return (
-                    <View ref={daySummaryRef} collapsable={false} style={{ padding: 14, borderRadius: 15, backgroundColor: hexA(wc === C.muted2 ? '#888888' : wc, 0.06), borderWidth: 1, borderColor: hexA(wc === C.muted2 ? '#888888' : wc, 0.22), gap: 12 }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                        <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: hexA(wc === C.muted2 ? '#888888' : wc, 0.15), borderWidth: 1.5, borderColor: hexA(wc === C.muted2 ? '#888888' : wc, 0.45), alignItems: 'center', justifyContent: 'center' }}>
-                          {st ? (
-                            <Icon path={st === 'done' ? 'M20 6 9 17l-5-5' : 'M6 6l12 12M18 6 6 18'} size={16} color={wc} strokeWidth={2.6} />
-                          ) : (
-                            <Icon name="calendar" size={15} color={C.muted2} strokeWidth={2} />
-                          )}
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <Serif style={{ fontSize: 17 }}>{dayNames[selDay]}</Serif>
-                          <Mono style={{ fontSize: 9.5, color: C.muted3, marginTop: 1 }}>{w.dates[selDay]}</Mono>
-                        </View>
-                        <Badge
-                          text={st === 'done' ? 'Workout done' : st === 'missed' ? 'Workout missed' : 'No workout'}
-                          color={wc === C.muted2 ? '#999189' : wc}
-                        />
-                      </View>
-                      {metric('STEPS', stepsV, w.stepsGoalK, 'k', C.blue)}
-                      {metric('NUTRITION', nutV, w.nutritionGoal, '', C.gold)}
-                      {metric('SLEEP', sleepV, w.sleepGoal, 'h', C.purple)}
-                      {canEditHealth ? (
-                        <Pressable onPress={openHealthSheet} hitSlop={6} accessibilityRole="button" accessibilityLabel={hasAllHealth ? 'Edit health data' : 'Add health data'}
-                          style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 11, borderRadius: 12, borderWidth: 1.2, borderStyle: 'dashed', borderColor: hexA(C.orange, 0.6), backgroundColor: hexA(C.orange, pressed ? 0.12 : 0.06) })}>
-                          <Icon name={hasAllHealth ? 'clipboard' : 'plus'} size={14} color={C.orange} strokeWidth={2.3} />
-                          <Text style={{ fontFamily: F.bodyBold, fontSize: 13, color: C.orange }}>{hasAllHealth ? 'Edit health data' : 'Add health data'}</Text>
-                        </Pressable>
-                      ) : null}
-                      {w.z2cTarget != null ? (
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 2 }}>
-                          <Mono style={{ flex: 1, fontSize: 9, letterSpacing: 0.8, color: C.muted3 }}>ZONE 2 CARDIO</Mono>
-                          {w.z2Min[selDay] != null ? (
-                            <Badge text={w.z2Min[selDay] ? `Done · ${w.z2Min[selDay]}m` : 'Done'} color={C.green} />
-                          ) : null}
-                          <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: w.z2cDone >= w.z2cTarget ? C.green : C.gold }}>{w.z2cDone}/{w.z2cTarget} this week</Text>
-                        </View>
-                      ) : null}
-
-                      {/* Daily Meals — what the client logged in the B2C app that day
-                          (nutrition_tracker.meals_analysis). */}
-                      {(() => {
-                        const meals = [...(w.meals[selDay] ?? [])].sort((a: any, b: any) => String(a?.timestamp ?? '').localeCompare(String(b?.timestamp ?? '')));
-                        const n1 = (v: any) => { const n = Number(v); return isFinite(n) ? Math.round(n * 10) / 10 : 0; };
-                        const tot = meals.reduce((acc: any, m: any) => ({ cal: acc.cal + n1(m?.calories), p: acc.p + n1(m?.protein), c: acc.c + n1(m?.carbs), f: acc.f + n1(m?.fats) }), { cal: 0, p: 0, c: 0, f: 0 });
-                        return (
-                          <View style={{ gap: 7, paddingTop: 4, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)' }}>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                              <Mono style={{ flex: 1, fontSize: 9, letterSpacing: 0.8, color: C.muted3 }}>DAILY MEALS{meals.length ? ` · ${meals.length}` : ''}</Mono>
-                              {meals.length ? (
-                                <Text style={{ fontFamily: F.bodyBold, fontSize: 11, color: C.gold }}>{Math.round(tot.cal)} kcal</Text>
-                              ) : null}
-                            </View>
-                            {meals.length === 0 ? (
-                              <Body style={{ fontSize: 11.5, color: C.muted3 }}>No meals logged this day.</Body>
-                            ) : (
-                              <>
-                                {meals.map((m: any, mi: number) => (
-                                  <View key={m?.id ?? mi} style={{ padding: 10, borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.03)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)', gap: 5 }}>
-                                    {/* Full meal description, never truncated (user request 25 Sep 2026): the
-                                        client types it in the B2C app and the trainer needs all of it. */}
-                                    <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
-                                      <Body style={{ flex: 1, fontSize: 12.5, lineHeight: 18, fontFamily: F.bodySemi, color: '#fff' }}>{m?.meal_name || 'Meal'}</Body>
-                                      {m?.timestamp ? (
-                                        <Mono style={{ fontSize: 8.5, color: C.muted3, marginTop: 3 }}>{istTimeParts(m.timestamp).time} {istTimeParts(m.timestamp).ampm}</Mono>
-                                      ) : null}
-                                    </View>
-                                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 5 }}>
-                                      {([
-                                        [`${Math.round(n1(m?.calories))} kcal`, C.gold],
-                                        [`P ${n1(m?.protein)}g`, C.green],
-                                        [`C ${n1(m?.carbs)}g`, C.blue],
-                                        [`F ${n1(m?.fats)}g`, C.orange],
-                                        ...(m?.fiber != null && n1(m.fiber) > 0 ? [[`Fb ${n1(m.fiber)}g`, C.purple] as [string, string]] : []),
-                                      ] as [string, string][]).map(([lab, col]) => (
-                                        <View key={lab} style={{ paddingVertical: 2.5, paddingHorizontal: 8, borderRadius: 999, backgroundColor: hexA(col, 0.09), borderWidth: 1, borderColor: hexA(col, 0.28) }}>
-                                          <Text style={{ fontFamily: F.bodySemi, fontSize: 9.5, color: col }}>{lab}</Text>
-                                        </View>
-                                      ))}
-                                    </View>
-                                  </View>
-                                ))}
-                                <Body style={{ fontSize: 10.5, color: C.muted2 }}>Day total: {Math.round(tot.cal)} kcal · P {Math.round(tot.p * 10) / 10}g · C {Math.round(tot.c * 10) / 10}g · F {Math.round(tot.f * 10) / 10}g</Body>
-                              </>
-                            )}
-                          </View>
-                        );
-                      })()}
-                    </View>
-                  );
-                })()}
-
-                {/* legend */}
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 14 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                    <View style={{ width: 9, height: 9, borderRadius: 3, backgroundColor: hexA(C.green, 0.7) }} />
-                    <Mono style={{ fontSize: 9, color: C.muted2 }}>Done</Mono>
-                  </View>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                    <View style={{ width: 9, height: 9, borderRadius: 3, backgroundColor: hexA(C.red, 0.7) }} />
-                    <Mono style={{ fontSize: 9, color: C.muted2 }}>Missed</Mono>
-                  </View>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                    <View style={{ width: 9, height: 9, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.12)' }} />
-                    <Mono style={{ fontSize: 9, color: C.muted2 }}>No data</Mono>
-                  </View>
-                </View>
-              </Card>
-            );
-          })()}
-
-          {/* Add / edit health data sheet (one Modal; backdrop is a sibling; keyboard-aware) */}
-          <Modal visible={!!hd} transparent animationType="slide" onRequestClose={() => { if (!hdSaving) closeHd(); }}>
-            <View style={{ flex: 1, justifyContent: 'flex-end' }}>
-              <Pressable onPress={() => { if (!hdSaving) closeHd(); }} accessibilityRole="button" accessibilityLabel="Close" importantForAccessibility="no-hide-descendants"
-                style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.62)' }} />
-              <View accessibilityViewIsModal style={{ maxHeight: hdKb > 0 ? '95%' : '88%', backgroundColor: C.sheetBg, borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: hexA(C.orange, 0.2), paddingHorizontal: 18, paddingTop: 14, paddingBottom: 16 + hdKb }}>
-                <View style={{ width: 40, height: 4, borderRadius: 99, backgroundColor: 'rgba(255,255,255,0.2)', alignSelf: 'center', marginBottom: 12 }} />
-                <Serif style={{ fontSize: 19 }}>{hd?.edit ? 'Edit health data' : 'Add health data'}</Serif>
-                <Body style={{ fontSize: 12, color: C.muted2, marginTop: 3, marginBottom: 12 }}>{hd?.sub} · saved values can be corrected here.</Body>
-                <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={{ flexShrink: 1 }} contentContainerStyle={{ gap: 14, paddingBottom: 6 }}>
-                  <View style={{ gap: 6 }}>
-                    <Mono style={{ fontSize: 9, letterSpacing: 0.8, color: C.muted3 }}>SLEEP (HOURS)</Mono>
-                    <TextInput value={hdSleep} onChangeText={setHdSleep} placeholder="e.g. 7.5" placeholderTextColor={C.muted3} keyboardType="decimal-pad" accessibilityLabel="Sleep hours"
-                      style={{ fontFamily: F.body, fontSize: 14, color: '#fff', paddingVertical: 11, paddingHorizontal: 12, borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }} />
-                  </View>
-                  <View style={{ gap: 6 }}>
-                    <Mono style={{ fontSize: 9, letterSpacing: 0.8, color: C.muted3 }}>NUTRITION (1-10)</Mono>
-                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                      {Array.from({ length: 10 }, (_, k) => k + 1).map((n) => {
-                        const on = hdRating === n;
-                        return (
-                          <Pressable key={n} onPress={() => setHdRating(on ? null : n)} hitSlop={4} accessibilityRole="button" accessibilityState={{ selected: on }}
-                            style={{ width: 44, paddingVertical: 9, borderRadius: 10, alignItems: 'center', backgroundColor: on ? hexA(C.gold, 0.18) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: on ? hexA(C.gold, 0.55) : 'rgba(255,255,255,0.09)' }}>
-                            <Text style={{ fontFamily: on ? F.bodyBold : F.bodySemi, fontSize: 13, color: on ? C.gold : C.ink }}>{n}</Text>
-                          </Pressable>
-                        );
-                      })}
-                    </View>
-                  </View>
-                  <View style={{ gap: 6 }}>
-                    <Mono style={{ fontSize: 9, letterSpacing: 0.8, color: C.muted3 }}>STEPS (COUNT)</Mono>
-                    <TextInput value={hdSteps} onChangeText={(t) => setHdSteps(t.replace(/[^0-9]/g, ''))} placeholder="e.g. 8500" placeholderTextColor={C.muted3} keyboardType="number-pad" accessibilityLabel="Steps count"
-                      style={{ fontFamily: F.body, fontSize: 14, color: '#fff', paddingVertical: 11, paddingHorizontal: 12, borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }} />
-                  </View>
-                </ScrollView>
-                <View style={{ flexDirection: 'row', gap: 10, paddingTop: 12 }}>
-                  <Pressable onPress={() => { if (!hdSaving) closeHd(); }} disabled={hdSaving} accessibilityRole="button"
-                    style={{ flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', opacity: hdSaving ? 0.5 : 1 }}>
-                    <Text style={{ fontFamily: F.bodySemi, fontSize: 13, color: C.muted }}>Cancel</Text>
-                  </Pressable>
-                  <Pressable onPress={saveHd} disabled={hdSaving} accessibilityRole="button" accessibilityLabel="Save health data"
-                    style={{ flex: 1.4, borderRadius: 12, overflow: 'hidden', opacity: hdSaving ? 0.6 : 1 }}>
-                    <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ minHeight: 46, alignItems: 'center', justifyContent: 'center' }}>
-                      {hdSaving ? <ActivityIndicator size="small" color="#fff" /> : <Text style={{ fontFamily: F.bodyBold, fontSize: 13.5, color: '#fff' }}>Save</Text>}
-                    </LinearGradient>
-                  </Pressable>
-                </View>
-              </View>
-            </View>
-          </Modal>
-        </>
-        )
+        <ClientTrendsSection clientId={clientId} scrollRef={trendScrollRef} scrollOffsetRef={trendOffsetRef} />
       ) : clientTab === 'progression' ? (
-        <>
-          {/* Age Scores — twin gauges + toggleable trend */}
-          <Card colors={['rgba(64,38,22,0.5)', 'rgba(18,14,14,0.55)']} border="rgba(255,150,90,0.14)" style={{ padding: 18, gap: 16 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-              <Icon name="activity" size={20} color={C.orange} strokeWidth={1.9} />
-              <Serif style={{ flex: 1, fontSize: 19 }}>Age Scores</Serif>
-              <Mono style={{ fontSize: 10, color: C.muted3 }}>Updated {bioUpdated}</Mono>
-            </View>
-
-            {bioRows.length === 0 ? (
-              <Body style={{ color: C.muted2, textAlign: 'center', paddingVertical: 16 }}>No biological age data yet.</Body>
-            ) : (
-            <View style={{ flexDirection: 'row', gap: 12 }}>
-              <AgeGauge
-                value={latestBio?.metabolic_age != null ? `${latestBio.metabolic_age}` : '—'}
-                label="Axion · Metabolic"
-                delta={fmtDelta(latestBio?.metabolic_age, latestBio?.chronological_age)}
-                deltaColor={(latestBio?.metabolic_age ?? 0) > (latestBio?.chronological_age ?? 0) ? C.gold : C.green}
-                color={C.blue}
-              />
-              <View style={{ width: 1, backgroundColor: 'rgba(255,255,255,0.06)' }} />
-              <AgeGauge
-                value={latestBio?.mechanical_age != null ? `${latestBio.mechanical_age}` : '—'}
-                label="MAQ · Mechanical"
-                delta={fmtDelta(latestBio?.mechanical_age, latestBio?.chronological_age)}
-                deltaColor={(latestBio?.mechanical_age ?? 0) > (latestBio?.chronological_age ?? 0) ? C.gold : C.green}
-                color={C.red}
-              />
-            </View>
-            )}
-
-            {/* series toggle + range */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <View style={{ flex: 1, flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: 999, padding: 3 }}>
-                {([['axion', 'Axion', C.blue], ['maq', 'MAQ', C.red]] as const).map(([id, label, col]) => {
-                  const active = ageSeries === id;
-                  return (
-                    <Pressable key={id} onPress={() => setAgeSeries(id)} style={{ flex: 1, alignItems: 'center', paddingVertical: 7, borderRadius: 999, backgroundColor: active ? hexA(col, 0.18) : 'transparent', borderWidth: 1, borderColor: active ? hexA(col, 0.45) : 'transparent' }}>
-                      <Text style={{ fontFamily: active ? F.bodyBold : F.bodySemi, fontSize: 12, color: active ? col : C.muted }}>{label}</Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-              <RangeChips options={['3M', 'All']} value={bioRange} onChange={setBioRange} accent={ageSeries === 'axion' ? C.blue : C.red} />
-            </View>
-
-            {ageSeries === 'axion' ? (
-              axionPtsF.length >= 2 ? <AreaLine id="axion" points={axionPtsF} color={C.blue} labels={axionLbls} /> : <Body style={{ color: C.muted3, textAlign: 'center', paddingVertical: 10 }}>{bioRange === '3M' && axionPts.length >= 2 ? 'No entries in the last 3 months.' : 'Not enough data for a trend.'}</Body>
-            ) : (
-              maqPtsF.length >= 2 ? <AreaLine id="maq" points={maqPtsF} color={C.red} labels={maqLbls} /> : <Body style={{ color: C.muted3, textAlign: 'center', paddingVertical: 10 }}>{bioRange === '3M' && maqPts.length >= 2 ? 'No entries in the last 3 months.' : 'Not enough data for a trend.'}</Body>
-            )}
-          </Card>
-
-          {/* Daily habits — sleep / steps / nutrition (last 5 days) + latest VO₂ max */}
-          <Card colors={['rgba(46,28,18,0.4)', 'rgba(18,14,14,0.5)']} border="rgba(255,150,90,0.09)" style={{ padding: 16, gap: 12 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-              <View style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: hexA(C.purple, 0.13), borderWidth: 1, borderColor: hexA(C.purple, 0.28), alignItems: 'center', justifyContent: 'center' }}>
-                <Icon name="clock" size={17} color={C.purple} strokeWidth={1.9} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Serif style={{ fontSize: 18 }}>Daily Habits</Serif>
-                <Body style={{ fontSize: 11, color: C.muted3 }}>Sleep · Steps · Nutrition — last 5 days</Body>
-              </View>
-              {detailQ.data?.vo2max != null ? (
-                <View style={{ alignItems: 'flex-end' }}>
-                  <Text style={{ fontFamily: F.bodyBold, fontSize: 17, color: C.red }}>
-                    {typeof detailQ.data.vo2max === 'number' ? detailQ.data.vo2max : String(detailQ.data.vo2max).replace(/\s*ml\/kg\/min\s*/i, '')}
-                  </Text>
-                  <Mono style={{ fontSize: 7.5, letterSpacing: 0.6, color: C.muted3 }}>VO₂ MAX</Mono>
-                </View>
-              ) : null}
-            </View>
-            {dailyQ.isLoading ? (
-              <View style={{ alignItems: 'center', paddingVertical: 16 }}><ActivityIndicator color={C.purple} /></View>
-            ) : (
-              <View style={{ borderRadius: 13, borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)', overflow: 'hidden' }}>
-                <View style={{ flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.04)', paddingVertical: 8, paddingHorizontal: 12 }}>
-                  <Mono style={{ flex: 1.3, fontSize: 8.5, letterSpacing: 0.6, color: C.muted3 }}>DAY</Mono>
-                  <Mono style={{ flex: 1, fontSize: 8.5, letterSpacing: 0.6, color: C.muted3, textAlign: 'center' }}>SLEEP</Mono>
-                  <Mono style={{ flex: 1, fontSize: 8.5, letterSpacing: 0.6, color: C.muted3, textAlign: 'center' }}>STEPS</Mono>
-                  <Mono style={{ flex: 1, fontSize: 8.5, letterSpacing: 0.6, color: C.muted3, textAlign: 'right' }}>NUTRITION</Mono>
-                </View>
-                {(dailyQ.data ?? []).map((r, i) => (
-                  <View key={r.ymd} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 12, borderTopWidth: i === 0 ? 0 : 1, borderTopColor: 'rgba(255,255,255,0.05)', backgroundColor: i === 0 ? hexA(C.purple, 0.05) : 'transparent' }}>
-                    <Body style={{ flex: 1.3, fontSize: 12.5, color: i === 0 ? '#fff' : C.ink3, fontFamily: i === 0 ? F.bodySemi : undefined }}>{r.label}</Body>
-                    <Text style={{ flex: 1, textAlign: 'center', fontFamily: F.bodySemi, fontSize: 12.5, color: r.sleep != null ? C.blue : C.muted3 }}>{r.sleep != null ? `${r.sleep}h` : '—'}</Text>
-                    <Text style={{ flex: 1, textAlign: 'center', fontFamily: F.bodySemi, fontSize: 12.5, color: r.steps != null ? C.green : C.muted3 }}>{r.steps != null ? r.steps.toLocaleString('en-IN') : '—'}</Text>
-                    <Text style={{ flex: 1, textAlign: 'right', fontFamily: F.bodySemi, fontSize: 12.5, color: r.nutrition != null ? C.orange : C.muted3 }}>{r.nutrition != null ? `${r.nutrition}/10` : '—'}</Text>
-                  </View>
-                ))}
-              </View>
-            )}
-          </Card>
-
-          {/* Session Load */}
-          <Card colors={['rgba(46,28,18,0.4)', 'rgba(18,14,14,0.5)']} border="rgba(255,150,90,0.09)" style={{ padding: 16, gap: 13 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-              <View style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: hexA(C.orange, 0.13), borderWidth: 1, borderColor: hexA(C.orange, 0.28), alignItems: 'center', justifyContent: 'center' }}>
-                <Icon name="bars" size={17} color={C.orange} strokeWidth={1.9} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Serif style={{ fontSize: 18 }}>Session Load</Serif>
-                <Mono style={{ fontSize: 9.5, color: C.muted3 }}>{rangeLabel(loadRange)} · {loadSeries.count} session{loadSeries.count === 1 ? '' : 's'}</Mono>
-              </View>
-              <View style={{ alignItems: 'flex-end' }}>
-                <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 4 }}>
-                  <Serif style={{ fontSize: 26, color: C.orange }}>{loadSeries.headline.toLocaleString()}</Serif>
-                  <Body style={{ fontSize: 11.5, color: C.muted2, marginBottom: 4 }}>kg avg</Body>
-                </View>
-              </View>
-            </View>
-            <RangeChips options={['W', 'M', '6M']} value={loadRange} onChange={setLoadRange} />
-            {progQ.isLoading ? (
-              <Body style={{ color: C.muted3, textAlign: 'center', paddingVertical: 18, fontSize: 12.5 }}>Loading…</Body>
-            ) : (
-              <ProgChart range={loadRange} id="load" data={loadSeries.data} labels={loadSeries.labels} color={C.orange} avg={loadSeries.headline || undefined} />
-            )}
-          </Card>
-
-          {/* Max 1RM Progress */}
-          <Card colors={['rgba(46,28,18,0.4)', 'rgba(18,14,14,0.5)']} border="rgba(255,150,90,0.09)" style={{ padding: 16, gap: 13 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-              <View style={{ width: 38, height: 38, borderRadius: 12, backgroundColor: hexA(C.green, 0.13), borderWidth: 1, borderColor: hexA(C.green, 0.28), alignItems: 'center', justifyContent: 'center' }}>
-                <Icon name="trend" size={17} color={C.green} strokeWidth={1.9} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Serif style={{ fontSize: 18 }}>Max 1RM Progress</Serif>
-                <Mono style={{ fontSize: 9.5, color: C.muted3 }}>{rangeLabel(rmRange)} · {rmSeries.count} session{rmSeries.count === 1 ? '' : 's'}</Mono>
-              </View>
-              <View style={{ alignItems: 'flex-end', gap: 4 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 4 }}>
-                  <Serif style={{ fontSize: 26, color: C.green }}>{rmSeries.headline}</Serif>
-                  <Body style={{ fontSize: 11.5, color: C.muted2, marginBottom: 4 }}>kg max</Body>
-                </View>
-              </View>
-            </View>
-            <RangeChips options={['W', 'M', '6M']} value={rmRange} onChange={setRmRange} accent={C.green} />
-            {progQ.isLoading ? (
-              <Body style={{ color: C.muted3, textAlign: 'center', paddingVertical: 18, fontSize: 12.5 }}>Loading…</Body>
-            ) : (
-              <ProgChart range={rmRange} id="rm" data={rmSeries.data} labels={rmSeries.labels} color={C.green} />
-            )}
-          </Card>
-        </>
+        <ClientProgressionSection clientId={clientId} />
       ) : clientTab === 'reports' ? (
         <Card colors={['rgba(46,28,18,0.4)', 'rgba(18,14,14,0.5)']} border="rgba(255,150,90,0.09)" style={{ padding: 16, gap: 14 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
@@ -5549,178 +5842,7 @@ export function ClientDetail() {
           )}
         </Card>
       ) : (
-        <Card colors={['rgba(46,28,18,0.4)', 'rgba(18,14,14,0.5)']} border="rgba(255,150,90,0.09)" style={{ padding: 16, gap: 14 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <Icon name="file" size={20} color={C.gold} strokeWidth={1.9} />
-            <View style={{ flex: 1 }}>
-              <Serif style={{ fontSize: 19 }}>Training Plans</Serif>
-              <Body style={{ fontSize: 11.5, color: C.muted, marginTop: 1 }}>{planSummary}</Body>
-            </View>
-            <Pressable onPress={() => { set({ editingPlan: null }); go('create-plan'); }}>
-              <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 9, paddingHorizontal: 13, borderRadius: 999 }}>
-                <Icon name="plus" size={13} color="#fff" strokeWidth={2.8} />
-                <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: '#fff' }}>Create Plan</Text>
-              </LinearGradient>
-            </Pressable>
-          </View>
-          {plansQ.isLoading ? (
-            <Body style={{ color: C.muted2, textAlign: 'center', paddingVertical: 20 }}>Loading plans…</Body>
-          ) : (plansQ.data?.length ?? 0) === 0 ? (
-            <Body style={{ color: C.muted2, textAlign: 'center', paddingVertical: 20 }}>No plans yet — create one above.</Body>
-          ) : (
-            (plansQ.data ?? []).map((p: any, i: number) => {
-              const stat = (p.status ?? 'approved') as string;
-              const statMeta =
-                stat === 'approved'
-                  ? p.expired ? { label: 'Expired', color: C.gold } : { label: 'Active', color: C.green }
-                  : stat === 'pending_review' ? { label: 'Pending review', color: C.blue }
-                  : stat === 'rejected' ? { label: 'Rejected', color: C.red }
-                  : stat === 'needs_revision' ? { label: 'Needs revision', color: C.gold }
-                  : { label: stat, color: C.muted };
-              const c = statMeta.color;
-              const weeks = p.plan_duration_weeks ? `${p.plan_duration_weeks} weeks` : null;
-              const exCount = p.exercises?.length ?? 0;
-              const meta = [weeks, p.modality, exCount ? `${exCount} exercises` : null].filter(Boolean).join(' · ') || 'Training plan';
-              const isOpen = openPlan === p.plan_id;
-              // Group exercises by body part for display
-              const groups: Record<string, any[]> = {};
-              for (const ex of (p.exercises ?? [])) {
-                const key = ex.body_part || 'General';
-                (groups[key] = groups[key] || []).push(ex);
-              }
-              // Edit gating (web parity): "most recent plan for this modality"
-              // is judged among MY plans only — plans are already newest-first.
-              const modKey = normalizePlanModality(p.modality);
-              const isMostRecent =
-                (plansQ.data ?? []).find((x: any) => x.mine && normalizePlanModality(x.modality) === modKey)?.plan_id === p.plan_id;
-              const startEdit = () => {
-                const myRows = (p.exercises ?? [])
-                  .filter((ex: any) => ex.trainer_id === myTrainerId)
-                  .sort((a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0));
-                set({
-                  editingPlan: {
-                    planId: p.plan_id,
-                    planName: p.plan_name ?? '',
-                    planDescription: p.plan_description ?? '',
-                    durationWeeks: p.plan_duration_weeks ?? 6,
-                    modality: p.modality ?? 'Strength Training',
-                    rows: myRows,
-                  },
-                });
-                go('create-plan');
-              };
-              // Coach asked for changes: the trainer must see WHY and get a
-              // one-tap Edit without hunting inside the expanded card (web
-              // shows both directly on the Training Programs card).
-              const myStat = (p.my_status ?? p.status ?? '') as string;
-              const quickEditable = p.mine && !!clientId && (myStat === 'pending_review' || myStat === 'needs_revision' || myStat === 'rejected');
-              const feedback = p.my_feedback ?? p.coach_feedback;
-              return (
-                <View key={p.plan_id ?? i} style={{ borderRadius: 14, backgroundColor: 'rgba(0,0,0,0.25)', borderWidth: 1, borderColor: hexA(c, 0.2), overflow: 'hidden' }}>
-                  <Pressable onPress={() => setOpenPlan(isOpen ? null : p.plan_id)} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, padding: 13 }}>
-                    <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: hexA(c, 0.13), alignItems: 'center', justifyContent: 'center' }}>
-                      <Icon name="layers" size={18} color={c} strokeWidth={1.9} />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Body style={{ fontSize: 14.5, fontFamily: F.bodySemi, color: '#fff' }}>{p.plan_name || 'Training Plan'}</Body>
-                      <Body style={{ fontSize: 11.5, color: C.muted2, marginTop: 1 }}>{meta}</Body>
-                      {(() => {
-                        // Created + expiry dates (expiry = approved_at + 42d, the shared rule).
-                        const created = p.created_at ? `Created ${istDayLabel(p.created_at)}` : null;
-                        const expiry = p.approved_at
-                          ? `${p.expired ? 'Expired' : 'Expires'} ${istDayLabel(new Date(new Date(p.approved_at).getTime() + PLAN_VALID_DAYS * 864e5).toISOString())}`
-                          : stat === 'approved' ? null : 'Expires 42d after approval';
-                        const line = [created, expiry].filter(Boolean).join(' · ');
-                        return line ? (
-                          <Body style={{ fontSize: 10, color: p.expired ? C.gold : C.muted3, marginTop: 2 }}>{line}</Body>
-                        ) : null;
-                      })()}
-                    </View>
-                    <Badge text={statMeta.label} color={c} />
-                    {quickEditable ? (
-                      <Pressable onPress={startEdit} hitSlop={6} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 999, backgroundColor: hexA(C.orange, 0.12), borderWidth: 1, borderColor: hexA(C.orange, 0.45) }}>
-                        <Icon path="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" size={11} color={C.orange} strokeWidth={2.2} />
-                        <Text style={{ fontFamily: F.bodyBold, fontSize: 11, color: C.orange }}>Edit</Text>
-                      </Pressable>
-                    ) : null}
-                    <Icon name={isOpen ? 'chevUp' : 'chevDown'} size={16} color={C.muted} strokeWidth={2.2} />
-                  </Pressable>
-                  {feedback && (myStat === 'needs_revision' || myStat === 'rejected') ? (
-                    <View style={{ flexDirection: 'row', gap: 8, marginHorizontal: 13, marginBottom: isOpen ? 10 : 13, padding: 10, borderRadius: 11, backgroundColor: hexA(C.red, 0.07), borderWidth: 1, borderColor: hexA(C.red, 0.28) }}>
-                      <Icon name="alert" size={13} color={C.red} strokeWidth={2.1} />
-                      <Body style={{ flex: 1, fontSize: 12, color: '#E0A090', lineHeight: 17 }}>
-                        <Text style={{ fontFamily: F.bodyBold, color: C.red }}>Coach feedback: </Text>{feedback}
-                      </Body>
-                    </View>
-                  ) : null}
-                  {isOpen ? (
-                    <View style={{ paddingHorizontal: 13, paddingBottom: 13, gap: 12, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)', paddingTop: 12 }}>
-                      {p.plan_description ? <Body style={{ fontSize: 12.5, color: C.muted2 }}>{p.plan_description}</Body> : null}
-                      {p.mine && clientId ? (
-                        <PlanEditAction plan={p} clientId={clientId} isMostRecent={isMostRecent} onEdit={startEdit} />
-                      ) : !p.mine && p.shared ? (
-                        <Body style={{ fontSize: 10.5, color: C.muted3 }}>Added by another trainer. Only the trainer who added these exercises can edit them.</Body>
-                      ) : null}
-                      {exCount === 0 ? (
-                        <Body style={{ fontSize: 12.5, color: C.muted3 }}>No exercises in this plan.</Body>
-                      ) : (
-                        Object.entries(groups).map(([bp, exs]) => (
-                          <View key={bp} style={{ gap: 8 }}>
-                            <Mono style={{ fontSize: 9.5, letterSpacing: 1, color: c }}>{bp.toUpperCase()}</Mono>
-                            {exs.map((ex: any, j: number) => {
-                              const exKey = `${p.plan_id}:${ex.id ?? j}`;
-                              const exOpen = openExercise === exKey;
-                              const setCount = ex.set_number != null && `${ex.set_number}`.trim() !== '' ? `${ex.set_number}` : null;
-                              const detail: [string, string][] = [
-                                ['SETS', setCount ?? '—'],
-                                ...(ex.reps_target != null ? [['TARGET REPS', `${ex.reps_target}`] as [string, string]] : []),
-                                ...(ex.load_target != null ? [['LOAD', `${ex.load_target} kg`] as [string, string]] : []),
-                                ...(ex.rm_percentage != null ? [['RM %', `${ex.rm_percentage}%`] as [string, string]] : []),
-                                ...(ex.tempo ? [['TEMPO', `${ex.tempo}`] as [string, string]] : []),
-                                ...(ex.rest_period != null ? [['REST', `${ex.rest_period}s`] as [string, string]] : []),
-                                ...(ex.duration ? [['DURATION', `${ex.duration}`] as [string, string]] : []),
-                              ];
-                              return (
-                                <View key={exKey} style={{ borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.03)', borderWidth: 1, borderColor: exOpen ? hexA(c, 0.3) : 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
-                                  <Pressable onPress={() => setOpenExercise(exOpen ? null : exKey)} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, padding: 11 }}>
-                                    <View style={{ flex: 1 }}>
-                                      <Body style={{ fontSize: 13.5, fontFamily: F.bodySemi, color: '#fff' }}>{ex.exercise_name || ex.sub_activity || 'Exercise'}</Body>
-                                      <Mono style={{ fontSize: 10, color: C.muted3, marginTop: 2 }}>{setCount ? `${setCount} sets` : 'Tap for details'}</Mono>
-                                    </View>
-                                    {ex.super_set_group ? <Badge text={`SS ${ex.super_set_group}`} color={C.purple} /> : null}
-                                    <Icon name={exOpen ? 'chevUp' : 'chevDown'} size={14} color={C.muted} strokeWidth={2.2} />
-                                  </Pressable>
-                                  {exOpen ? (
-                                    <View style={{ paddingHorizontal: 11, paddingBottom: 11, gap: 8, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)', paddingTop: 10 }}>
-                                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                                        {detail.map(([lab, val]) => (
-                                          <View key={lab} style={{ minWidth: '30%', flexGrow: 1, paddingVertical: 7, paddingHorizontal: 10, borderRadius: 9, backgroundColor: 'rgba(0,0,0,0.25)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' }}>
-                                            <Mono style={{ fontSize: 8.5, letterSpacing: 0.6, color: C.muted3 }}>{lab}</Mono>
-                                            <Text style={{ fontFamily: F.bodyBold, fontSize: 13.5, color: C.ink, marginTop: 2 }}>{val}</Text>
-                                          </View>
-                                        ))}
-                                      </View>
-                                      {ex.exercise_notes ? (
-                                        <View>
-                                          <Mono style={{ fontSize: 8.5, letterSpacing: 0.6, color: C.muted3, marginBottom: 3 }}>NOTES</Mono>
-                                          <Body style={{ fontSize: 12, color: C.muted2 }}>{ex.exercise_notes}</Body>
-                                        </View>
-                                      ) : null}
-                                    </View>
-                                  ) : null}
-                                </View>
-                              );
-                            })}
-                          </View>
-                        ))
-                      )}
-                    </View>
-                  ) : null}
-                </View>
-              );
-            })
-          )}
-        </Card>
+        <ClientPlansSection clientId={clientId} />
       )}
 
       {/* Report detail sheets */}
