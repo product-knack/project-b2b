@@ -1668,7 +1668,10 @@ export type PlanSetInput = {
   ss: string;         // super-set group (A/B/…)
   notes: string;
 };
-export type PlanExerciseInput = { name: string; measurement: 'reps' | 'duration'; sets: PlanSetInput[] };
+/** An Odds AI exercise that is not in exercises_db yet (16 Oct 2026): labelled NOT IN DB in Create Plan
+    and added to the library by add_ai_exercises_to_library when the plan is submitted. */
+export type PlanExerciseNotInDb = { muscle_group: string | null; equipment: string | null; modality: string };
+export type PlanExerciseInput = { name: string; measurement: 'reps' | 'duration'; sets: PlanSetInput[]; notInDb?: PlanExerciseNotInDb | null };
 export type PlanBodyPartInput = { body_part: string; exercises: PlanExerciseInput[] };
 export type PlanYogaInput = { name: string; type: 'Constant' | 'Custom' };
 export type PlanBoxingSelection = { category: string; exercise: string };
@@ -1852,7 +1855,35 @@ export async function submitWorkoutPlan(input: WorkoutPlanCreateInput) {
             : error.message
         );
       }
+      // Odds AI exercises that were not in the library (NOT IN DB) and are still in the plan join
+      // exercises_db now (16 Oct 2026). Best effort: the plan is saved either way; a retried sync skips
+      // names the library already has.
+      await addAiExercisesToLibrary(planId, bodyParts);
       return { planId, count: rows.length };
+}
+
+/** The NOT IN DB exercises of a submitted plan, as add_ai_exercises_to_library items (deduped by name). */
+export const notInDbItems = (bodyParts: PlanBodyPartInput[]) => {
+  const seen = new Set<string>();
+  const out: { name: string; modality: string; muscle_group: string | null; equipment: string | null; measurement: 'reps' | 'duration' }[] = [];
+  for (const bp of bodyParts ?? []) {
+    for (const ex of bp.exercises ?? []) {
+      const name = (ex.name ?? '').trim();
+      if (!ex.notInDb || !name || seen.has(name.toLowerCase())) continue;
+      seen.add(name.toLowerCase());
+      out.push({ name, modality: ex.notInDb.modality || 'Strength', muscle_group: ex.notInDb.muscle_group ?? null, equipment: ex.notInDb.equipment ?? null, measurement: ex.measurement });
+    }
+  }
+  return out;
+};
+async function addAiExercisesToLibrary(planId: string, bodyParts: PlanBodyPartInput[]) {
+  const items = notInDbItems(bodyParts);
+  if (!items.length) return;
+  try {
+    await withTimeout(
+      Promise.resolve((supabase.rpc as any)('add_ai_exercises_to_library', { p_plan_id: planId, p_items: items })) as Promise<{ data: any; error: any }>,
+      NET_MS, 'Add exercises to the library');
+  } catch { /* the plan is saved; the library add can be repeated by the next plan that carries the name */ }
 }
 
 export function useCreateWorkoutPlan() {
@@ -1861,6 +1892,8 @@ export function useCreateWorkoutPlan() {
     mutationFn: submitWorkoutPlan,
     onSuccess: (_r, vars) => {
       qc.invalidateQueries({ queryKey: ['client-plans', vars.clientId] });
+      // NOT IN DB exercises may have joined the library: the plan pickers read it fresh.
+      qc.invalidateQueries({ queryKey: ['plan-exercise-db'] });
       // The Essentials "make a workout plan" home alert turns to "waiting for approval" (16 Oct 2026).
       qc.invalidateQueries({ queryKey: ['trainer-essentials-plan-gaps'] });
     },

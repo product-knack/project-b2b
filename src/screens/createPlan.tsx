@@ -699,7 +699,19 @@ export function CreatePlan() {
                       <View style={{ width: 24, height: 24, borderRadius: 8, backgroundColor: hexA(C.orange, 0.13), alignItems: 'center', justifyContent: 'center' }}>
                         <Text style={{ fontFamily: F.mono, fontSize: 11, color: C.orange }}>{exi + 1}</Text>
                       </View>
-                      <Body numberOfLines={1} style={{ flex: 1, fontSize: 14.5, fontFamily: F.bodySemi, color: '#fff' }}>{ex.name}</Body>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        {/* An Odds AI exercise that is not in our library yet: saved to it with the plan (16 Oct 2026). */}
+                        {ex.notInDb ? (
+                          <View style={{ alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 3, paddingVertical: 2, paddingHorizontal: 7, borderRadius: 999, backgroundColor: hexA(C.gold, 0.14), borderWidth: 1, borderColor: hexA(C.gold, 0.5) }}>
+                            <Icon name="plus" size={9} color={C.gold} strokeWidth={2.6} />
+                            <Mono style={{ fontSize: 8, letterSpacing: 1, color: C.gold }}>NOT IN DB · ADDED TO THE LIBRARY ON SUBMIT</Mono>
+                          </View>
+                        ) : null}
+                        <Body numberOfLines={1} style={{ fontSize: 14.5, fontFamily: F.bodySemi, color: '#fff' }}>{ex.name}</Body>
+                        {ex.notInDb && (ex.notInDb.muscle_group || ex.notInDb.equipment) ? (
+                          <Body numberOfLines={1} style={{ fontSize: 10.5, color: C.muted2, marginTop: 1 }}>{[ex.notInDb.muscle_group, ex.notInDb.equipment].filter(Boolean).join(' · ')}</Body>
+                        ) : null}
+                      </View>
                       <Pressable onPress={() => removeExercise(bpi, exi)} hitSlop={8}>
                         <Icon name="close" size={15} color={C.muted2} strokeWidth={2.2} />
                       </Pressable>

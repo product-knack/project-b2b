@@ -250,6 +250,7 @@ async function processItem(item: OutboxItem): Promise<{ linkPending?: boolean } 
     await submitWorkoutPlan(p);
     qcRef?.invalidateQueries({ queryKey: ['client-plans', p.clientId] });
     qcRef?.invalidateQueries({ queryKey: ['trainer-essentials-plan-gaps'] }); // Essentials plan alert (16 Oct 2026)
+    qcRef?.invalidateQueries({ queryKey: ['plan-exercise-db'] }); // NOT IN DB exercises may have joined the library
   } else if (item.kind === 'edit-plan') {
     // The RPC re-validates the 4-workout lock server-side at THIS moment, so a
     // queued edit that syncs after the 4th workout fails here with the friendly

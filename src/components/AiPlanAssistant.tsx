@@ -12,7 +12,7 @@ import { Icon } from '../icons';
 import { Body, Mono, Serif } from './primitives';
 import { trackEvent } from '../lib/amplitude';
 import { useAiPlanDraft } from '../lib/aiPlanQueries';
-import { SPLITS, sourcesLine, draftExerciseCount, type AiPlanPreview, type AiPlanResult, type SplitKey } from '../lib/aiPlanDraft';
+import { SPLITS, sourcesLine, draftExerciseCount, draftNewExercises, type AiPlanPreview, type AiPlanResult, type SplitKey } from '../lib/aiPlanDraft';
 
 const AI = '#A78BFA';
 const STEPS = ['Reading the QHP', 'Checking blood markers and medical history', 'Picking exercises from the Odds library', 'Setting sets, reps and rest', 'Checking every exercise against the library'];
@@ -51,7 +51,7 @@ export function AiPlanAssistant({ clientId, clientName, preview, onApply }: {
     try {
       const r = await draftM.mutateAsync({ clientId, split, sessionsPerWeek: perWeek, note });
       setResult(r);
-      trackEvent('AI Plan Generated', { client_id: clientId, split, model: r.model, exercises: draftExerciseCount(r.draft), dropped: r.dropped.length });
+      trackEvent('AI Plan Generated', { client_id: clientId, split, model: r.model, exercises: draftExerciseCount(r.draft), not_in_db: draftNewExercises(r.draft).length, dropped: r.dropped.length });
       onApply(r);
     } catch (e: any) {
       trackEvent('AI Plan Generate Failed', { client_id: clientId, split, error: String(e?.message ?? e).slice(0, 120) });
@@ -157,6 +157,14 @@ export function AiPlanAssistant({ clientId, clientName, preview, onApply }: {
                 </Text>
               </View>
               <Body style={{ fontSize: 11, color: C.muted2, lineHeight: 15 }}>Change, add or delete anything, then submit. It goes for approval like any plan.</Body>
+              {draftNewExercises(result.draft).length ? (
+                <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6, padding: 9, borderRadius: 11, backgroundColor: hexA(C.gold, 0.08), borderWidth: 1, borderColor: hexA(C.gold, 0.35) }}>
+                  <Icon name="plus" size={11} color={C.gold} strokeWidth={2.6} />
+                  <Body style={{ flex: 1, fontSize: 11, color: C.gold, lineHeight: 15 }}>
+                    Not in our library yet: {draftNewExercises(result.draft).join(', ')}. They are marked NOT IN DB below and join the library when you submit; delete any you do not want.
+                  </Body>
+                </View>
+              ) : null}
               {result.draft.rationale.length ? (
                 <View style={{ gap: 4 }}>
                   <Mono style={{ fontSize: 8.5, letterSpacing: 1.2, color: C.green }}>WHY THIS PLAN</Mono>

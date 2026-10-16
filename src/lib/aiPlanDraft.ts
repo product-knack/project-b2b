@@ -19,7 +19,9 @@ export const splitOf = (k: string | null | undefined): SplitOption | null => SPL
 
 /* ---------- the server's answer ---------- */
 export type DraftSet = { reps: number | null; duration: string | null; rest: number | null; tempo: string | null; rir: number | null; note: string | null };
-export type DraftExercise = { name: string; measurement: 'reps' | 'duration'; group?: string | null; sets: DraftSet[] };
+/** in_db false = an exercise the AI found more effective that is not in exercises_db yet (16 Oct 2026):
+    NOT IN DB in the form, added to the library when the plan is submitted. */
+export type DraftExercise = { name: string; measurement: 'reps' | 'duration'; group?: string | null; in_db?: boolean; equipment?: string | null; modality?: string | null; sets: DraftSet[] };
 export type DraftSection = { name: string; exercises: DraftExercise[] };
 export type AiPlanDraft = {
   plan_name: string;
@@ -66,13 +68,19 @@ export const draftToBodyParts = (d: AiPlanDraft): PlanBodyPartInput[] => {
     exercises: (sec.exercises ?? []).filter((e) => e && e.name).map((e) => {
       const measurement: 'reps' | 'duration' = e.measurement === 'duration' ? 'duration' : 'reps';
       const sets = (e.sets?.length ? e.sets : [{ reps: null, duration: null, rest: null, tempo: null, rir: null, note: null }]).map((s) => draftSetToInput(s, measurement));
-      return { name: e.name, measurement, sets };
+      const notInDb = e.in_db === false
+        ? { muscle_group: e.group ?? null, equipment: e.equipment ?? null, modality: e.modality || (/conditioning/i.test(sec.name) ? 'Cardio' : 'Strength') }
+        : null;
+      return notInDb ? { name: e.name, measurement, sets, notInDb } : { name: e.name, measurement, sets };
     }),
   }));
   return out.length ? out : [{ body_part: '', exercises: [] }];
 };
 
 export const draftExerciseCount = (d: AiPlanDraft | null | undefined) => (d?.sections ?? []).reduce((n, s) => n + (s.exercises?.length ?? 0), 0);
+/** The exercises of a draft that are not in the library yet. */
+export const draftNewExercises = (d: AiPlanDraft | null | undefined): string[] =>
+  (d?.sections ?? []).flatMap((s) => (s.exercises ?? []).filter((e) => e.in_db === false).map((e) => e.name));
 
 /* ---------- copy ---------- */
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
