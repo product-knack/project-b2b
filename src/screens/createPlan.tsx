@@ -16,6 +16,10 @@ import {
 } from '../lib/clientQueries';
 import { enqueueOutbox, getIsOnline, useIsOnline, getOutbox, updateOutboxItem } from '../lib/offline';
 import { useDragReorder } from '../lib/useDragReorder';
+import { AiPlanAssistant } from '../components/AiPlanAssistant';
+import { useAiPlanPreview } from '../lib/aiPlanQueries';
+import { draftToBodyParts, shouldFill, draftExerciseCount, type AiPlanResult } from '../lib/aiPlanDraft';
+import { trackEvent } from '../lib/amplitude';
 
 /* ============ CREATE WORKOUT PLAN ============
    Mirrors the web app's Create Workout Plan form end-to-end (client, plan meta,
@@ -233,6 +237,42 @@ export function CreatePlan() {
   /* Switching modality resets the builder (the exercise pool and builder are
      modality-specific) — when exercises are already selected, confirm first so
      a stray tap can't silently throw the work away. */
+  /* ---- Odds AI plan assistant (16 Oct 2026): Essentials clients only, new plans only ----
+     The server decides eligibility (Essentials client + a caller who may plan for them). The draft
+     fills the Strength Training builder; the name and description only when the trainer has not
+     typed their own (or still holds the previous AI text). */
+  const aiPreviewQ = useAiPlanPreview(selectedClientId, !isEdit && isOnline);
+  const aiEligible = !isEdit && aiPreviewQ.data?.eligible === true;
+  const lastAi = React.useRef<{ name: string; desc: string } | null>(null);
+  React.useEffect(() => {
+    // An Essentials client's plan is a Strength Training plan (it covers the Strength and Cardio days).
+    if (aiEligible && !modality) setModality('Strength Training');
+  }, [aiEligible]); // eslint-disable-line react-hooks/exhaustive-deps
+  const applyAiDraft = (r: AiPlanResult) => {
+    const doApply = () => {
+      setOpenSet(null);
+      setPickerFor(null); setSelPick({}); setExSearch('');
+      setModality('Strength Training');
+      setBodyParts(draftToBodyParts(r.draft));
+      if (shouldFill(planName, lastAi.current?.name ?? null)) setPlanName(r.draft.plan_name);
+      if (shouldFill(desc, lastAi.current?.desc ?? null)) setDesc(r.draft.description);
+      lastAi.current = { name: r.draft.plan_name, desc: r.draft.description };
+      trackEvent('AI Plan Draft Applied', { client_id: selectedClientId, split: r.draft.split, exercises: draftExerciseCount(r.draft) });
+    };
+    if (hasContent) {
+      Alert.alert(
+        'Replace the exercises?',
+        `The Odds AI draft replaces the ${contentCount} ${modality === 'Boxing' || modality === 'Yoga' ? 'activities' : 'exercises'} already in this form.`,
+        [
+          { text: 'Keep mine', style: 'cancel' },
+          { text: 'Replace with the draft', style: 'destructive', onPress: doApply },
+        ],
+      );
+      return;
+    }
+    doApply();
+  };
+
   const resetBuildersTo = (next: PlanModality) => {
     setBodyParts([{ body_part: '', exercises: [] }]);
     setOpenSet(null);
@@ -445,6 +485,11 @@ export function CreatePlan() {
             </Body>
           </View>
         </View>
+
+        {/* Odds AI plan assistant: Essentials clients, new plans (16 Oct 2026) */}
+        {aiEligible && aiPreviewQ.data && selectedClientId ? (
+          <AiPlanAssistant clientId={selectedClientId} clientName={clientName} preview={aiPreviewQ.data} onApply={applyAiDraft} />
+        ) : null}
 
         {/* Plan details */}
         <Card colors={['rgba(50,30,19,0.45)', 'rgba(18,14,14,0.5)']} radius={20} style={{ padding: 18, gap: 15 }}>

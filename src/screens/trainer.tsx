@@ -56,6 +56,7 @@ import { PdfPreview } from '../components/PdfPreview';
 import { QhpVoiceMemoButton, QhpVoiceMemoPlayer, QhpVoiceMemoDialog } from '../components/QhpVoiceMemo';
 import { QhpRefreshPendingCard } from '../components/qhpRefreshPending';
 import { EssentialsAuctionHomeCard } from '../components/essentialsAuctionCard';
+import { EssentialsPlanAlertCard } from '../components/essentialsPlanAlert';
 import { AuctionResultsCards } from '../components/auctionResultsCards';
 import { NucleusHomeCard } from './nucleus';
 import { DailyQuizModal } from '../components/dailyQuizModal';
@@ -2015,6 +2016,8 @@ export function Dashboard() {
          (1 Oct 2026); tap opens the auction page. Renders nothing otherwise. */}
       {/* Essentials Auction won / lost cards (10 Oct 2026): 4 hours after the 4 PM decision */}
       <AuctionResultsCards />
+      {/* Essentials client won with no valid plan: make it with Odds AI (16 Oct 2026). Nothing otherwise. */}
+      <EssentialsPlanAlertCard />
       <EssentialsAuctionHomeCard />
 
       {/* Odds Nucleus teaser (16 Oct 2026): the hero piece; nothing while the library is empty. */}

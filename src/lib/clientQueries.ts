@@ -1859,7 +1859,11 @@ export function useCreateWorkoutPlan() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: submitWorkoutPlan,
-    onSuccess: (_r, vars) => qc.invalidateQueries({ queryKey: ['client-plans', vars.clientId] }),
+    onSuccess: (_r, vars) => {
+      qc.invalidateQueries({ queryKey: ['client-plans', vars.clientId] });
+      // The Essentials "make a workout plan" home alert turns to "waiting for approval" (16 Oct 2026).
+      qc.invalidateQueries({ queryKey: ['trainer-essentials-plan-gaps'] });
+    },
   });
 }
 
