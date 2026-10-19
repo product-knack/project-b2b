@@ -21,6 +21,7 @@ import {
   TITLES, type Which, type ClientHealthSummaryRow, type WeeklySummary, type ContextSummary,
   durationText, fmtStamp, historyOf, summaryOf, generatedAtOf, hasScript, lastListen, isNewSince,
   listenGate, gateDue, type GateState,
+  type ListenGate,
 } from '../lib/clientHealthSummary';
 
 const GOLD = C.gold;
@@ -368,6 +369,14 @@ export function ListenGateSheet({ visible, clientId, clientName, onContinue, onL
   const voice = useSummaryVoice();
   const row = q.data ?? null;
   const gate = listenGate(row, uid);
+  // The due items are fixed when the sheet opens (19 Oct 2026 audit): Play records the listen at
+  // once, and the refreshed row read "done" before the audio had finished, unlocking Continue.
+  const [dueAtOpen, setDueAtOpen] = React.useState<ListenGate | null>(null);
+  React.useEffect(() => {
+    if (!visible) { setDueAtOpen(null); return; }
+    if (!dueAtOpen && row) setDueAtOpen(gate);
+  }, [visible, row, dueAtOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+  const gateNow: ListenGate = dueAtOpen ?? gate;
   const [heard, setHeard] = React.useState<Record<Which, boolean>>({ weekly: false, context: false });
   const [transcript, setTranscript] = React.useState<Which | null>(null);
   const [err, setErr] = React.useState<string | null>(null);
@@ -375,7 +384,7 @@ export function ListenGateSheet({ visible, clientId, clientName, onContinue, onL
     if (visible) { setHeard({ weekly: false, context: false }); setTranscript(null); setErr(null); } else voice.stop();
   }, [visible]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const need = (which: Which) => gate[which] === 'due' && !heard[which];
+  const need = (which: Which) => gateNow[which] === 'due' && !heard[which];
   const allDone = !need('weekly') && !need('context');
   const play = (which: Which) => {
     const s = summaryOf(row, which);
@@ -421,7 +430,7 @@ export function ListenGateSheet({ visible, clientId, clientName, onContinue, onL
             ) : (['weekly', 'context'] as Which[]).map((which, i) => (
               <SummaryRow key={which} which={which} row={row} uid={uid} ordinal={i + 1} {...rowVoiceProps(voice, which)} transcriptOpen={transcript === which}
                 onPlay={() => play(which)} onStop={voice.stop} onToggleTranscript={() => setTranscript((t) => (t === which ? null : which))}
-                status={gateStatus(which, gate[which], heard[which], row)} />
+                status={gateStatus(which, gateNow[which], heard[which], row)} />
             ))}
             {voice.notice ? <Body style={{ fontSize: 11, color: GOLD }}>{voice.notice}</Body> : null}
             {err ? <Body style={{ fontSize: 11.5, color: C.red }}>{err}</Body> : null}

@@ -2368,7 +2368,9 @@ export function Dashboard() {
             {!rosterQ.isLoading && missedNeedingRemark > 0 ? <MissedAlert count={missedNeedingRemark} /> : null}
 
             <View style={{ flexDirection: 'row', gap: 10 }}>
-              <ActionBtn label="Trial Workout" icon="sparkle" accent onPress={() => go('workout')} />
+              {/* A fresh form: the last client and roster slot must not leak in (19 Oct 2026 audit:
+                  a trial could overwrite a queued log or be refused as "Already logged"). */}
+              <ActionBtn label="Trial Workout" icon="sparkle" accent onPress={() => { set({ selectedClientId: null, selectedClientName: null, workoutScheduleId: null, editingOutboxId: null }); go('workout'); }} />
               {/* Request Roster was hidden on 2026-09-05 (user's call), so a trainer
                   in a manager team now gets their roster only from the day plan.
                   A trainer in NO current team keeps the direct add, which is their
@@ -6611,8 +6613,13 @@ export function Workout() {
   const listenEligible = !!workoutScheduleId && !editingOutboxId && isOnline;
   const summaryQ = useClientHealthSummary(selectedClientId, listenEligible);
   const [listenDone, setListenDone] = React.useState(false);
-  React.useEffect(() => { setListenDone(false); }, [selectedClientId, workoutScheduleId]);
-  const listenRequired = listenEligible && !listenDone && !!summaryQ.data && gateDue(listenGate(summaryQ.data, authSession?.user?.id ?? null));
+  // Once due, the gate STAYS up until Continue (19 Oct 2026 audit): Play records the listen at
+  // once, the refreshed row then read "done", the sheet closed and the voice stopped after a second.
+  const [listenArmed, setListenArmed] = React.useState(false);
+  React.useEffect(() => { setListenDone(false); setListenArmed(false); }, [selectedClientId, workoutScheduleId]);
+  const listenDue = listenEligible && !!summaryQ.data && gateDue(listenGate(summaryQ.data, authSession?.user?.id ?? null));
+  React.useEffect(() => { if (listenDue && !listenDone) setListenArmed(true); }, [listenDue, listenDone]);
+  const listenRequired = listenEligible && !listenDone && (listenArmed || listenDue);
   // Session timer (13 Oct 2026): a log whose health data is already complete starts its
   // timer on entry (gate 'skipped'); when the check-in sheet has to open, its Save starts
   // it instead (gate 'saved'). An existing start for the same client and IST day is kept,
@@ -6792,6 +6799,7 @@ export function Workout() {
   const PARALLEL_TTL_MS = 4 * 3_600_000; // web parity: 4-hour restore window
   const [pairNames, setPairNames] = React.useState<{ primary: { id: string; name: string }; second: { id: string; name: string } } | null>(null);
   const [pairPickerOpen, setPairPickerOpen] = React.useState(false);
+  const [trialSearch, setTrialSearch] = React.useState(''); // Trial Workout: pick the client on this page (19 Oct 2026)
   const [pairSearch, setPairSearch] = React.useState('');
   // Never unmount the picker Modal while its TextInput still has focus: on
   // Android's new architecture that combination crashes the app. Dismiss the
@@ -7402,13 +7410,51 @@ export function Workout() {
   };
 
   if (!selectedClientId) {
+    // Trial Workout lands here (19 Oct 2026): the web's TrialClientPickerDialog rule, my actively
+    // training clients on a Trial subscription and active, then the form opens for the pick with
+    // no roster slot. Roster and client-page logs never see this state.
+    const term = trialSearch.trim().toLowerCase();
+    const trialClients = (myClientsQ.data ?? []).filter((c) => c.subscription_type === 'Trial' && c.status === 'active' && (!term || c.full_name.toLowerCase().includes(term)));
     return (
-      <Page gap={16} pt={6}>
-        <View style={{ alignItems: 'center', gap: 12, paddingVertical: 50 }}>
-          <Icon name="user" size={30} color="#4C4640" strokeWidth={1.6} />
-          <Serif style={{ fontSize: 19 }}>No client selected</Serif>
-          <Body style={{ fontSize: 13, color: C.muted3, textAlign: 'center', paddingHorizontal: 30 }}>Open a session from Today's Roster or a client page to log a workout.</Body>
+      <Page gap={14} pt={6} kbAware>
+        <BackLink label="Log Workout" onPress={goBack} />
+        <View style={{ gap: 4 }}>
+          <Serif style={{ fontSize: 22 }}>Trial Clients</Serif>
+          <Body style={{ fontSize: 12.5, color: C.muted2 }}>Log a workout for a trial client. No roster required.</Body>
         </View>
+        <TextInput
+          value={trialSearch}
+          onChangeText={setTrialSearch}
+          placeholder="Search my clients"
+          placeholderTextColor={C.muted3}
+          autoCorrect={false}
+          style={{ fontFamily: F.body, fontSize: 14, color: C.ink, paddingVertical: 11, paddingHorizontal: 14, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }}
+        />
+        {myClientsQ.isLoading ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10 }}>
+            <ActivityIndicator size="small" color={C.orange} />
+            <Body style={{ fontSize: 12, color: C.muted2 }}>Loading your clients…</Body>
+          </View>
+        ) : myClientsQ.isError ? (
+          <Body style={{ fontSize: 12.5, color: C.red }}>Could not load your clients. Check your connection and try again.</Body>
+        ) : trialClients.length === 0 ? (
+          <Body style={{ fontSize: 12.5, color: C.muted3 }}>{term ? 'No trial client matches that name.' : 'No trial clients assigned to you.'}</Body>
+        ) : (
+          <View style={{ gap: 8 }}>
+            {trialClients.map((c) => (
+              <Pressable
+                key={c.client_id}
+                onPress={() => { Keyboard.dismiss(); set({ selectedClientId: c.client_id, selectedClientName: c.full_name, workoutScheduleId: null, editingOutboxId: null }); }}
+                accessibilityRole="button"
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 12, paddingHorizontal: 12, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' }}
+              >
+                <Avatar initial={initials(c.full_name)} size={36} colors={['#F47A2A', '#E85D3A']} fontSize={12} />
+                <Body numberOfLines={1} style={{ flex: 1, fontSize: 14, fontFamily: F.bodySemi, color: '#fff' }}>{c.full_name}</Body>
+                <Icon name="chevRight" size={14} color={C.muted2} strokeWidth={2.2} />
+              </Pressable>
+            ))}
+          </View>
+        )}
       </Page>
     );
   }
