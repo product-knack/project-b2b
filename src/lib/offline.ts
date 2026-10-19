@@ -157,8 +157,19 @@ export async function enqueueOutbox(kind: OutboxItem['kind'], label: string, pay
 
 export async function removeOutboxItem(id: string) {
   await load();
-  items = items.filter((i) => i.id !== id);
+  const target = items.find((i) => i.id === id);
+  // A discarded workout takes its queued voice notes with it (19 Oct 2026): a note whose
+  // session will never exist on the server has nothing left to attach to.
+  const orphanNotes = target?.kind === 'workout-log' && target.payload?.sessionId
+    ? items.filter((i) => i.kind === 'session-voice-note' && i.payload?.workoutSessionId === target.payload.sessionId)
+    : [];
+  const drop = new Set([id, ...orphanNotes.map((i) => i.id)]);
+  items = items.filter((i) => !drop.has(i.id));
   await persist();
+  if (orphanNotes.length) {
+    const { discardTake } = require('./sessionVoiceQueries'); // lazy: that module imports this one
+    for (const n of orphanNotes) { try { discardTake(n.payload?.uri); } catch { /* file already gone */ } }
+  }
 }
 
 export async function retryOutboxItem(id: string) {
@@ -211,6 +222,32 @@ function isTransientError(e: any): boolean {
   if (isTimeoutError(e)) return true; // a stalled request is retried, never marked failed
   const msg = String(e?.message ?? e ?? '');
   return /network request failed|network error|failed to fetch|fetch failed|timeout|timed out|abort|socket|ENOTFOUND|ECONN/i.test(msg);
+}
+
+/* ---- voice notes whose workout is not on the server (19 Oct 2026) ----
+   The session row is created by a trigger seconds after the log lands, and a log the server
+   refused never creates one. Such a note is SKIPPED for this pass (the queue goes on), tried
+   again shortly, and given up after a few tries once its workout is no longer queued here. */
+const VOICE_NOTE_MAX_TRIES = 5;
+const REDRAIN_MS = 6_000;
+const NOTE_ORPHAN_MESSAGE = 'The workout this note belongs to was never saved on the server. Discard the note, or log the workout again and record it there.';
+let redrainTimer: ReturnType<typeof setTimeout> | undefined;
+function scheduleRedrain() {
+  if (redrainTimer) return;
+  redrainTimer = setTimeout(() => { redrainTimer = undefined; drainOutbox(); }, REDRAIN_MS);
+}
+function isSessionPending(e: any): boolean {
+  const { isSessionPendingError } = require('./sessionVoiceQueries');
+  return isSessionPendingError(e);
+}
+/* The note's workout is still on this device (pending, syncing or failed): keep waiting for it. */
+function workoutStillQueued(note: OutboxItem): boolean {
+  const sid = note.payload?.workoutSessionId;
+  return !!sid && items.some((i) => i.kind === 'workout-log' && i.payload?.sessionId === sid);
+}
+/* Returns the item's next state after a SessionPendingError: wait, or give up. */
+function notePendingOutcome(note: OutboxItem): 'wait' | 'failed' {
+  return !workoutStillQueued(note) && note.attempts + 1 >= VOICE_NOTE_MAX_TRIES ? 'failed' : 'wait';
 }
 
 /* ---- drainer ---- */
@@ -307,6 +344,20 @@ export async function drainOutbox() {
         await persist();
         await addSyncedNotice(current, result?.linkPending ? 'link_pending' : 'synced');
       } catch (e: any) {
+        if (isSessionPending(e)) {
+          // The note's workout is not on the server: skip the note, NOT the queue.
+          const outcome = notePendingOutcome(current);
+          items = items.map((i) =>
+            i.id === item.id
+              ? outcome === 'failed'
+                ? { ...i, status: 'failed' as const, attempts: i.attempts + 1, error: NOTE_ORPHAN_MESSAGE }
+                : { ...i, attempts: i.attempts + 1 }
+              : i
+          );
+          await persist();
+          if (outcome === 'wait') scheduleRedrain();
+          continue;
+        }
         if (isTransientError(e)) {
           // Still offline / flaky — bump the attempt count and stop; NetInfo will
           // trigger another drain when the connection is back.
@@ -353,6 +404,18 @@ export async function submitItem(id: string): Promise<SubmitItemResult> {
       await addSyncedNotice(current, result?.linkPending ? 'link_pending' : 'synced');
       return { status: 'synced' };
     } catch (e: any) {
+      if (isSessionPending(e)) {
+        const current = items.find((i) => i.id === id)!;
+        if (notePendingOutcome(current) === 'wait') {
+          items = items.map((i) => (i.id === id ? { ...i, status: 'pending' as const, attempts: i.attempts + 1 } : i));
+          await persist();
+          scheduleRedrain(); // the session's trigger usually lands within seconds
+          return { status: 'queued' };
+        }
+        items = items.map((i) => (i.id === id ? { ...i, status: 'failed' as const, attempts: i.attempts + 1, error: NOTE_ORPHAN_MESSAGE } : i));
+        await persist();
+        return { status: 'failed', error: NOTE_ORPHAN_MESSAGE };
+      }
       if (isTransientError(e)) {
         items = items.map((i) => (i.id === id ? { ...i, status: 'pending' as const, attempts: i.attempts + 1 } : i));
         await persist();

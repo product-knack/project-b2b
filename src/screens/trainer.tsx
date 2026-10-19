@@ -4495,8 +4495,9 @@ export function ClientTrendsSection({ clientId, scrollRef, scrollOffsetRef, canE
     z2cTarget: w.goal.z2cTarget,
     z2cDone: w.goal.z2cDone,
   })), [weeklyQ.data]);
+  // One expression, no wrapping fragment: a bare ternary inside <> renders as TEXT and
+  // React Native stops the screen ("This screen hit a snag"), the 16 to 19 Oct 2026 crash.
   return (
-    <>
         weeklyQ.isLoading ? (
           <Card colors={['rgba(46,28,18,0.4)', 'rgba(18,14,14,0.5)']} border="rgba(255,150,90,0.09)" style={{ padding: 20 }}>
             <Body style={{ color: C.muted2, textAlign: 'center', paddingVertical: 14 }}>Loading trends…</Body>
@@ -4804,7 +4805,6 @@ export function ClientTrendsSection({ clientId, scrollRef, scrollOffsetRef, canE
           </Modal>
         </>
         )
-    </>
   );
 }
 
