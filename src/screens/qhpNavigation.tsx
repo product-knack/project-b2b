@@ -20,7 +20,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { F, hexA } from '../theme';
 import { Icon } from '../icons';
 import { useStore, homeRouteFor } from '../store';
-import { backOverride } from '../gestureLock';
 import { useSpeech } from '../lib/useSpeech';
 import { NAV_MAP_HTML } from '../lib/navMapHtml';
 import { navTargetRef, fetchNavRoute, saveNavigationTrack, appVersionLabel, type NavTarget } from '../lib/qhpNavigationQueries';
@@ -390,14 +389,6 @@ export function QhpNavigation() {
       { text: 'Exit', style: 'destructive', onPress: () => finish('ended') },
     ]);
   };
-  // Android back goes through the same Exit confirm as the Exit button (19 Oct 2026 audit): before,
-  // back() just left the screen, the ride was never saved and the office kept seeing it live. The
-  // edge swipe is already off on this route (Router NO_SWIPE_BACK).
-  const confirmExitRef = React.useRef(confirmExit); confirmExitRef.current = confirmExit;
-  React.useEffect(() => {
-    backOverride.handler = () => confirmExitRef.current();
-    return () => { backOverride.handler = null; };
-  }, []);
 
   React.useEffect(() => {
     const sub = AppState.addEventListener('change', (s) => { if (s === 'active' && phaseRef.current === 'navigating') send({ type: 'recenter' }); });

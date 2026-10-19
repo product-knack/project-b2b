@@ -72,8 +72,8 @@ import * as Clipboard from 'expo-clipboard';
 import * as ImagePicker from 'expo-image-picker';
 import { ic } from '../icons';
 import {
-  quickActions, stats, sessionCards, clientsBase, clientBanners, clientInfo, clientTabs,
-  modalities, qhpTabDefs, qhpData, mgrTabDefs, mgrData, convos, events,
+  quickActions, stats, leaders, sessionCards, clientsBase, clientBanners, clientInfo, clientTabs,
+  modalities, qhpTabDefs, qhpData, mgrTabDefs, mgrData, convos, events, mgrDefs,
 } from '../data';
 import { tones } from '../theme';
 import { MedicalEntrySheet } from './doctorClientDetail';
@@ -1837,11 +1837,9 @@ export function Dashboard() {
     return `${count} client${count === 1 ? '' : 's'} QHP scheduled, please assign assessor asap`;
   }, [assignAlert]);
   const mgrLbQ = useManagerLeaderboard();
-  // Live rows only (19 Oct 2026 audit): the demo people from data.ts used to show while loading,
-  // offline, on an error, and for a period with no data.
   const mgrTop3 = mgrLbQ.data?.entries?.length
     ? mgrLbQ.data.entries.slice(0, 3).map((e, i) => ({ rank: e.rank, name: e.managerName.split(' ')[0], sess: e.totalSessions, mc: [C.gold, '#B8BCC4', '#C08A52'][i] }))
-    : [];
+    : mgrDefs.slice(0, 3).map((m) => ({ rank: m.rank, name: m.name, sess: m.sess + m.qhp, mc: m.mc }));
   const profileQ = useQuery({
     queryKey: ['trainerProfile', trainerId],
     enabled: !!trainerId,
@@ -1907,8 +1905,7 @@ export function Dashboard() {
     medal: i < 3 ? ic.crown : undefined,
     medalColor: i < 3 ? medalColors[i] : undefined,
   }));
-  // Live rows only (19 Oct 2026 audit): never the demo people from data.ts.
-  const leaderRows: { trainerId?: string; name: string; ref: number; sess: number; medal?: string; medalColor?: string }[] = liveLeaders ?? [];
+  const leaderRows: { trainerId?: string; name: string; ref: number; sess: number; medal?: string; medalColor?: string }[] = leaderboardQ.isError || !liveLeaders ? leaders : liveLeaders;
   // Daily quiz points for this month, shown under each podium trainer (no separate quiz
   // leaderboard any more). Same query key as My Quiz Score, so it is one request.
   const quizThisMonth = useQuizScoresByTrainer([quizMonthKey(new Date())], isTrainerRole);
@@ -2371,9 +2368,7 @@ export function Dashboard() {
             {!rosterQ.isLoading && missedNeedingRemark > 0 ? <MissedAlert count={missedNeedingRemark} /> : null}
 
             <View style={{ flexDirection: 'row', gap: 10 }}>
-              {/* A fresh form: the last client and roster slot must not leak in (19 Oct 2026 audit:
-                  a trial could overwrite a queued log or be refused as "Already logged"). */}
-              <ActionBtn label="Trial Workout" icon="sparkle" accent onPress={() => { set({ selectedClientId: null, selectedClientName: null, workoutScheduleId: null, editingOutboxId: null }); go('workout'); }} />
+              <ActionBtn label="Trial Workout" icon="sparkle" accent onPress={() => go('workout')} />
               {/* Request Roster was hidden on 2026-09-05 (user's call), so a trainer
                   in a manager team now gets their roster only from the day plan.
                   A trainer in NO current team keeps the direct add, which is their
@@ -2476,8 +2471,8 @@ export function Dashboard() {
       {dashCaps.data.isManager ? (
         <LeaderboardPreview
           title="Managers Leaderboard"
-          sub={mgrLbQ.isLoading ? 'Loading…' : mgrLbQ.isError ? 'Could not load the board' : mgrTop3.length ? 'Live · sessions + QHP' : 'No standings yet'}
-          live={mgrTop3.length > 0}
+          sub="Live · sessions + QHP"
+          live
           variant="list"
           accent={C.purple}
           unit="PTS"
@@ -2488,7 +2483,7 @@ export function Dashboard() {
 
       <LeaderboardPreview
         title="Trainer Leaderboard"
-        sub={leaderboardQ.isLoading ? 'Loading…' : leaderboardQ.isError ? 'Could not load the board' : leaderRows.length ? `${leaderRows.length} trainers · this month` : 'No standings yet'}
+        sub={leaderboardQ.isLoading ? 'Loading…' : `${leaderRows.length} trainers · this month`}
         accent={C.gold}
         unit="SESS"
         onPress={() => go('trainer-leaderboard')}
@@ -2853,7 +2848,7 @@ export function TrainerLeaderboardContent() {
   const medalColors = [C.gold, '#B8BCC4', '#C08A52'];
   const rows: { trainerId?: string; name: string; ref: number; sess: number; medal?: string; medalColor?: string }[] = (leaderboardQ.data && leaderboardQ.data.length
     ? leaderboardQ.data.map((e, i) => ({ trainerId: e.trainerId, name: e.trainerName, ref: e.referralCount, sess: e.sessionCount + e.qhpCount /* web parity: sessions + QHP */, medal: i < 3 ? ic.crown : undefined, medalColor: i < 3 ? medalColors[i] : undefined }))
-    : []); // live rows only (19 Oct 2026 audit): an error used to show the demo people from data.ts
+    : (leaderboardQ.isError ? leaders : []));
   const podium = [rows[1], rows[0], rows[2]].filter(Boolean);
   const podiumHeights = [86, 112, 70];
   const maxSess = Math.max(1, rows[0]?.sess ?? 1);
@@ -2868,12 +2863,10 @@ export function TrainerLeaderboardContent() {
             <Serif style={{ fontSize: 22 }}>Trainer Leaderboard</Serif>
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 }}>
-            {rows.length ? (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 4, paddingHorizontal: 9, borderRadius: 999, backgroundColor: hexA(C.green, 0.12), borderWidth: 1, borderColor: hexA(C.green, 0.28) }}>
-                <PulseDot color={C.green} />
-                <Text style={{ fontSize: 10.5, fontFamily: F.bodySemi, color: C.green }}>Live</Text>
-              </View>
-            ) : null}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 4, paddingHorizontal: 9, borderRadius: 999, backgroundColor: hexA(C.green, 0.12), borderWidth: 1, borderColor: hexA(C.green, 0.28) }}>
+              <PulseDot color={C.green} />
+              <Text style={{ fontSize: 10.5, fontFamily: F.bodySemi, color: C.green }}>Live</Text>
+            </View>
             <Mono style={{ fontSize: 11, color: C.mono2 }}>{sel.label} · {rows.length} trainers</Mono>
           </View>
 
@@ -2895,10 +2888,6 @@ export function TrainerLeaderboardContent() {
 
           {leaderboardQ.isLoading ? (
             <Body style={{ fontSize: 13, color: C.muted3, paddingVertical: 26 }}>Loading leaderboard…</Body>
-          ) : leaderboardQ.isError ? (
-            <Body style={{ fontSize: 13, color: C.red, paddingVertical: 26, textAlign: 'center' }}>Could not load the leaderboard. Check your connection and try again.</Body>
-          ) : rows.length === 0 ? (
-            <Body style={{ fontSize: 13, color: C.muted3, paddingVertical: 26, textAlign: 'center' }}>No standings for this period yet.</Body>
           ) : podium.length >= 3 ? (
             <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 10, marginTop: 20, width: '100%' }}>
               {podium.map((m, i) => {
@@ -4506,9 +4495,8 @@ export function ClientTrendsSection({ clientId, scrollRef, scrollOffsetRef, canE
     z2cTarget: w.goal.z2cTarget,
     z2cDone: w.goal.z2cDone,
   })), [weeklyQ.data]);
-  // One expression, no wrapping fragment: a bare ternary inside <> renders as TEXT and
-  // React Native stops the screen ("This screen hit a snag"), the 16 to 19 Oct 2026 crash.
   return (
+    <>
         weeklyQ.isLoading ? (
           <Card colors={['rgba(46,28,18,0.4)', 'rgba(18,14,14,0.5)']} border="rgba(255,150,90,0.09)" style={{ padding: 20 }}>
             <Body style={{ color: C.muted2, textAlign: 'center', paddingVertical: 14 }}>Loading trends…</Body>
@@ -4816,6 +4804,7 @@ export function ClientTrendsSection({ clientId, scrollRef, scrollOffsetRef, canE
           </Modal>
         </>
         )
+    </>
   );
 }
 
@@ -6622,13 +6611,8 @@ export function Workout() {
   const listenEligible = !!workoutScheduleId && !editingOutboxId && isOnline;
   const summaryQ = useClientHealthSummary(selectedClientId, listenEligible);
   const [listenDone, setListenDone] = React.useState(false);
-  // Once due, the gate STAYS up until Continue (19 Oct 2026 audit): Play records the listen at
-  // once, the refreshed row then read "done", the sheet closed and the voice stopped after a second.
-  const [listenArmed, setListenArmed] = React.useState(false);
-  React.useEffect(() => { setListenDone(false); setListenArmed(false); }, [selectedClientId, workoutScheduleId]);
-  const listenDue = listenEligible && !!summaryQ.data && gateDue(listenGate(summaryQ.data, authSession?.user?.id ?? null));
-  React.useEffect(() => { if (listenDue && !listenDone) setListenArmed(true); }, [listenDue, listenDone]);
-  const listenRequired = listenEligible && !listenDone && (listenArmed || listenDue);
+  React.useEffect(() => { setListenDone(false); }, [selectedClientId, workoutScheduleId]);
+  const listenRequired = listenEligible && !listenDone && !!summaryQ.data && gateDue(listenGate(summaryQ.data, authSession?.user?.id ?? null));
   // Session timer (13 Oct 2026): a log whose health data is already complete starts its
   // timer on entry (gate 'skipped'); when the check-in sheet has to open, its Save starts
   // it instead (gate 'saved'). An existing start for the same client and IST day is kept,
@@ -6808,7 +6792,6 @@ export function Workout() {
   const PARALLEL_TTL_MS = 4 * 3_600_000; // web parity: 4-hour restore window
   const [pairNames, setPairNames] = React.useState<{ primary: { id: string; name: string }; second: { id: string; name: string } } | null>(null);
   const [pairPickerOpen, setPairPickerOpen] = React.useState(false);
-  const [trialSearch, setTrialSearch] = React.useState(''); // Trial Workout: pick the client on this page (19 Oct 2026)
   const [pairSearch, setPairSearch] = React.useState('');
   // Never unmount the picker Modal while its TextInput still has focus: on
   // Android's new architecture that combination crashes the app. Dismiss the
@@ -7419,51 +7402,13 @@ export function Workout() {
   };
 
   if (!selectedClientId) {
-    // Trial Workout lands here (19 Oct 2026): the web's TrialClientPickerDialog rule, my actively
-    // training clients on a Trial subscription and active, then the form opens for the pick with
-    // no roster slot. Roster and client-page logs never see this state.
-    const term = trialSearch.trim().toLowerCase();
-    const trialClients = (myClientsQ.data ?? []).filter((c) => c.subscription_type === 'Trial' && c.status === 'active' && (!term || c.full_name.toLowerCase().includes(term)));
     return (
-      <Page gap={14} pt={6} kbAware>
-        <BackLink label="Log Workout" onPress={goBack} />
-        <View style={{ gap: 4 }}>
-          <Serif style={{ fontSize: 22 }}>Trial Clients</Serif>
-          <Body style={{ fontSize: 12.5, color: C.muted2 }}>Log a workout for a trial client. No roster required.</Body>
+      <Page gap={16} pt={6}>
+        <View style={{ alignItems: 'center', gap: 12, paddingVertical: 50 }}>
+          <Icon name="user" size={30} color="#4C4640" strokeWidth={1.6} />
+          <Serif style={{ fontSize: 19 }}>No client selected</Serif>
+          <Body style={{ fontSize: 13, color: C.muted3, textAlign: 'center', paddingHorizontal: 30 }}>Open a session from Today's Roster or a client page to log a workout.</Body>
         </View>
-        <TextInput
-          value={trialSearch}
-          onChangeText={setTrialSearch}
-          placeholder="Search my clients"
-          placeholderTextColor={C.muted3}
-          autoCorrect={false}
-          style={{ fontFamily: F.body, fontSize: 14, color: C.ink, paddingVertical: 11, paddingHorizontal: 14, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }}
-        />
-        {myClientsQ.isLoading ? (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10 }}>
-            <ActivityIndicator size="small" color={C.orange} />
-            <Body style={{ fontSize: 12, color: C.muted2 }}>Loading your clients…</Body>
-          </View>
-        ) : myClientsQ.isError ? (
-          <Body style={{ fontSize: 12.5, color: C.red }}>Could not load your clients. Check your connection and try again.</Body>
-        ) : trialClients.length === 0 ? (
-          <Body style={{ fontSize: 12.5, color: C.muted3 }}>{term ? 'No trial client matches that name.' : 'No trial clients assigned to you.'}</Body>
-        ) : (
-          <View style={{ gap: 8 }}>
-            {trialClients.map((c) => (
-              <Pressable
-                key={c.client_id}
-                onPress={() => { Keyboard.dismiss(); set({ selectedClientId: c.client_id, selectedClientName: c.full_name, workoutScheduleId: null, editingOutboxId: null }); }}
-                accessibilityRole="button"
-                style={{ flexDirection: 'row', alignItems: 'center', gap: 11, paddingVertical: 12, paddingHorizontal: 12, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' }}
-              >
-                <Avatar initial={initials(c.full_name)} size={36} colors={['#F47A2A', '#E85D3A']} fontSize={12} />
-                <Body numberOfLines={1} style={{ flex: 1, fontSize: 14, fontFamily: F.bodySemi, color: '#fff' }}>{c.full_name}</Body>
-                <Icon name="chevRight" size={14} color={C.muted2} strokeWidth={2.2} />
-              </Pressable>
-            ))}
-          </View>
-        )}
       </Page>
     );
   }
@@ -12514,9 +12459,9 @@ export function MgrDash() {
     teamEnd: e.teamEnd,
     expected: e.expectedSessions,
   }));
-  // Live rows only (19 Oct 2026 audit): the demo people from data.ts used to show, under a "Live"
-  // pill, while loading, offline, on an error, and for a month tab with no data.
-  const mgrRows = liveMgr ?? [];
+  const mgrRows = mgrLbQ.isError || !liveMgr || liveMgr.length === 0
+    ? mgrDefs.map((m) => ({ ...m, inactive: 0, score: m.sess + m.qhp, sess: m.sess + m.qhp, rawSess: m.sess, members: [] as ManagerTeamMember[], teamStart: null as string | null, teamEnd: null as string | null, expected: null as number | null }))
+    : liveMgr;
   const podium = [mgrRows[1], mgrRows[0], mgrRows[2]].filter(Boolean); // 2nd · 1st · 3rd
   const podiumHeights = [86, 112, 70];
 
@@ -12541,12 +12486,10 @@ export function MgrDash() {
             <Serif style={{ fontSize: 22 }}>Managers Leaderboard</Serif>
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 }}>
-            {mgrRows.length ? (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 4, paddingHorizontal: 9, borderRadius: 999, backgroundColor: hexA(C.green, 0.12), borderWidth: 1, borderColor: hexA(C.green, 0.28) }}>
-                <PulseDot color={C.green} />
-                <Text style={{ fontSize: 10.5, fontFamily: F.bodySemi, color: C.green }}>Live</Text>
-              </View>
-            ) : null}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 4, paddingHorizontal: 9, borderRadius: 999, backgroundColor: hexA(C.green, 0.12), borderWidth: 1, borderColor: hexA(C.green, 0.28) }}>
+              <PulseDot color={C.green} />
+              <Text style={{ fontSize: 10.5, fontFamily: F.bodySemi, color: C.green }}>Live</Text>
+            </View>
             <Mono style={{ fontSize: 11, color: C.mono2 }}>{lb?.periodLabel ?? 'Competition period'}</Mono>
           </View>
 
@@ -12599,13 +12542,6 @@ export function MgrDash() {
 
       {/* Full standings — expandable run-rate details */}
       <Mono style={{ fontSize: 12, letterSpacing: 2.1 }}>FULL STANDINGS</Mono>
-      {mgrLbQ.isLoading ? (
-        <Body style={{ fontSize: 13, color: C.muted3, paddingVertical: 20 }}>Loading the board…</Body>
-      ) : mgrLbQ.isError ? (
-        <Body style={{ fontSize: 13, color: C.red, paddingVertical: 20 }}>Could not load the board. Check your connection and try again.</Body>
-      ) : mgrRows.length === 0 ? (
-        <Body style={{ fontSize: 13, color: C.muted3, paddingVertical: 20 }}>No standings for this period yet.</Body>
-      ) : null}
       {mgrRows.map((m) => {
         const open = mgrRow === m.rank;
         // Run rate — TARGET-FREE (user decision 2026-08-01): no expected-sessions

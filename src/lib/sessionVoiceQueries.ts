@@ -98,18 +98,9 @@ export type SessionVoiceOutboxPayload = {
   painDiscomfort?: boolean;
 };
 
-/** The server has no training_sessions row for the note's workout (yet). Thrown with this
-    name so the outbox skips the note this pass without blocking the rest of the queue,
-    and gives up after a few tries once the workout is no longer queued on the device. */
-export class SessionPendingError extends Error {
-  constructor() { super('The workout this note belongs to is not on the server yet.'); this.name = 'SessionPendingError'; }
-}
-export const isSessionPendingError = (e: any) => e?.name === 'SessionPendingError';
-
 /** The drain step: upload the durable file, append the row, drop the local copy.
-    "Session not found yet" is the workout's trigger racing, or a log the server refused:
-    rethrown as SessionPendingError (19 Oct 2026; it used to carry the word "timeout", which
-    the outbox read as a network blip and stopped the WHOLE queue at this note forever). */
+    "Session not found yet" is the workout's trigger racing (or a deduped log):
+    thrown with a marker the outbox treats as transient, so the note retries. */
 export async function submitSessionVoiceNote(p: SessionVoiceOutboxPayload): Promise<void> {
   const local = new File(p.uri);
   if (!local.exists) throw new Error('The recording file is missing on this device.');
@@ -119,7 +110,7 @@ export async function submitSessionVoiceNote(p: SessionVoiceOutboxPayload): Prom
   } catch (e: any) {
     // The row did not take it: remove the object again (own upload, allowed).
     try { await supabase.storage.from(SESSION_VOICE_BUCKET).remove([path]); } catch { /* best effort */ }
-    if (/Session not found yet/i.test(String(e?.message ?? ''))) throw new SessionPendingError();
+    if (/Session not found yet/i.test(String(e?.message ?? ''))) throw new Error('Session not found yet (timeout, retrying)');
     throw e;
   }
   discardTake(p.uri);

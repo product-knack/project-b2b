@@ -4,7 +4,6 @@ import type { SessionTiming } from './sessionTiming';
 import { computeEssentials, EssentialsStatus } from './essentials';
 import { invokeWithTimeout, withTimeout, NET_MS } from './withTimeout';
 import { parseCheckinInfo, type MedicineCheckinInfo, type MedicineCheckinPayload } from './medicineCheckin';
-import { parseLoadTarget } from './planLoad';
 import type { ConsultAINotes } from './consultantQueries';
 import { parseVoiceNotes, SessionVoiceNote } from './sessionVoiceTypes';
 
@@ -1850,7 +1849,8 @@ export async function submitWorkoutPlan(input: WorkoutPlanCreateInput) {
             .flatMap((ex) => {
               const isDuration = ex.measurement === 'duration';
               return ex.sets.map((set, si) => {
-                const loadVal = parseLoadTarget(set.load); // numeric column; text such as "BW" is no load
+                const loadRaw = set.load.trim();
+                const loadVal = loadRaw === '' ? null : isNaN(Number(loadRaw)) ? loadRaw : parseFloat(loadRaw);
                 return {
                   ...meta,
                   body_part: bp.body_part.trim(),
@@ -2501,7 +2501,7 @@ export function buildPlanExerciseRows(input: {
       .flatMap((ex) => {
         const isDuration = ex.measurement === 'duration';
         return ex.sets.map((set, si) => {
-          const loadNum = parseLoadTarget(set.load); // same rule as a new plan (19 Oct 2026)
+          const loadNum = set.load.trim() === '' ? null : Number(set.load);
           return {
             ...blank,
             body_part: bp.body_part.trim(),
@@ -2513,7 +2513,7 @@ export function buildPlanExerciseRows(input: {
             reps_target: isDuration ? null : set.reps.trim() ? parseInt(set.reps, 10) || null : null,
             super_set_group: set.ss.trim() || null,
             exercise_notes: set.notes.trim() || null,
-            load_target: isDuration ? null : loadNum,
+            load_target: isDuration || loadNum === null || isNaN(loadNum) ? null : loadNum,
             rir_target: set.rir.trim() ? parseInt(set.rir, 10) || null : null,
             duration: isDuration ? (set.duration.trim() || null) : null,
             measurement_type: ex.measurement,
