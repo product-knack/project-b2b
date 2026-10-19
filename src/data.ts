@@ -296,7 +296,9 @@ export const mgrMonthTabs = [
 ];
 
 /* ===== Navigation groups ===== */
-export type NavItem = { label: string; icon: IconName; route: string; badge?: string };
+/** `tab`: the tab the item opens on a tabbed route (the drawer sets it before navigating, and
+    only the item whose tab is showing lights up); 19 Oct 2026. */
+export type NavItem = { label: string; icon: IconName; route: string; badge?: string; tab?: string };
 export type NavGroup = { label: string; items: NavItem[] };
 export const trainerNav: NavGroup[] = [
   { label: 'My Work', items: [
@@ -321,11 +323,13 @@ export const trainerNav: NavGroup[] = [
   ] },
   { label: 'Team & Analytics', items: [
     { label: 'Managers Dashboard', icon: 'crown', route: 'mgr-dash' },
-    { label: 'Managers Overview', icon: 'grid', route: 'managers', badge: '3' },
-    { label: 'QHP Overview', icon: 'heart', route: 'managers' },
-    { label: 'Trainers Tracker', icon: 'users', route: 'managers' },
+    // The four Managers items share one native page (Managers Overview) and open its matching tab;
+    // the web has separate pages for QHP Overview, Trainers Tracker and Trainer Roster.
+    { label: 'Managers Overview', icon: 'grid', route: 'managers', badge: '3', tab: 'sessions' },
+    { label: 'QHP Overview', icon: 'heart', route: 'managers', tab: 'qhp' },
+    { label: 'Trainers Tracker', icon: 'users', route: 'managers', tab: 'late-logs' },
     { label: 'Workout Analyst', icon: 'activity', route: 'workout-analyst' },
-    { label: 'Trainer Roster', icon: 'map', route: 'managers' },
+    { label: 'Trainer Roster', icon: 'map', route: 'managers', tab: 'roster' },
   ] },
   { label: 'Learn', items: [
     { label: 'Odds Nucleus', icon: 'nucleus', route: 'nucleus' },

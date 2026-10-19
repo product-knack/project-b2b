@@ -7,7 +7,7 @@ import { C, F, hexA, ORANGE_GRAD } from '../theme';
 import { CX, INDIGO_GRAD } from './consultantUi';
 import { Icon, MenuIcon, IconName } from '../icons';
 import { useStore } from '../store';
-import { trainerNav, crmNav, coachNav, opsNav, adminNav, doctorNav, consultantNav, therapistNav, marketingNav, academyNav, techNav, bottomTabs, tabMap } from '../data';
+import { trainerNav, crmNav, coachNav, opsNav, adminNav, doctorNav, consultantNav, therapistNav, marketingNav, academyNav, techNav, bottomTabs, tabMap, type NavItem } from '../data';
 import { useDoctorIdentity } from '../lib/doctorQueries';
 import { OddsWordmark } from './oddsAi';
 import { useAuth } from '../auth';
@@ -167,7 +167,7 @@ function NavRow({ label, icon, active, badgeText, onPress, isNew, light }: { lab
 
 /* ---------- Side drawer ("More") ---------- */
 export function Drawer() {
-  const { drawerOpen, closeDrawer, role, route, go, set, resetSession } = useStore();
+  const { drawerOpen, closeDrawer, role, route, go, set, resetSession, mgrTab } = useStore();
   const { signOut, session, dbRole } = useAuth();
   const insets = useSafeAreaInsets();
   // A consultant doctor gets the web's trimmed sidebar (Consultant Dashboard, All Calls, ...); the profile read runs for doctors only.
@@ -178,7 +178,7 @@ export function Drawer() {
   // role, decides (a doctor or trainer can be an academy teacher).
   const academyLink = useMyAcademyLink(session?.user?.id ?? null);
   const groups = React.useMemo(() => {
-    const items: { label: string; icon: any; route: string }[] = [];
+    const items: NavItem[] = []; // same shape as the static groups, so `tab` survives the union
     if (academyLink.data?.teacherId) items.push({ label: 'Odds Academy', icon: 'award', route: 'academy-teacher' });
     if (academyLink.data?.studentId) items.push({ label: 'Odds Academy (Student)', icon: 'award', route: 'academy-student' });
     return items.length ? [...baseGroups, { label: 'Odds Academy', items }] : baseGroups;
@@ -203,9 +203,11 @@ export function Drawer() {
     // workspace links it too, so academy/admin accounts also see it.
     if (it.route === 'b2c-reports') return session?.user?.id === '196ec824-a093-4944-ae3d-3c4919ebf0df' || role === 'academy' || role === 'admin';
     if (it.route === 'mgr-dash' || it.label === 'Managers Overview' || it.label === 'QHP Overview') return caps.data.isManager;
-    if (it.label === 'Trainers Tracker') return caps.data.isTrainerManager;
+    // Trainers Tracker and Trainer Roster open tabs of the Managers Overview page, which only a
+    // manager with a team can see; without that the items dead-ended (19 Oct 2026 audit).
+    if (it.label === 'Trainers Tracker') return caps.data.isTrainerManager && caps.data.isManager;
     if (it.route === 'crm-esc') return caps.data.isCrmManager; // web: crm_manager spec only
-    if (it.label === 'Trainer Roster') return caps.data.canViewAllTrainers;
+    if (it.label === 'Trainer Roster') return caps.data.canViewAllTrainers && caps.data.isManager;
     if (it.route === 'workout-analyst') return caps.data.workoutAnalyst;
     if (it.route === 'plans-analyst') return caps.data.workoutComplianceAnalyst;
     if (it.route === 'academy-senior-analyst') return caps.data.seniorAnalyst;
@@ -261,7 +263,11 @@ export function Drawer() {
                 </View>
                 <View style={[styles.groupCard, light ? { backgroundColor: CX.slate50, borderColor: CX.slate200 } : null]}>
                   {items.map((item, i) => {
-                    const active = route === item.route;
+                    // Items that share a tabbed route (the four Managers items, 19 Oct 2026): only the
+                    // one whose tab is showing lights up; an item without a tab lights when no sibling
+                    // claims the current tab.
+                    const siblingTabShowing = items.some((x) => x.route === route && x.tab != null && x.tab === mgrTab);
+                    const active = route === item.route && (item.tab != null ? item.tab === mgrTab : !siblingTabShowing);
                     const isTech = item.route === 'tech-desk' || item.route === 'tech-desk-inbox';
                     const count = isTech ? (techBadge.data?.count ?? 0) : (badges[item.route] ?? 0);
                     const badgeText = count > 0 ? (count > 99 ? '99+' : String(count)) : null;
@@ -277,6 +283,7 @@ export function Drawer() {
                         onPress={() => {
                           // Workout Templates lives as a sheet on the trainer dashboard, not a route.
                           if (item.route === 'workout-templates') { set({ workoutTemplatesOpen: true }); go('dashboard'); closeDrawer(); return; }
+                          if (item.tab) set({ mgrTab: item.tab }); // open the page on this item's tab
                           go(item.route);
                         }}
                       />

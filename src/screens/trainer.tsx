@@ -72,8 +72,8 @@ import * as Clipboard from 'expo-clipboard';
 import * as ImagePicker from 'expo-image-picker';
 import { ic } from '../icons';
 import {
-  quickActions, stats, leaders, sessionCards, clientsBase, clientBanners, clientInfo, clientTabs,
-  modalities, qhpTabDefs, qhpData, mgrTabDefs, mgrData, convos, events, mgrDefs,
+  quickActions, stats, sessionCards, clientsBase, clientBanners, clientInfo, clientTabs,
+  modalities, qhpTabDefs, qhpData, mgrTabDefs, mgrData, convos, events,
 } from '../data';
 import { tones } from '../theme';
 import { MedicalEntrySheet } from './doctorClientDetail';
@@ -1837,9 +1837,11 @@ export function Dashboard() {
     return `${count} client${count === 1 ? '' : 's'} QHP scheduled, please assign assessor asap`;
   }, [assignAlert]);
   const mgrLbQ = useManagerLeaderboard();
+  // Live rows only (19 Oct 2026 audit): the demo people from data.ts used to show while loading,
+  // offline, on an error, and for a period with no data.
   const mgrTop3 = mgrLbQ.data?.entries?.length
     ? mgrLbQ.data.entries.slice(0, 3).map((e, i) => ({ rank: e.rank, name: e.managerName.split(' ')[0], sess: e.totalSessions, mc: [C.gold, '#B8BCC4', '#C08A52'][i] }))
-    : mgrDefs.slice(0, 3).map((m) => ({ rank: m.rank, name: m.name, sess: m.sess + m.qhp, mc: m.mc }));
+    : [];
   const profileQ = useQuery({
     queryKey: ['trainerProfile', trainerId],
     enabled: !!trainerId,
@@ -1905,7 +1907,8 @@ export function Dashboard() {
     medal: i < 3 ? ic.crown : undefined,
     medalColor: i < 3 ? medalColors[i] : undefined,
   }));
-  const leaderRows: { trainerId?: string; name: string; ref: number; sess: number; medal?: string; medalColor?: string }[] = leaderboardQ.isError || !liveLeaders ? leaders : liveLeaders;
+  // Live rows only (19 Oct 2026 audit): never the demo people from data.ts.
+  const leaderRows: { trainerId?: string; name: string; ref: number; sess: number; medal?: string; medalColor?: string }[] = liveLeaders ?? [];
   // Daily quiz points for this month, shown under each podium trainer (no separate quiz
   // leaderboard any more). Same query key as My Quiz Score, so it is one request.
   const quizThisMonth = useQuizScoresByTrainer([quizMonthKey(new Date())], isTrainerRole);
@@ -2473,8 +2476,8 @@ export function Dashboard() {
       {dashCaps.data.isManager ? (
         <LeaderboardPreview
           title="Managers Leaderboard"
-          sub="Live · sessions + QHP"
-          live
+          sub={mgrLbQ.isLoading ? 'Loading…' : mgrLbQ.isError ? 'Could not load the board' : mgrTop3.length ? 'Live · sessions + QHP' : 'No standings yet'}
+          live={mgrTop3.length > 0}
           variant="list"
           accent={C.purple}
           unit="PTS"
@@ -2485,7 +2488,7 @@ export function Dashboard() {
 
       <LeaderboardPreview
         title="Trainer Leaderboard"
-        sub={leaderboardQ.isLoading ? 'Loading…' : `${leaderRows.length} trainers · this month`}
+        sub={leaderboardQ.isLoading ? 'Loading…' : leaderboardQ.isError ? 'Could not load the board' : leaderRows.length ? `${leaderRows.length} trainers · this month` : 'No standings yet'}
         accent={C.gold}
         unit="SESS"
         onPress={() => go('trainer-leaderboard')}
@@ -2850,7 +2853,7 @@ export function TrainerLeaderboardContent() {
   const medalColors = [C.gold, '#B8BCC4', '#C08A52'];
   const rows: { trainerId?: string; name: string; ref: number; sess: number; medal?: string; medalColor?: string }[] = (leaderboardQ.data && leaderboardQ.data.length
     ? leaderboardQ.data.map((e, i) => ({ trainerId: e.trainerId, name: e.trainerName, ref: e.referralCount, sess: e.sessionCount + e.qhpCount /* web parity: sessions + QHP */, medal: i < 3 ? ic.crown : undefined, medalColor: i < 3 ? medalColors[i] : undefined }))
-    : (leaderboardQ.isError ? leaders : []));
+    : []); // live rows only (19 Oct 2026 audit): an error used to show the demo people from data.ts
   const podium = [rows[1], rows[0], rows[2]].filter(Boolean);
   const podiumHeights = [86, 112, 70];
   const maxSess = Math.max(1, rows[0]?.sess ?? 1);
@@ -2865,10 +2868,12 @@ export function TrainerLeaderboardContent() {
             <Serif style={{ fontSize: 22 }}>Trainer Leaderboard</Serif>
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 4, paddingHorizontal: 9, borderRadius: 999, backgroundColor: hexA(C.green, 0.12), borderWidth: 1, borderColor: hexA(C.green, 0.28) }}>
-              <PulseDot color={C.green} />
-              <Text style={{ fontSize: 10.5, fontFamily: F.bodySemi, color: C.green }}>Live</Text>
-            </View>
+            {rows.length ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 4, paddingHorizontal: 9, borderRadius: 999, backgroundColor: hexA(C.green, 0.12), borderWidth: 1, borderColor: hexA(C.green, 0.28) }}>
+                <PulseDot color={C.green} />
+                <Text style={{ fontSize: 10.5, fontFamily: F.bodySemi, color: C.green }}>Live</Text>
+              </View>
+            ) : null}
             <Mono style={{ fontSize: 11, color: C.mono2 }}>{sel.label} · {rows.length} trainers</Mono>
           </View>
 
@@ -2890,6 +2895,10 @@ export function TrainerLeaderboardContent() {
 
           {leaderboardQ.isLoading ? (
             <Body style={{ fontSize: 13, color: C.muted3, paddingVertical: 26 }}>Loading leaderboard…</Body>
+          ) : leaderboardQ.isError ? (
+            <Body style={{ fontSize: 13, color: C.red, paddingVertical: 26, textAlign: 'center' }}>Could not load the leaderboard. Check your connection and try again.</Body>
+          ) : rows.length === 0 ? (
+            <Body style={{ fontSize: 13, color: C.muted3, paddingVertical: 26, textAlign: 'center' }}>No standings for this period yet.</Body>
           ) : podium.length >= 3 ? (
             <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 10, marginTop: 20, width: '100%' }}>
               {podium.map((m, i) => {
@@ -12505,9 +12514,9 @@ export function MgrDash() {
     teamEnd: e.teamEnd,
     expected: e.expectedSessions,
   }));
-  const mgrRows = mgrLbQ.isError || !liveMgr || liveMgr.length === 0
-    ? mgrDefs.map((m) => ({ ...m, inactive: 0, score: m.sess + m.qhp, sess: m.sess + m.qhp, rawSess: m.sess, members: [] as ManagerTeamMember[], teamStart: null as string | null, teamEnd: null as string | null, expected: null as number | null }))
-    : liveMgr;
+  // Live rows only (19 Oct 2026 audit): the demo people from data.ts used to show, under a "Live"
+  // pill, while loading, offline, on an error, and for a month tab with no data.
+  const mgrRows = liveMgr ?? [];
   const podium = [mgrRows[1], mgrRows[0], mgrRows[2]].filter(Boolean); // 2nd · 1st · 3rd
   const podiumHeights = [86, 112, 70];
 
@@ -12532,10 +12541,12 @@ export function MgrDash() {
             <Serif style={{ fontSize: 22 }}>Managers Leaderboard</Serif>
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 4, paddingHorizontal: 9, borderRadius: 999, backgroundColor: hexA(C.green, 0.12), borderWidth: 1, borderColor: hexA(C.green, 0.28) }}>
-              <PulseDot color={C.green} />
-              <Text style={{ fontSize: 10.5, fontFamily: F.bodySemi, color: C.green }}>Live</Text>
-            </View>
+            {mgrRows.length ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 4, paddingHorizontal: 9, borderRadius: 999, backgroundColor: hexA(C.green, 0.12), borderWidth: 1, borderColor: hexA(C.green, 0.28) }}>
+                <PulseDot color={C.green} />
+                <Text style={{ fontSize: 10.5, fontFamily: F.bodySemi, color: C.green }}>Live</Text>
+              </View>
+            ) : null}
             <Mono style={{ fontSize: 11, color: C.mono2 }}>{lb?.periodLabel ?? 'Competition period'}</Mono>
           </View>
 
@@ -12588,6 +12599,13 @@ export function MgrDash() {
 
       {/* Full standings — expandable run-rate details */}
       <Mono style={{ fontSize: 12, letterSpacing: 2.1 }}>FULL STANDINGS</Mono>
+      {mgrLbQ.isLoading ? (
+        <Body style={{ fontSize: 13, color: C.muted3, paddingVertical: 20 }}>Loading the board…</Body>
+      ) : mgrLbQ.isError ? (
+        <Body style={{ fontSize: 13, color: C.red, paddingVertical: 20 }}>Could not load the board. Check your connection and try again.</Body>
+      ) : mgrRows.length === 0 ? (
+        <Body style={{ fontSize: 13, color: C.muted3, paddingVertical: 20 }}>No standings for this period yet.</Body>
+      ) : null}
       {mgrRows.map((m) => {
         const open = mgrRow === m.rank;
         // Run rate — TARGET-FREE (user decision 2026-08-01): no expected-sessions
