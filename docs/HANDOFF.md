@@ -2,6 +2,23 @@
 
 Read this first when picking up the project on a new machine.
 
+## Built, never used, needs a process decision before any code (20 Oct 2026)
+**Live ride tracking of the assessor (route tracker).** Built 14 Oct 2026 on the app
+(`src/lib/routeTracker.ts`, `src/screens/qhpNavigation.tsx`), the server (hub-track migration
+`20261014120000_route_tracker.sql`) and the web Leads page. Audited end to end on 20 Oct 2026:
+`docs/route-tracker-audit-20oct.md`. Zero rides have ever been published. The blocker is not a bug:
+no client has a location pin before their first QHP (8 of 84 QHP clients in the last 30 days had
+one, all captured by a trainer at a session), so Start navigation, and with it the tracking, is
+almost never available. Decisions for whoever owns ops, not engineering: (1) how the pin gets onto
+the lead before the ride (Ops pastes it at QHP booking, the assessor pastes an address at Start, or
+the pin carries from lead to client); (2) who may see rides (today the lead owner, QHP managers and
+admins; 8 of 27 booked leads have an owner). Do not build any phase until those are decided.
+If the feature is ever switched on, fix these four first (details in the audit): Android back leaves
+the ride unsaved and "live"; a stalled final save blocks the end event and traps the assessor; a
+dropped start is never retried and the whole ride then fails quietly; an end sent offline is lost.
+While idle it costs nothing: the crons touch an empty table, and the Leads page host was made
+dormant on 20 Oct 2026 (one query every 5 minutes, no realtime channel until a ride exists).
+
 ## What this is
 React Native / Expo (SDK 54) staff app for Odds Fitness — a native port of the live web app
 (`oddsfitness-hub-track-main`, React + Supabase). Six role workspaces: trainer, CRM, coach,
