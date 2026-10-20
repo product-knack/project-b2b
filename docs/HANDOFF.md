@@ -47,6 +47,10 @@ ANON key only — never service_role in the app. Edge functions live in `supabas
 - Client Threads (dedicated backend): `src/lib/clientThreadQueries.ts`, `src/screens/clientThreads.tsx`,
   migration SQL in `supabase/client_threads_migration.sql`
 - Roster distance: `supabase/functions/roster-distance/` + Google key in Supabase secret GOOGLE_API_KEY
+- iOS handoffs: `docs/ios-*-handoff.md`, one document per batch, pasted to the iOS app's assistant. The latest is
+  `docs/ios-8-to-16oct-handoff.md` (20 Oct 2026: everything Android gained from 8 to 16 Oct, 15 sections in build
+  order, with the pure rule files to copy byte for byte). Their node tests live in `tests/rules/` (run
+  `node tests/rules/<name>.js` from the repo root; `ROOT` at the top of each file points at the repo).
 
 ## Deep context per workspace
 See `docs/memory/` — verified backend contracts, gotchas, and test accounts per dashboard

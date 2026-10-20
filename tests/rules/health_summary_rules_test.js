@@ -1,0 +1,70 @@
+// Rule test for the Odds staff app. ROOT = the repo root; point it at the iOS repo and run: node tests/rules/health_summary_rules_test.js
+const ROOT = require("path").resolve(__dirname, "../..");
+// node test of src/lib/clientHealthSummary.ts (pure rules: gate, new-since, duration, split).
+const ts = require(ROOT + '/node_modules/typescript');
+const fs = require('fs');
+const src = fs.readFileSync(ROOT + '/src/lib/clientHealthSummary.ts', 'utf8');
+const js = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
+const m = { exports: {} };
+new Function('module', 'exports', 'require', js)(m, m.exports, require);
+const R = m.exports;
+let fails = 0;
+const eq = (name, got, want) => { const ok = JSON.stringify(got) === JSON.stringify(want); if (!ok) fails++; console.log(ok ? 'PASS' : 'FAIL', name, ok ? '' : `got ${JSON.stringify(got)} want ${JSON.stringify(want)}`); };
+const ME = 'me', OTHER = 'other';
+const row = (over = {}) => ({
+  client_id: 'c',
+  weekly_summary: { script: 'Over the last seven days the client did three sessions. Sleep averaged seven hours.', highlights: ['3 sessions'] },
+  weekly_generated_at: '2026-10-08T18:29:00Z', // 11:59 PM IST on 8 Oct
+  context_summary: { script: 'Blood pressure improved. For anything clinical, please check the doctor consultation notes.', improved: [{}], worsened: [], watch: [{}, {}] },
+  context_generated_at: '2026-10-05T04:00:00Z',
+  context_dirty: false,
+  listen_history: [],
+  ...over,
+});
+const NOW = new Date('2026-10-09T05:00:00Z').getTime(); // 10:30 AM IST, 9 Oct
+// gate: never listened
+eq('never listened -> both due', R.listenGate(row(), ME, NOW), { weekly: 'due', context: 'due' });
+// weekly heard today after the build, context heard after its build
+const okHist = [{ at: '2026-10-09T02:00:00Z', by: ME, which: 'weekly' }, { at: '2026-10-06T02:00:00Z', by: ME, which: 'context' }];
+eq('heard today + context up to date -> done', R.listenGate(row({ listen_history: okHist }), ME, NOW), { weekly: 'done', context: 'done' });
+eq('gateDue false when done', R.gateDue({ weekly: 'done', context: 'done' }), false);
+// weekly heard yesterday (before the nightly build) -> due
+eq('weekly heard before nightly build -> due', R.gateStateFor(row({ listen_history: [{ at: '2026-10-08T10:00:00Z', by: ME, which: 'weekly' }] }), 'weekly', ME, NOW), 'due');
+// weekly heard yesterday 11:59:30 PM IST (after build) but not today -> due (daily rule)
+eq('weekly heard after build but yesterday -> due', R.gateStateFor(row({ listen_history: [{ at: '2026-10-08T18:29:30Z', by: ME, which: 'weekly' }] }), 'weekly', ME, NOW), 'due');
+// context heard before its rebuild -> due; another person's listen never counts
+eq('context heard before rebuild -> due', R.gateStateFor(row({ listen_history: [{ at: '2026-10-04T10:00:00Z', by: ME, which: 'context' }] }), 'context', ME, NOW), 'due');
+eq('someone else heard -> still due for me', R.gateStateFor(row({ listen_history: [{ at: '2026-10-09T02:00:00Z', by: OTHER, which: 'weekly' }] }), 'weekly', ME, NOW), 'due');
+// nothing to hear
+eq('no weekly script -> none', R.gateStateFor(row({ weekly_summary: null, weekly_generated_at: null }), 'weekly', ME, NOW), 'none');
+eq('empty script -> none', R.gateStateFor(row({ context_summary: { script: '  ' } }), 'context', ME, NOW), 'none');
+eq('no row -> none/none', R.listenGate(null, ME, NOW), { weekly: 'none', context: 'none' });
+eq('gateDue with one due', R.gateDue({ weekly: 'none', context: 'due' }), true);
+// generated_at falls back to the json
+eq('generatedAt falls back to json', R.generatedAtOf(row({ weekly_generated_at: null, weekly_summary: { script: 'x', generated_at: '2026-10-01T00:00:00Z' } }), 'weekly'), '2026-10-01T00:00:00Z');
+// new since you listened
+eq('isNewSince never listened', R.isNewSince(row(), 'weekly', ME), true);
+eq('isNewSince heard after build', R.isNewSince(row({ listen_history: okHist }), 'weekly', ME), false);
+eq('isNewSince no uid', R.isNewSince(row({ listen_history: okHist }), 'weekly', null), true);
+// last listens
+eq('lastListen newest of kind', R.lastListen([{ at: '1', by: 'a', which: 'weekly' }, { at: '2', by: 'b', which: 'context' }, { at: '3', by: 'c', which: 'weekly' }], 'weekly').by, 'c');
+eq('myLastListen mine only', R.myLastListen([{ at: '1', by: ME, which: 'weekly' }, { at: '3', by: OTHER, which: 'weekly' }], 'weekly', ME).at, '1');
+// duration + words
+eq('durationText 67 words', R.durationText(Array(67).fill('w').join(' ')), '28 sec');
+eq('durationText 283 words', R.durationText(Array(283).fill('w').join(' ')), '1 min 58 sec');
+eq('scriptWords empty', R.scriptWords('  '), 0);
+// IST day + stamp
+eq('istDayOf 18:29Z is 8 Oct IST', R.istDayOf('2026-10-08T18:29:00Z'), '2026-10-08');
+eq('istDayOf 18:31Z is 9 Oct IST', R.istDayOf('2026-10-08T18:31:00Z'), '2026-10-09');
+eq('fmtStamp', R.fmtStamp('2026-10-09T09:46:14Z'), '9 Oct, 3:16 pm');
+eq('fmtStamp empty', R.fmtStamp(null), '');
+// split for speech
+const long = Array(12).fill('This is a sentence that is fairly long and ends properly.').join(' ');
+const parts = R.splitForSpeech(long, 200);
+eq('split: every part within max', parts.every((p) => p.length <= 200), true);
+eq('split: joins back to the text', parts.join(' ').replace(/\s+/g, ' '), long.replace(/\s+/g, ' '));
+eq('split: short text untouched', R.splitForSpeech('Hello there.', 200), ['Hello there.']);
+eq('split: empty', R.splitForSpeech('   ', 200), []);
+eq('split: one over-long sentence is cut', R.splitForSpeech('a'.repeat(450), 200).map((p) => p.length), [200, 200, 50]);
+console.log(fails ? `${fails} FAILED` : 'ALL PASS');
+process.exit(fails ? 1 : 0);
