@@ -44,6 +44,9 @@ import * as Location from 'expo-location';
 import KvStorage from 'expo-sqlite/kv-store';
 import { enqueueOutbox, getIsOnline, useIsOnline, useOutbox, retryOutboxItem, removeOutboxItem, drainOutbox, submitItem, updateOutboxItem, getOutboxItem, WorkoutLogOutboxPayload, OutboxItem, useSyncedNotices, dismissSyncedNotice, workoutQueueBySlot, queuedLine, pendingWorkoutForSlot, type QueuedWorkout } from '../lib/offline';
 import { useClientThreadsUnread } from '../lib/clientThreadQueries';
+import { useClientsOtpFlags, useMySessionOtpStatus } from '../lib/sessionOtpQueries';
+import { otpGateNeeded, isOtpGateError, OTP_GATE_MESSAGE } from '../lib/sessionOtp';
+import { SessionOtpSheet } from '../components/SessionOtpSheet';
 import { ClientThreadsCard } from '../components/clientThreadsCard';
 import { ManagerTeamChatCard } from './managerChat';
 import { istToday, useMyManagerTeam, TRAINER_MODALITIES } from '../lib/managerChatQueries';
@@ -1766,6 +1769,18 @@ export function Dashboard() {
   const myTeamQ = useMyManagerTeam();
   const teamlessTrainer = !myTeamQ.isPending && !myTeamQ.data;
   const rosterQ = useTodayRoster(trainerId, rosterDay);
+  // Session OTP (20 Oct 2026): a member with the flag on needs their 4-digit code verified before
+  // Add Workout opens for that roster slot. Flags and statuses are read once per roster; the sheet
+  // opens alone and the navigation runs only from its onVerified.
+  const otpRows = rosterQ.data ?? [];
+  const otpFlagsQ = useClientsOtpFlags(otpRows.map((r) => r.client_id));
+  const otpStatusQ = useMySessionOtpStatus(otpRows.map((r) => r.id));
+  const [otpFor, setOtpFor] = React.useState<{ scheduleId: string; clientName: string; couple: boolean; proceed: () => void } | null>(null);
+  const withOtpGate = (clientId: string, scheduleId: string, clientName: string, proceed: () => void) => {
+    const st = otpStatusQ.data?.[scheduleId];
+    if (otpGateNeeded(otpFlagsQ.data?.[clientId], st)) setOtpFor({ scheduleId, clientName, couple: st?.couple === true, proceed });
+    else proceed();
+  };
   // One silent device fix for the roster cards' inline distance estimates
   // (permission is guaranteed for trainers by the LocationGate — never prompts).
   const [devPos, setDevPos] = React.useState<{ lat: number; lng: number } | null>(null);
@@ -2431,7 +2446,7 @@ export function Dashboard() {
                     onVoice={r.workout_session_id && r.client_id ? () => setVoiceFor({ workoutSessionId: r.workout_session_id!, clientId: r.client_id!, clientName: r.client_name, notes: r.voice_notes }) : undefined}
                     queued={queuedBySlot.get(r.id) ?? null}
                     onEditQueued={() => { const o = outbox.find((x) => x.id === queuedBySlot.get(r.id)?.id); if (o) openQueuedLog(o); }}
-                    onAddWorkout={() => { const o = outbox.find((x) => x.id === queuedBySlot.get(r.id)?.id); if (o) { openQueuedLog(o); return; } if (r.client_id) openWorkout(r.client_id, r.client_name, r.modality ?? r.session_type ?? 'strength', r.id); }}
+                    onAddWorkout={() => { const o = outbox.find((x) => x.id === queuedBySlot.get(r.id)?.id); if (o) { openQueuedLog(o); return; } if (r.client_id) withOtpGate(r.client_id, r.id, r.client_name, () => openWorkout(r.client_id!, r.client_name, r.modality ?? r.session_type ?? 'strength', r.id)); }}
                   />
                 ))}
                 {attentionRows.length && todayRows.length ? (
@@ -2453,7 +2468,7 @@ export function Dashboard() {
                     onVoice={r.workout_session_id && r.client_id ? () => setVoiceFor({ workoutSessionId: r.workout_session_id!, clientId: r.client_id!, clientName: r.client_name, notes: r.voice_notes }) : undefined}
                     queued={queuedBySlot.get(r.id) ?? null}
                     onEditQueued={() => { const o = outbox.find((x) => x.id === queuedBySlot.get(r.id)?.id); if (o) openQueuedLog(o); }}
-                    onAddWorkout={() => { const o = outbox.find((x) => x.id === queuedBySlot.get(r.id)?.id); if (o) { openQueuedLog(o); return; } if (r.client_id) openWorkout(r.client_id, r.client_name, r.modality ?? r.session_type ?? 'strength', r.id); }}
+                    onAddWorkout={() => { const o = outbox.find((x) => x.id === queuedBySlot.get(r.id)?.id); if (o) { openQueuedLog(o); return; } if (r.client_id) withOtpGate(r.client_id, r.id, r.client_name, () => openWorkout(r.client_id!, r.client_name, r.modality ?? r.session_type ?? 'strength', r.id)); }}
                   />
                 ))}
                 {attentionRows.length && !todayRows.length ? (
@@ -2600,7 +2615,7 @@ export function Dashboard() {
                         />
                       </View>
                       {failed && o.error ? (
-                        <Body style={{ fontSize: 11, color: '#E0A090' }} numberOfLines={2}>{o.error}</Body>
+                        <Body style={{ fontSize: 11, color: '#E0A090' }} numberOfLines={2}>{isOtpGateError(o.error) ? OTP_GATE_MESSAGE : o.error}</Body>
                       ) : null}
                       <View style={{ flexDirection: 'row', gap: 8 }}>
                         {o.kind === 'workout-log' ? (
@@ -2625,7 +2640,17 @@ export function Dashboard() {
                         ) : null}
                         <Pressable
                           disabled={o.status === 'syncing'}
-                          onPress={() => submitItem(o.id)}
+                          onPress={() => {
+                            // A log the server refused for a missing session code: verify first, then retry (20 Oct 2026).
+                            const p = o.payload as WorkoutLogOutboxPayload & { clientName?: string };
+                            if (o.kind === 'workout-log' && failed && isOtpGateError(o.error) && p.scheduleSessionId && p.clientId) {
+                              setOutboxOpen(false);
+                              const scheduleId = p.scheduleSessionId;
+                              setTimeout(() => setOtpFor({ scheduleId, clientName: p.clientName ?? o.label.split(' · ')[0] ?? 'the member', couple: false, proceed: () => { submitItem(o.id); } }), 300);
+                              return;
+                            }
+                            submitItem(o.id);
+                          }}
                           style={{ flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: 11, backgroundColor: hexA(C.blue, 0.1), borderWidth: 1, borderColor: hexA(C.blue, 0.3), opacity: o.status === 'syncing' ? 0.5 : 1 }}
                         >
                           <Text style={{ fontFamily: F.bodySemi, fontSize: 12, color: '#A9BCFF' }}>{o.status === 'syncing' ? 'Syncing…' : 'Retry now'}</Text>
@@ -2752,6 +2777,14 @@ export function Dashboard() {
 
       <CyclePopup info={cycleFor} onClose={() => setCycleFor(null)} />
       <SessionVoiceSheet info={voiceFor} userId={trainerId} onClose={() => setVoiceFor(null)} />
+      <SessionOtpSheet
+        visible={!!otpFor}
+        scheduleId={otpFor?.scheduleId ?? null}
+        clientName={otpFor?.clientName ?? ''}
+        couple={otpFor?.couple ?? false}
+        onClose={() => setOtpFor(null)}
+        onVerified={() => { const p = otpFor?.proceed; setOtpFor(null); p?.(); }}
+      />
     </Page>
   );
 }
@@ -7393,7 +7426,7 @@ export function Workout() {
         finishAfterSave(true);
       } else {
         // Server rejection: stays safely queued on this device, shown on Home.
-        setSyncError(res.error ?? 'The server rejected this log.');
+        setSyncError(isOtpGateError(res.error) ? OTP_GATE_MESSAGE : (res.error ?? 'The server rejected this log.'));
         if (editingOutboxId) set({ editingOutboxId: null });
       }
     } finally {

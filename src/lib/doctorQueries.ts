@@ -3,6 +3,7 @@ import { parseVoiceNotes, type SessionVoiceNote } from './sessionVoiceTypes';
 import { supabase } from './supabase';
 import type { SessionTiming } from './sessionTiming';
 import { invokeWithTimeout, uploadWithTimeout } from './withTimeout';
+import { OTP_GATE_MESSAGE } from './sessionOtp';
 import { useAuth } from '../auth';
 import { THERAPY_MODALITIES, therapyModalityLabel, ROSTER_FRESH_START_MS } from './therapistQueries';
 
@@ -528,7 +529,8 @@ export async function submitPhysioSession(i: PhysioSubmitInput): Promise<{ sessi
         attendance_marked: true, cancelled: false, location: '',
         session_timing: i.sessionTiming ?? null,
       }] as any).select('id').single();
-      if (sessionError) throw new Error(sessionError.message);
+      // Session OTP gate (20 Oct 2026): the server refuses an unverified member's session.
+      if (sessionError) throw new Error(/OTP_NOT_VERIFIED/.test(String(sessionError.message)) ? OTP_GATE_MESSAGE : sessionError.message);
       const sessionId = (sessionData as any).id as string;
       await supabase.from('training_sessions').update({ workout_session_id: sessionId } as any).eq('id', sessionId);
       const { error: ncErr } = await supabase.from('neural_check').insert({
@@ -561,7 +563,8 @@ export async function submitPhysioSession(i: PhysioSubmitInput): Promise<{ sessi
     // Session timer (13 Oct 2026): the measured timing; duration_minutes keeps the sheet's default (user decision).
     session_timing: i.sessionTiming ?? null,
   }] as any).select('id').single();
-  if (error) throw new Error(error.message);
+  // Session OTP gate (20 Oct 2026): the server refuses an unverified member's session.
+  if (error) throw new Error(/OTP_NOT_VERIFIED/.test(String(error.message)) ? OTP_GATE_MESSAGE : error.message);
   const sessionId = (sessionData as any).id as string;
   // Self-link (all physio/therapy sessions). A failed link is non-fatal to the
   // user but must reach ops (web spec v2 §3.2/§3.5) — mobile consoles are

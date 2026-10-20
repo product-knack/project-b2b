@@ -36,6 +36,9 @@ import { FeatureTour, DOCTOR_TOUR, TourLauncher } from '../components/featureTou
 import * as Location from 'expo-location';
 import { useTrainerLeaderboard, istTimeParts } from '../lib/trainerQueries';
 import { CancelSessionFlow } from '../components/cancelSessionFlow';
+import { SessionOtpSheet } from '../components/SessionOtpSheet';
+import { useClientsOtpFlags, useMySessionOtpStatus } from '../lib/sessionOtpQueries';
+import { otpGateNeeded } from '../lib/sessionOtp';
 
 /* ============ DOCTOR WORKSPACE (web /doctor/* port, obsidian/ember UI) ============ */
 
@@ -282,6 +285,17 @@ export function DoctorTodayRoster({ accent = C.orange, onLog }: { accent?: strin
   const { session } = useAuth();
   const uid = session?.user?.id ?? '';
   const rosterQ = useDoctorTodayRoster();
+  // Session OTP (20 Oct 2026): the one Log button below starts the doctor's Add Workout, the physio
+  // sheet and the therapist's Log Session, so the code check sits in front of all three.
+  const otpRows = (rosterQ.data ?? []) as any[];
+  const otpFlagsQ = useClientsOtpFlags(otpRows.map((r) => r.client_id));
+  const otpStatusQ = useMySessionOtpStatus(otpRows.map((r) => r.id));
+  const [otpFor, setOtpFor] = React.useState<{ scheduleId: string; clientName: string; couple: boolean; proceed: () => void } | null>(null);
+  const withOtpGate = (clientId: string, scheduleId: string, clientName: string, proceed: () => void) => {
+    const st = otpStatusQ.data?.[scheduleId];
+    if (otpGateNeeded(otpFlagsQ.data?.[clientId], st)) setOtpFor({ scheduleId, clientName, couple: st?.couple === true, proceed });
+    else proceed();
+  };
   const [logFor, setLogFor] = React.useState<{ clientId: string; clientName: string; scheduleId?: string | null } | null>(null);
   const [addOpen, setAddOpen] = React.useState(false); // doctor: add today's / tomorrow's own session
   // Same rule as the trainer dashboard (15 Oct 2026, user: "sessions come only from My Crew"):
@@ -465,13 +479,17 @@ export function DoctorTodayRoster({ accent = C.orange, onLog }: { accent?: strin
                       <Pressable
                         onPress={() => {
                           const c = { clientId: r.client_id ?? '', clientName: r.client_name, scheduleId: r.id ?? null };
-                          if (onLog) { onLog(c); return; }
-                          // Doctor: a workout-modality slot opens the trainer's Add Workout form with
-                          // that modality, linked to this roster slot (trainer dashboard parity);
-                          // physio / rehab / recovery slots keep the physio sheet.
-                          const mod = r.modality ?? r.session_type;
-                          if (r.client_id && isWorkoutModality(mod)) openWorkout(r.client_id, r.client_name, mod as string, r.id);
-                          else setLogFor(c);
+                          const proceed = () => {
+                            if (onLog) { onLog(c); return; }
+                            // Doctor: a workout-modality slot opens the trainer's Add Workout form with
+                            // that modality, linked to this roster slot (trainer dashboard parity);
+                            // physio / rehab / recovery slots keep the physio sheet.
+                            const mod = r.modality ?? r.session_type;
+                            if (r.client_id && isWorkoutModality(mod)) openWorkout(r.client_id, r.client_name, mod as string, r.id);
+                            else setLogFor(c);
+                          };
+                          // Session OTP (20 Oct 2026): a member with the flag on verifies the code first, whichever sheet follows.
+                          if (r.client_id && r.id) withOtpGate(r.client_id, r.id, r.client_name, proceed); else proceed();
                         }}
                         style={{ flex: 1.5, borderRadius: 12, overflow: 'hidden' }}
                       >
@@ -495,6 +513,16 @@ export function DoctorTodayRoster({ accent = C.orange, onLog }: { accent?: strin
 
       {/* Add Session (doctor) → the trainer's own-session sheet with physio + workout modalities */}
       {teamlessDoctor ? <AddOwnSessionSheet visible={addOpen} onClose={() => setAddOpen(false)} trainerId={uid} modalities={DOCTOR_ROSTER_MODALITIES} /> : null}
+
+      {/* Session code (20 Oct 2026): opens alone, before any log sheet, for members with the OTP flag on */}
+      <SessionOtpSheet
+        visible={!!otpFor}
+        scheduleId={otpFor?.scheduleId ?? null}
+        clientName={otpFor?.clientName ?? ''}
+        couple={otpFor?.couple ?? false}
+        onClose={() => setOtpFor(null)}
+        onVerified={() => { const p = otpFor?.proceed; setOtpFor(null); setTimeout(() => p?.(), 250); }}
+      />
 
       {/* Log Session → the physio session sheet, prefilled with this client */}
       {!onLog ? <PhysioSessionSheet visible={!!logFor} onClose={() => setLogFor(null)} clientId={logFor?.clientId} clientName={logFor?.clientName} scheduleId={logFor?.scheduleId ?? null} /> : null}

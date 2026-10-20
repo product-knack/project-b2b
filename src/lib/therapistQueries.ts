@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { parseVoiceNotes, type SessionVoiceNote } from './sessionVoiceTypes';
 import { supabase } from './supabase';
 import type { SessionTiming } from './sessionTiming';
+import { OTP_GATE_MESSAGE } from './sessionOtp';
 import { useAuth } from '../auth';
 
 /* ============================================================================
@@ -196,7 +197,8 @@ export function useAddTherapySession() {
         p_therapy_type: input.therapyType,
         p_timing: input.sessionTiming ?? null,
       });
-      if (error) throw new Error(error.message);
+      // Session OTP gate (20 Oct 2026): the RPC inserts training_sessions on the server, so the gate applies here too.
+      if (error) throw new Error(/OTP_NOT_VERIFIED/.test(String(error.message)) ? OTP_GATE_MESSAGE : error.message);
       // roster_error non-null = session saved, roster step failed — the RPC has
       // already written the ops_alerts row, so we do NOT retry or double-report.
       return data as { session_id: string; schedule_id: string | null; roster_error: string | null } | null;

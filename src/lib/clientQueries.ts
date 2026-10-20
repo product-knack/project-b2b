@@ -4,6 +4,7 @@ import type { SessionTiming } from './sessionTiming';
 import { computeEssentials, EssentialsStatus } from './essentials';
 import { invokeWithTimeout, withTimeout, NET_MS } from './withTimeout';
 import { parseCheckinInfo, type MedicineCheckinInfo, type MedicineCheckinPayload } from './medicineCheckin';
+import { OTP_GATE_MESSAGE } from './sessionOtp';
 import type { ConsultAINotes } from './consultantQueries';
 import { parseVoiceNotes, SessionVoiceNote } from './sessionVoiceTypes';
 
@@ -555,6 +556,9 @@ export async function submitWorkoutLog(args: WorkoutLogInput) {
     }
     if (error) {
       if (/DUPLICATE_SLOT/.test(String(error.message))) throw new Error(ALREADY_LOGGED_MESSAGE);
+      // Session OTP gate (20 Oct 2026): the server refuses an unverified member's log; a real rejection,
+      // never queued as retryable (isTransientError does not match it), shown with the friendly text.
+      if (/OTP_NOT_VERIFIED/.test(String(error.message))) throw new Error(OTP_GATE_MESSAGE);
       throw new Error(error.message);
     }
   }
