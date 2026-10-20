@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
+<title>Assessor on the way</title>
+<!--
+  QHP tracking map for the client app (Odds Longevity), 20 Oct 2026. Loaded in a WebView (react-native-webview)
+  as a static HTML string. The app talks to the page with postMessage JSON; the page talks back the same way.
+
+  App -> page (window.postMessage on iOS, document message on Android; the page listens to both):
+    { type: 'init',   home: {lat, lng} | null, address: string | null,
+                      planned: string | null  (Google encoded polyline from ride.planned_polyline),
+                      ridden:  string | null  (ride.polyline), assessor: {lat, lng, heading} | null,
+                      status: 'none' | 'on_the_way' | 'arrived' | 'stale' | 'ended' }
+    { type: 'update', assessor: {lat, lng, heading} | null, ridden: string | null, status: ... }
+    { type: 'follow' }            re-centre on the assessor after the member dragged the map
+  Page -> app:
+    { type: 'ready' }             the map style has loaded; send 'init' after this
+    { type: 'dragged' }           the member moved the map; show a Re-centre button
+    { type: 'error', message }    tiles or style failed; show the text fallback
+
+  Map: MapLibre GL 4.7.1 (jsdelivr) with the OpenFreeMap "liberty" style, the same stack as the staff app's
+  navigation page. Never CARTO tiles. Credit: the app prints "Map data from OpenStreetMap" under the map.
+-->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css"/>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #0E0A09; overflow: hidden; }
+  #map { position: absolute; inset: 0; }
+  .maplibregl-ctrl { display: none !important; }
+  .pin { width: 30px; height: 30px; border-radius: 15px; background: #1D9A5B; border: 3px solid #fff; box-shadow: 0 2px 8px rgba(0,0,0,.35); display: flex; align-items: center; justify-content: center; }
+  .pin::after { content: ''; width: 8px; height: 8px; border-radius: 4px; background: #fff; }
+  .rider { width: 44px; height: 44px; position: relative; }
+  .rider .ring { position: absolute; inset: 0; border-radius: 22px; background: rgba(244,122,42,.25); animation: pulse 1.6s ease-out infinite; }
+  .rider .dot { position: absolute; left: 10px; top: 10px; width: 24px; height: 24px; border-radius: 12px; background: #F47A2A; border: 3px solid #fff; box-shadow: 0 2px 8px rgba(0,0,0,.4); }
+  .rider .arrow { position: absolute; left: 17px; top: -2px; width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 10px solid #fff; transform-origin: 5px 24px; }
+  .rider.still .arrow { display: none; }
+  .rider.stale .dot { background: #B98A2A; } .rider.stale .ring { display: none; }
+  .rider.arrived .dot { background: #1D9A5B; } .rider.arrived .ring { display: none; }
+  @keyframes pulse { 0% { transform: scale(.6); opacity: .9; } 100% { transform: scale(1.6); opacity: 0; } }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script>
+(function () {
+  var STYLE = 'https://tiles.openfreemap.org/styles/liberty';
+  var map = null, home = null, rider = null, riderEl = null, following = true, ready = false, lastPlanned = null, lastRidden = null;
+
+  function send(msg) { try { window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify(msg)); } catch (e) {} }
+
+  // Google encoded polyline -> [[lng, lat], ...] (same codec as the staff app's qhpNavigation.ts)
+  function decode(str) {
+    var out = [], index = 0, lat = 0, lng = 0;
+    while (index < str.length) {
+      var b, shift = 0, result = 0;
+      do { b = str.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20 && index < str.length);
+      lat += result & 1 ? ~(result >> 1) : result >> 1;
+      shift = 0; result = 0;
+      do { b = str.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20 && index < str.length);
+      lng += result & 1 ? ~(result >> 1) : result >> 1;
+      out.push([lng / 1e5, lat / 1e5]);
+    }
+    return out;
+  }
+
+  function line(id, color, width, dash) {
+    map.addSource(id, { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: [] } } });
+    map.addLayer({ id: id + '-casing', type: 'line', source: id, paint: { 'line-color': '#fff', 'line-width': width + 4, 'line-opacity': 0.9 }, layout: { 'line-cap': 'round', 'line-join': 'round' } });
+    var paint = { 'line-color': color, 'line-width': width };
+    if (dash) paint['line-dasharray'] = dash;
+    map.addLayer({ id: id, type: 'line', source: id, paint: paint, layout: { 'line-cap': 'round', 'line-join': 'round' } });
+  }
+  function setLine(id, coords) { var s = map.getSource(id); if (s) s.setData({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: coords } }); }
+
+  function fitAll(assessor) {
+    var pts = [];
+    if (home) pts.push([home.lng, home.lat]);
+    if (assessor) pts.push([assessor.lng, assessor.lat]);
+    if (lastPlanned) pts = pts.concat(lastPlanned);
+    if (!pts.length) return;
+    if (pts.length === 1) { map.easeTo({ center: pts[0], zoom: 15, duration: 600 }); return; }
+    var b = new maplibregl.LngLatBounds(pts[0], pts[0]);
+    pts.forEach(function (p) { b.extend(p); });
+    map.fitBounds(b, { padding: { top: 70, bottom: 110, left: 50, right: 50 }, maxZoom: 16, duration: 700 });
+  }
+
+  function applyAssessor(a, status) {
+    if (!a || typeof a.lat !== 'number' || typeof a.lng !== 'number') { if (rider) { rider.remove(); rider = null; } return; }
+    if (!rider) {
+      riderEl = document.createElement('div');
+      riderEl.className = 'rider';
+      riderEl.innerHTML = '<div class="ring"></div><div class="dot"></div><div class="arrow"></div>';
+      rider = new maplibregl.Marker({ element: riderEl, anchor: 'center', rotationAlignment: 'map' }).setLngLat([a.lng, a.lat]).addTo(map);
+    } else {
+      rider.setLngLat([a.lng, a.lat]);
+    }
+    riderEl.className = 'rider' + (status === 'stale' ? ' stale' : status === 'arrived' ? ' arrived' : '') + (typeof a.heading === 'number' ? '' : ' still');
+    var arrow = riderEl.querySelector('.arrow');
+    if (arrow && typeof a.heading === 'number') arrow.style.transform = 'rotate(' + a.heading + 'deg)';
+    if (following) map.easeTo({ center: [a.lng, a.lat], duration: 900 });
+  }
+
+  function handle(msg) {
+    if (!msg || !map) return;
+    if (msg.type === 'init') {
+      home = msg.home && typeof msg.home.lat === 'number' ? msg.home : null;
+      if (home) {
+        var el = document.createElement('div'); el.className = 'pin';
+        new maplibregl.Marker({ element: el, anchor: 'center' }).setLngLat([home.lng, home.lat]).addTo(map);
+      }
+      lastPlanned = msg.planned ? decode(msg.planned) : null;
+      lastRidden = msg.ridden ? decode(msg.ridden) : null;
+      if (lastPlanned) setLine('planned', lastPlanned);
+      if (lastRidden) setLine('ridden', lastRidden);
+      following = true;
+      applyAssessor(msg.assessor, msg.status);
+      fitAll(msg.assessor);
+    } else if (msg.type === 'update') {
+      if (msg.ridden) { lastRidden = decode(msg.ridden); setLine('ridden', lastRidden); }
+      applyAssessor(msg.assessor, msg.status);
+    } else if (msg.type === 'follow') {
+      following = true;
+      if (rider) map.easeTo({ center: rider.getLngLat(), zoom: Math.max(map.getZoom(), 14.5), duration: 600 }); else fitAll(null);
+    }
+  }
+  function onMessage(e) { var d = null; try { d = typeof e.data === 'string' ? JSON.parse(e.data) : e.data; } catch (err) { return; } handle(d); }
+  window.addEventListener('message', onMessage);
+  document.addEventListener('message', onMessage);
+  window.__track = handle; // for the browser mock
+
+  // The style is fetched here and trimmed: no sprite and no icon layers (POI pins), which a tracking map does
+  // not need; that also removes the image decoding from the load path (the style then loads in about a second).
+  fetch(STYLE).then(function (r) { return r.json(); }).then(function (style) {
+    delete style.sprite;
+    style.layers = (style.layers || []).filter(function (l) { return !(l.layout && l.layout['icon-image']); });
+    map = new maplibregl.Map({ container: 'map', style: style, center: [77.209, 28.6139], zoom: 11, attributionControl: false });
+    map.on('load', function () {
+      line('planned', '#1A73E8', 5);
+      line('ridden', '#8A8F98', 4);
+      map.on('dragstart', function () { following = false; send({ type: 'dragged' }); });
+      ready = true;
+      window.__ready = true; // the browser mock polls this; the app waits for the 'ready' message instead
+      send({ type: 'ready' });
+    });
+    map.on('error', function (e) { send({ type: 'error', message: (e && e.error && e.error.message) || 'map error' }); });
+  }).catch(function (e) {
+    send({ type: 'error', message: String(e && e.message || e) });
+  });
+})();
+</script>
+</body>
+</html>
