@@ -23,7 +23,7 @@ const OUTBOX_KEY = 'outbox:v1';
 export type OutboxItem = {
   id: string;
   userId?: string;        // who queued it — items never drain (or show) under another account
-  kind: 'workout-log' | 'create-plan' | 'edit-plan' | 'chat-message' | 'location-log' | 'screenshot-log' | 'session-voice-note' | 'nav-track' | 'route-ended';
+  kind: 'workout-log' | 'create-plan' | 'edit-plan' | 'chat-message' | 'location-log' | 'screenshot-log' | 'session-voice-note' | 'nav-track' | 'route-ended' | 'session-otp-verify';
   label: string;          // human line for the pending-sync UI
   createdAt: string;      // ORIGINAL device timestamp at submit time
   status: 'pending' | 'syncing' | 'failed';
@@ -219,9 +219,39 @@ let draining = false;
 
 /* One item's actual submit + cache invalidation. Throws on failure; success means
    the server insert/RPC genuinely succeeded (submit fns throw on any DB error). */
+/* Session codes typed with no network (21 Oct 2026) are verified BEFORE any workout log goes out, in queue
+   order, so the server-side OTP gate sees the verification first even when a single item is submitted on
+   its own (the form's awaited submit, Retry). A refused code is marked failed and left for the trainer
+   (the workout then fails on the gate with the saved code's own reason); a connection failure throws so
+   the caller stops and retries later. Runs inside the drain lock: it never calls drainOutbox / submitItem. */
+async function flushSavedOtps(): Promise<void> {
+  const waiting = items.filter((i) => i.kind === 'session-otp-verify' && i.status === 'pending' && mine(i));
+  if (!waiting.length) return;
+  const { submitSavedOtp } = require('./sessionOtpQueries');
+  for (const v of waiting) {
+    const current = items.find((i) => i.id === v.id);
+    if (!current || current.status !== 'pending') continue;
+    try {
+      await withTimeout(submitSavedOtp(current.payload), SYNC_MS, 'Session code');
+      items = items.filter((i) => i.id !== v.id);
+      await persist();
+      qcRef?.invalidateQueries({ queryKey: ['session-otp-status'] });
+    } catch (e: any) {
+      if (isTransientError(e)) throw e;
+      items = items.map((i) => (i.id === v.id ? { ...i, status: 'failed' as const, attempts: i.attempts + 1, error: String(e?.message ?? e) } : i));
+      await persist();
+    }
+  }
+}
+
 async function processItem(item: OutboxItem): Promise<{ linkPending?: boolean } | void> {
-  if (item.kind === 'workout-log') {
+  if (item.kind === 'session-otp-verify') {
+    const { submitSavedOtp } = require('./sessionOtpQueries');
+    await submitSavedOtp(item.payload);
+    qcRef?.invalidateQueries({ queryKey: ['session-otp-status'] });
+  } else if (item.kind === 'workout-log') {
     const p = item.payload as WorkoutLogOutboxPayload;
+    await flushSavedOtps();
     // Health gate data entered offline syncs first (idempotent upserts),
     // then the log itself (idempotent via pre-generated session id).
     if (p.health) await submitHealthData(p.health);
@@ -399,7 +429,18 @@ export function initOffline(queryClient: QueryClient) {
 // Location logs are captured silently and must NEVER appear in the pending-sync
 // list — the user should never see their location syncing. They still drain via
 // the internal `items` list above; this hook just hides them from the UI.
-const uiVisible = (list: OutboxItem[]) => list.filter((i) => i.kind !== 'location-log' && i.kind !== 'nav-track' && i.kind !== 'route-ended' && mine(i));
+const uiVisible = (list: OutboxItem[]) => list.filter((i) => i.kind !== 'location-log' && i.kind !== 'nav-track' && i.kind !== 'route-ended' && i.kind !== 'session-otp-verify' && mine(i));
+/* Every item of the signed-in user, hidden kinds included (the OTP gate reads the saved codes from here). */
+export function useOutboxAll(): OutboxItem[] {
+  const [list, setList] = React.useState<OutboxItem[]>(() => items.filter(mine));
+  React.useEffect(() => {
+    load().then(() => setList(items.filter(mine)));
+    const l = () => setList(items.filter(mine));
+    listeners.add(l);
+    return () => { listeners.delete(l); };
+  }, []);
+  return list;
+}
 export function useOutbox(): OutboxItem[] {
   const [snap, setSnap] = React.useState<OutboxItem[]>(uiVisible(items));
   React.useEffect(() => {

@@ -37,8 +37,9 @@ import * as Location from 'expo-location';
 import { useTrainerLeaderboard, istTimeParts } from '../lib/trainerQueries';
 import { CancelSessionFlow } from '../components/cancelSessionFlow';
 import { SessionOtpSheet } from '../components/SessionOtpSheet';
-import { useClientsOtpFlags, useMySessionOtpStatus } from '../lib/sessionOtpQueries';
-import { otpGateNeeded } from '../lib/sessionOtp';
+import { useClientsOtpFlags, useMySessionOtpStatus, saveSessionOtpOffline, savedOtpsFrom } from '../lib/sessionOtpQueries';
+import { otpGateNeeded, savedOtpCovers, istDayOf } from '../lib/sessionOtp';
+import { useOutboxAll } from '../lib/offline';
 
 /* ============ DOCTOR WORKSPACE (web /doctor/* port, obsidian/ember UI) ============ */
 
@@ -290,11 +291,23 @@ export function DoctorTodayRoster({ accent = C.orange, onLog }: { accent?: strin
   const otpRows = (rosterQ.data ?? []) as any[];
   const otpFlagsQ = useClientsOtpFlags(otpRows.map((r) => r.client_id));
   const otpStatusQ = useMySessionOtpStatus(otpRows.map((r) => r.id));
-  const [otpFor, setOtpFor] = React.useState<{ scheduleId: string; clientName: string; couple: boolean; proceed: () => void } | null>(null);
+  // Offline (21 Oct 2026): a code typed with no network waits in the queue and covers its slot until sync.
+  const outboxAll = useOutboxAll();
+  const savedOtps = React.useMemo(() => savedOtpsFrom(outboxAll), [outboxAll]);
+  const todayIst = istDayOf(Date.now());
+  const [otpFor, setOtpFor] = React.useState<{ scheduleId: string; clientId: string; clientName: string; couple: boolean; coupleGroupId: string | null; proceed: () => void } | null>(null);
   const withOtpGate = (clientId: string, scheduleId: string, clientName: string, proceed: () => void) => {
     const st = otpStatusQ.data?.[scheduleId];
-    if (otpGateNeeded(otpFlagsQ.data?.[clientId], st)) setOtpFor({ scheduleId, clientName, couple: st?.couple === true, proceed });
-    else proceed();
+    if (otpGateNeeded(otpFlagsQ.data?.[clientId], st, savedOtpCovers(savedOtps, scheduleId, st, todayIst))) {
+      setOtpFor({ scheduleId, clientId, clientName, couple: st?.couple === true, coupleGroupId: st?.coupleGroupId ?? null, proceed });
+    } else proceed();
+  };
+  const saveOtpOffline = (code: string) => {
+    const f = otpFor;
+    if (!f) return;
+    setOtpFor(null);
+    void saveSessionOtpOffline({ scheduleId: f.scheduleId, clientId: f.clientId, coupleGroupId: f.coupleGroupId, day: todayIst, enteredAt: new Date().toISOString(), code, clientName: f.clientName })
+      .then(() => setTimeout(() => f.proceed(), 250));
   };
   const [logFor, setLogFor] = React.useState<{ clientId: string; clientName: string; scheduleId?: string | null } | null>(null);
   const [addOpen, setAddOpen] = React.useState(false); // doctor: add today's / tomorrow's own session
@@ -522,6 +535,7 @@ export function DoctorTodayRoster({ accent = C.orange, onLog }: { accent?: strin
         couple={otpFor?.couple ?? false}
         onClose={() => setOtpFor(null)}
         onVerified={() => { const p = otpFor?.proceed; setOtpFor(null); setTimeout(() => p?.(), 250); }}
+        onSave={saveOtpOffline}
       />
 
       {/* Log Session → the physio session sheet, prefilled with this client */}

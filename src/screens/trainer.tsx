@@ -42,10 +42,10 @@ import { useAddOwnSession, useTodayRoster, useTrainerStats, useTrainerProfile, u
 import { PrevSet, useMyClients, useClientDetail, useClientSessions, useClientPlans, useClientGoals, useSaveWeeklyGoals, useDeleteWeeklyGoal, useZone2Week, useLogZone2Session, useWeeklyHealthSummary, PLAN_VALID_DAYS, useClientReports, useClientConsultAi, ClientConsultAi, useClientBioAge, useClientProgression, useCreateWorkoutSession, useModalityGate, useWorkoutTemplates, useSaveWorkoutTemplate, useDeleteWorkoutTemplate, useClientHealthCheck, useSaveHealthData, useExerciseDb, useSessionExercises, uuidv4, HealthDataInput, useWeeklyProgressionAll, ackWeeklyReport, WeeklyProgressionRow, useApprovedPlansForLogging, usePartnerInfo, usePreviousExerciseData, checkDuplicateWorkoutToday, PlanExerciseRow, useClientDailyStats, useClientWhoopRecovery, useSaveClientHomeLocation, PILATES_REFORMER_EXERCISES, usePlanEditValidation, normalizePlanModality, PLAN_EDIT_MAX_WORKOUTS } from '../lib/clientQueries';
 import * as Location from 'expo-location';
 import KvStorage from 'expo-sqlite/kv-store';
-import { enqueueOutbox, getIsOnline, useIsOnline, useOutbox, retryOutboxItem, removeOutboxItem, drainOutbox, submitItem, updateOutboxItem, getOutboxItem, WorkoutLogOutboxPayload, OutboxItem, useSyncedNotices, dismissSyncedNotice, workoutQueueBySlot, queuedLine, pendingWorkoutForSlot, type QueuedWorkout } from '../lib/offline';
+import { enqueueOutbox, getIsOnline, useIsOnline, useOutbox, useOutboxAll, retryOutboxItem, removeOutboxItem, drainOutbox, submitItem, updateOutboxItem, getOutboxItem, WorkoutLogOutboxPayload, OutboxItem, useSyncedNotices, dismissSyncedNotice, workoutQueueBySlot, queuedLine, pendingWorkoutForSlot, type QueuedWorkout } from '../lib/offline';
 import { useClientThreadsUnread } from '../lib/clientThreadQueries';
-import { useClientsOtpFlags, useMySessionOtpStatus } from '../lib/sessionOtpQueries';
-import { otpGateNeeded, isOtpGateError, OTP_GATE_MESSAGE } from '../lib/sessionOtp';
+import { useClientsOtpFlags, useMySessionOtpStatus, saveSessionOtpOffline, savedOtpsFrom, failedVerifyReasonFor, discardSavedOtps } from '../lib/sessionOtpQueries';
+import { otpGateNeeded, isOtpGateError, savedOtpCovers, istDayOf, workoutOtpErrorText, OTP_SAVED_HINT } from '../lib/sessionOtp';
 import { SessionOtpSheet } from '../components/SessionOtpSheet';
 import { ClientThreadsCard } from '../components/clientThreadsCard';
 import { ManagerTeamChatCard } from './managerChat';
@@ -1775,11 +1775,24 @@ export function Dashboard() {
   const otpRows = rosterQ.data ?? [];
   const otpFlagsQ = useClientsOtpFlags(otpRows.map((r) => r.client_id));
   const otpStatusQ = useMySessionOtpStatus(otpRows.map((r) => r.id));
-  const [otpFor, setOtpFor] = React.useState<{ scheduleId: string; clientName: string; couple: boolean; proceed: () => void } | null>(null);
+  // Offline (21 Oct 2026): a code typed with no network waits in the queue (kind session-otp-verify) and
+  // covers its slot (and the partner's leg of the same day) until the server has judged it at sync.
+  const outboxAll = useOutboxAll();
+  const savedOtps = React.useMemo(() => savedOtpsFrom(outboxAll), [outboxAll]);
+  const rosterDayIst = istDayOf(Date.now() + rosterDay * 864e5);
+  const [otpFor, setOtpFor] = React.useState<{ scheduleId: string; clientId: string; clientName: string; couple: boolean; coupleGroupId: string | null; proceed: () => void } | null>(null);
   const withOtpGate = (clientId: string, scheduleId: string, clientName: string, proceed: () => void) => {
     const st = otpStatusQ.data?.[scheduleId];
-    if (otpGateNeeded(otpFlagsQ.data?.[clientId], st)) setOtpFor({ scheduleId, clientName, couple: st?.couple === true, proceed });
-    else proceed();
+    if (otpGateNeeded(otpFlagsQ.data?.[clientId], st, savedOtpCovers(savedOtps, scheduleId, st, rosterDayIst))) {
+      setOtpFor({ scheduleId, clientId, clientName, couple: st?.couple === true, coupleGroupId: st?.coupleGroupId ?? null, proceed });
+    } else proceed();
+  };
+  const saveOtpOffline = (code: string) => {
+    const f = otpFor;
+    if (!f) return;
+    setOtpFor(null);
+    void saveSessionOtpOffline({ scheduleId: f.scheduleId, clientId: f.clientId, coupleGroupId: f.coupleGroupId, day: rosterDayIst, enteredAt: new Date().toISOString(), code, clientName: f.clientName })
+      .then(() => f.proceed());
   };
   // One silent device fix for the roster cards' inline distance estimates
   // (permission is guaranteed for trainers by the LocationGate — never prompts).
@@ -2615,7 +2628,10 @@ export function Dashboard() {
                         />
                       </View>
                       {failed && o.error ? (
-                        <Body style={{ fontSize: 11, color: '#E0A090' }} numberOfLines={2}>{isOtpGateError(o.error) ? OTP_GATE_MESSAGE : o.error}</Body>
+                        <Body style={{ fontSize: 11, color: '#E0A090' }} numberOfLines={3}>{isOtpGateError(o.error) ? workoutOtpErrorText(failedVerifyReasonFor(outboxAll, (o.payload as WorkoutLogOutboxPayload)?.scheduleSessionId)) : o.error}</Body>
+                      ) : null}
+                      {!failed && o.kind === 'workout-log' && savedOtps.some((s) => s.scheduleId === (o.payload as WorkoutLogOutboxPayload)?.scheduleSessionId) ? (
+                        <Body style={{ fontSize: 11, color: C.gold }}>{OTP_SAVED_HINT}</Body>
                       ) : null}
                       <View style={{ flexDirection: 'row', gap: 8 }}>
                         {o.kind === 'workout-log' ? (
@@ -2646,7 +2662,9 @@ export function Dashboard() {
                             if (o.kind === 'workout-log' && failed && isOtpGateError(o.error) && p.scheduleSessionId && p.clientId) {
                               setOutboxOpen(false);
                               const scheduleId = p.scheduleSessionId;
-                              setTimeout(() => setOtpFor({ scheduleId, clientName: p.clientName ?? o.label.split(' · ')[0] ?? 'the member', couple: false, proceed: () => { submitItem(o.id); } }), 300);
+                              const clientId = p.clientId;
+                              // A code saved offline that the server refused is dropped once a new one is verified or saved.
+                              setTimeout(() => setOtpFor({ scheduleId, clientId, clientName: p.clientName ?? o.label.split(' · ')[0] ?? 'the member', couple: false, coupleGroupId: null, proceed: () => { void discardSavedOtps(outboxAll, scheduleId).then(() => submitItem(o.id)); } }), 300);
                               return;
                             }
                             submitItem(o.id);
@@ -2784,6 +2802,7 @@ export function Dashboard() {
         couple={otpFor?.couple ?? false}
         onClose={() => setOtpFor(null)}
         onVerified={() => { const p = otpFor?.proceed; setOtpFor(null); p?.(); }}
+        onSave={saveOtpOffline}
       />
     </Page>
   );
@@ -6620,6 +6639,7 @@ export function Workout() {
   const [z2Date, setZ2Date] = React.useState<string | null>(null);
   const [z2Dur, setZ2Dur] = React.useState('');
   const isOnline = useIsOnline();
+  const outboxAllW = useOutboxAll(); // a session code saved offline that the server refused shows its own reason
   // Health data entered while offline — satisfies the gate locally and syncs
   // inside the same outbox item as the workout log.
   const [offlineHealth, setOfflineHealth] = React.useState<HealthDataInput | null>(null);
@@ -7426,7 +7446,7 @@ export function Workout() {
         finishAfterSave(true);
       } else {
         // Server rejection: stays safely queued on this device, shown on Home.
-        setSyncError(isOtpGateError(res.error) ? OTP_GATE_MESSAGE : (res.error ?? 'The server rejected this log.'));
+        setSyncError(isOtpGateError(res.error) ? workoutOtpErrorText(failedVerifyReasonFor(outboxAllW, workoutScheduleId)) : (res.error ?? 'The server rejected this log.'));
         if (editingOutboxId) set({ editingOutboxId: null });
       }
     } finally {

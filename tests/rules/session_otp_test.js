@@ -1,6 +1,8 @@
 // Rule test for the Odds staff app. ROOT = the repo root; point it at the iOS repo and run: node tests/rules/session_otp_test.js
 const ROOT = require("path").resolve(__dirname, "../..");
-// Session OTP pure rules (20 Oct 2026): the gate decision, the reason copy, the gate error check, the parser.
+// Session OTP pure rules (20 Oct 2026; offline 21 Oct 2026): the gate decision incl. a code saved on the phone,
+// the couple cover of a saved code, the reason copy incl. expired, the gate error check, the refused-sync
+// reason parser, the workout error line, the parser, the IST day.
 const ts = require(ROOT + '/node_modules/typescript');
 const fs = require('fs');
 const src = fs.readFileSync(ROOT + '/src/lib/sessionOtp.ts', 'utf8');
@@ -15,21 +17,43 @@ eq('gate: flag on, pending', O.otpGateNeeded(true, { status: 'pending', verified
 eq('gate: flag on, verified', O.otpGateNeeded(true, { status: 'verified', verified_at: 'x', couple: false }), false);
 eq('gate: flag off', O.otpGateNeeded(false, { status: 'pending', verified_at: null, couple: false }), false);
 eq('gate: flag unknown (row not readable) = no step', O.otpGateNeeded(undefined, undefined), false);
+eq('gate: flag on, pending, code saved on this phone = no step', O.otpGateNeeded(true, { status: 'pending', verified_at: null, couple: false }, true), false);
+eq('gate: flag on, pending, saved false = step', O.otpGateNeeded(true, { status: 'pending', verified_at: null, couple: false }, false), true);
+
+const saved = [{ scheduleId: 'A', clientId: 'c1', coupleGroupId: 'g1', day: '2026-10-21', enteredAt: '2026-10-21T13:02:00.000Z' }];
+eq('saved covers its own slot', O.savedOtpCovers(saved, 'A', { status: 'pending', verified_at: null, couple: true, coupleGroupId: 'g1' }, '2026-10-21'), true);
+eq('saved covers the partner slot, same couple, same day', O.savedOtpCovers(saved, 'B', { status: 'pending', verified_at: null, couple: true, coupleGroupId: 'g1' }, '2026-10-21'), true);
+eq('saved does not cover another couple', O.savedOtpCovers(saved, 'B', { status: 'pending', verified_at: null, couple: true, coupleGroupId: 'g2' }, '2026-10-21'), false);
+eq('saved does not cover the partner on another day', O.savedOtpCovers(saved, 'B', { status: 'pending', verified_at: null, couple: true, coupleGroupId: 'g1' }, '2026-10-22'), false);
+eq('saved does not cover an unrelated slot', O.savedOtpCovers(saved, 'C', { status: 'pending', verified_at: null, couple: false, coupleGroupId: null }, '2026-10-21'), false);
+eq('a single saved code never covers through a null group', O.savedOtpCovers([{ scheduleId: 'A', clientId: 'c1', coupleGroupId: null, day: '2026-10-21', enteredAt: 'x' }], 'B', { status: 'pending', verified_at: null, couple: false, coupleGroupId: null }, '2026-10-21'), false);
+eq('nothing saved', O.savedOtpCovers([], 'A', undefined, '2026-10-21'), false);
+
 eq('reason invalid', O.otpReasonText('invalid'), 'OTP not valid. Ask the member for the code again.');
 eq('reason cancelled', O.otpReasonText('cancelled'), 'This session is cancelled, so its code cannot be used.');
 eq('reason no_otp', O.otpReasonText('no_otp'), "No code exists for this session yet. Ask CRM to check the member's OTP setting.");
 eq('reason not_your_session', O.otpReasonText('not_your_session'), 'This session belongs to another trainer.');
 eq('reason not_authenticated', O.otpReasonText('not_authenticated'), 'You are signed out. Sign in again and retry.');
+eq('reason expired', O.otpReasonText('expired'), 'The code was typed on a different day than the session, so it cannot be used.');
 eq('reason unknown', O.otpReasonText('something'), 'The code could not be verified.');
 eq('gate error: raw server text', O.isOtpGateError(new Error("OTP_NOT_VERIFIED: this member's session code has not been verified for this session")), true);
 eq('gate error: friendly text', O.isOtpGateError(O.OTP_GATE_MESSAGE), true);
 eq('gate error: other', O.isOtpGateError(new Error('DUPLICATE_SLOT: already logged')), false);
+eq('refused sync reason parsed', O.verifyFailureReason(new Error('OTP_VERIFY_FAILED:invalid')), 'invalid');
+eq('refused sync reason expired', O.verifyFailureReason('OTP_VERIFY_FAILED:expired'), 'expired');
+eq('refused sync reason absent', O.verifyFailureReason(new Error('network request failed')), null);
+eq('workout line: wrong code at sync', O.workoutOtpErrorText('invalid'), O.OTP_WRONG_AT_SYNC_MESSAGE);
+eq('workout line: expired at sync', O.workoutOtpErrorText('expired'), O.OTP_EXPIRED_AT_SYNC_MESSAGE);
+eq('workout line: other reason', O.workoutOtpErrorText('cancelled'), 'This session is cancelled, so its code cannot be used. Then Retry.');
+eq('workout line: no saved failure = gate copy', O.workoutOtpErrorText(null), O.OTP_GATE_MESSAGE);
 eq('parse ok', O.parseVerifyAnswer({ ok: true, already_verified: false, verified_at: '2026-10-20T10:00:00Z', verified_count: 2 }), { ok: true, already_verified: false, verified_at: '2026-10-20T10:00:00Z', verified_count: 2 });
 eq('parse not ok', O.parseVerifyAnswer({ ok: false, reason: 'invalid' }), { ok: false, reason: 'invalid' });
 eq('parse junk', O.parseVerifyAnswer(null).ok, false);
 eq('digits only, max four', O.otpDigits('12a3-45'), '1234');
 eq('body copy single', O.otpSheetBody('Vashist', false), 'Ask Vashist for the 4-digit code CRM sent them. The workout opens once it is verified.');
 eq('body copy couple', O.otpSheetBody('Vashist', true).endsWith(' One code covers both partners today.'), true);
-eq('no dashes in any copy', [O.OTP_GATE_MESSAGE, O.OTP_OFFLINE_MESSAGE, O.OTP_NETWORK_MESSAGE, O.otpReasonText('invalid'), O.otpSheetBody('A', true)].some((s) => s.includes('—')), false);
+eq('IST day: 21 Oct 23:30 IST is 21 Oct', O.istDayOf(Date.UTC(2026, 9, 21, 18, 0)), '2026-10-21');
+eq('IST day: 21 Oct 18:31 UTC is 22 Oct IST', O.istDayOf(Date.UTC(2026, 9, 21, 18, 31)), '2026-10-22');
+eq('no dashes in any copy', [O.OTP_GATE_MESSAGE, O.OTP_OFFLINE_MESSAGE, O.OTP_NETWORK_MESSAGE, O.OTP_SAVED_HINT, O.OTP_WRONG_AT_SYNC_MESSAGE, O.OTP_EXPIRED_AT_SYNC_MESSAGE, O.otpReasonText('invalid'), O.otpReasonText('expired'), O.otpSheetBody('A', true)].some((s) => s.includes('—')), false);
 console.log(fails ? `${fails} FAILED` : 'ALL PASS');
 process.exit(fails ? 1 : 0);

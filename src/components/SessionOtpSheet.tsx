@@ -9,19 +9,23 @@ import { useIsOnline } from '../lib/offline';
 import { useVerifySessionOtp } from '../lib/sessionOtpQueries';
 import { otpDigits, otpReasonText, otpSheetBody, OTP_NETWORK_MESSAGE, OTP_OFFLINE_MESSAGE } from '../lib/sessionOtp';
 
-/* Session code sheet (20 Oct 2026): the trainer types the member's 4-digit code before Add Workout.
-   Mirrors the web SessionOtpDialog: title "Session code", the body line (plus the couple sentence),
-   four boxes drawn from one number input, auto-submit on the 4th digit, inline reason copy, Cancel /
-   Verify. {ok:true} calls onVerified; {ok:false} shows the reason and clears the boxes; a network
-   error keeps the sheet open; offline shows the offline line and never calls the server.
-   Sheet rules: sibling backdrop, keyboard padding, hitSlop >= 10, one Modal at a time (the caller
-   mounts it next to its other sheets and opens it alone). */
-export function SessionOtpSheet({ visible, scheduleId, clientName, couple, onVerified, onClose }: {
+/* Session code sheet (20 Oct 2026; offline 21 Oct 2026): the trainer types the member's 4-digit code before
+   Add Workout. Mirrors the web SessionOtpDialog: title "Session code", the body line (plus the couple
+   sentence), four boxes drawn from one number input, inline reason copy, Cancel / Verify. Online: auto-submit
+   on the 4th digit, {ok:true} calls onVerified, {ok:false} shows the reason and clears the boxes.
+   Offline (owner decision 21 Oct 2026: trust now, verify at sync): the gold line explains, the button reads
+   Save code, and onSave(code) hands the digits to the caller, who queues them before the workout. A verify
+   call that fails on the network switches the sheet to the same Save code mode (the trainer may still retry).
+   Sheet rules: sibling backdrop, keyboard padding, hitSlop >= 10, one Modal at a time (the caller mounts it
+   next to its other sheets and opens it alone). */
+export function SessionOtpSheet({ visible, scheduleId, clientName, couple, onVerified, onSave, onClose }: {
   visible: boolean;
   scheduleId: string | null;
   clientName: string;
   couple: boolean;
   onVerified: () => void;
+  /** The code typed with no network (or after a failed call); the caller queues it. Absent = online only. */
+  onSave?: (code: string) => void;
   onClose: () => void;
 }) {
   const insets = useSafeAreaInsets();
@@ -30,18 +34,28 @@ export function SessionOtpSheet({ visible, scheduleId, clientName, couple, onVer
   const verifyM = useVerifySessionOtp();
   const [code, setCode] = React.useState('');
   const [err, setErr] = React.useState<string | null>(null);
+  const [netFailed, setNetFailed] = React.useState(false);
   const inputRef = React.useRef<TextInput>(null);
   const submitting = React.useRef(false);
   const busy = verifyM.isPending;
+  // Save mode: no network, or the last call never reached the server. Needs a caller that queues.
+  const saveMode = !!onSave && (!online || netFailed);
 
   React.useEffect(() => {
-    if (visible) { setCode(''); setErr(null); submitting.current = false; verifyM.reset(); setTimeout(() => inputRef.current?.focus(), 250); }
+    if (visible) { setCode(''); setErr(null); setNetFailed(false); submitting.current = false; verifyM.reset(); setTimeout(() => inputRef.current?.focus(), 250); }
     else Keyboard.dismiss();
   }, [visible]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const save = React.useCallback((value: string) => {
+    if (!scheduleId || value.length !== 4 || !onSave) return;
+    Keyboard.dismiss();
+    onSave(value);
+  }, [scheduleId, onSave]);
+
   const submit = React.useCallback(async (value: string) => {
     if (!scheduleId || value.length !== 4 || submitting.current) return;
-    if (!online) { setErr(OTP_OFFLINE_MESSAGE); return; }
+    if (saveMode) { save(value); return; }
+    if (!online) { setErr('You are offline. The session code can only be verified online.'); return; }
     submitting.current = true;
     setErr(null);
     try {
@@ -51,20 +65,23 @@ export function SessionOtpSheet({ visible, scheduleId, clientName, couple, onVer
       setCode('');
       setTimeout(() => inputRef.current?.focus(), 50);
     } catch {
-      setErr(OTP_NETWORK_MESSAGE);
+      // The server was never reached: offer to save the code for the sync (the digits stay in the boxes).
+      if (onSave) { setNetFailed(true); setErr(OTP_NETWORK_MESSAGE); }
+      else setErr('The code could not be verified. Check your connection and retry.');
     } finally {
       submitting.current = false;
     }
-  }, [scheduleId, online, verifyM, onVerified]);
+  }, [scheduleId, online, saveMode, save, verifyM, onVerified, onSave]);
 
   const onChange = (raw: string) => {
     const next = otpDigits(raw);
     setCode(next);
-    if (err) setErr(null);
-    if (next.length === 4) submit(next);
+    if (err && !netFailed) setErr(null);
+    // Online: the fourth digit submits. Save mode waits for the tap on Save code.
+    if (next.length === 4 && !saveMode) submit(next);
   };
 
-  const canVerify = code.length === 4 && !busy && !!scheduleId;
+  const canAct = code.length === 4 && !busy && !!scheduleId;
   const boxes = [0, 1, 2, 3];
 
   return (
@@ -93,7 +110,7 @@ export function SessionOtpSheet({ visible, scheduleId, clientName, couple, onVer
                 const ch = code[i] ?? '';
                 const active = i === Math.min(code.length, 3);
                 return (
-                  <View key={i} style={{ width: 54, height: 60, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1.5, borderColor: err ? hexA(C.red, 0.6) : active ? C.gold : 'rgba(255,255,255,0.12)' }}>
+                  <View key={i} style={{ width: 54, height: 60, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1.5, borderColor: err && !netFailed ? hexA(C.red, 0.6) : active ? C.gold : 'rgba(255,255,255,0.12)' }}>
                     <Text style={{ fontFamily: F.bodyBold, fontSize: 24, color: '#fff' }}>{ch}</Text>
                   </View>
                 );
@@ -113,15 +130,15 @@ export function SessionOtpSheet({ visible, scheduleId, clientName, couple, onVer
               accessibilityLabel="Session code"
               style={{ position: 'absolute', opacity: 0, height: 1, width: 1 }}
             />
-            {err ? <Body style={{ fontSize: 12, color: C.red, textAlign: 'center' }}>{err}</Body> : null}
-            {!online && !err ? <Body style={{ fontSize: 12, color: C.gold, textAlign: 'center' }}>{OTP_OFFLINE_MESSAGE}</Body> : null}
+            {err ? <Body style={{ fontSize: 12, color: netFailed ? C.gold : C.red, textAlign: 'center' }}>{err}</Body> : null}
+            {!online && !err ? <Body style={{ fontSize: 12, color: C.gold, textAlign: 'center', lineHeight: 17 }}>{onSave ? OTP_OFFLINE_MESSAGE : 'You are offline. The session code can only be verified online.'}</Body> : null}
 
             <View style={{ flexDirection: 'row', gap: 10 }}>
               <Pressable onPress={() => { if (!busy) onClose(); }} disabled={busy} hitSlop={10} accessibilityRole="button" style={{ flex: 1, alignItems: 'center', paddingVertical: 14, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.06)', opacity: busy ? 0.5 : 1 }}>
                 <Text style={{ fontFamily: F.bodySemi, fontSize: 13.5, color: C.muted }}>Cancel</Text>
               </Pressable>
-              <Pressable onPress={() => submit(code)} disabled={!canVerify} hitSlop={10} accessibilityRole="button" accessibilityState={{ disabled: !canVerify }} style={{ flex: 1.3, alignItems: 'center', justifyContent: 'center', paddingVertical: 14, borderRadius: 14, backgroundColor: canVerify ? C.gold : hexA(C.gold, 0.25), opacity: canVerify ? 1 : 0.6 }}>
-                {busy ? <ActivityIndicator size="small" color="#1A1208" /> : <Text style={{ fontFamily: F.bodyBold, fontSize: 14, color: '#1A1208' }}>Verify</Text>}
+              <Pressable onPress={() => submit(code)} disabled={!canAct} hitSlop={10} accessibilityRole="button" accessibilityState={{ disabled: !canAct }} style={{ flex: 1.3, alignItems: 'center', justifyContent: 'center', paddingVertical: 14, borderRadius: 14, backgroundColor: canAct ? C.gold : hexA(C.gold, 0.25), opacity: canAct ? 1 : 0.6 }}>
+                {busy ? <ActivityIndicator size="small" color="#1A1208" /> : <Text style={{ fontFamily: F.bodyBold, fontSize: 14, color: '#1A1208' }}>{saveMode ? 'Save code' : 'Verify'}</Text>}
               </Pressable>
             </View>
             <Body style={{ fontSize: 10.5, color: C.muted3, textAlign: 'center' }}>The code is the member's own. You verify it, you never see it here.</Body>
