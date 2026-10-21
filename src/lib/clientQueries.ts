@@ -1787,11 +1787,15 @@ export type WorkoutPlanCreateInput = {
   boxing: { selected: PlanBoxingSelection[]; custom: PlanBoxingCustom[]; padwork: boolean };
   /** Offline sync: pre-generated plan id so retries can never duplicate the plan. */
   planId?: string;
+  /** Registry marker (21 Oct 2026): 'ai' when the builder was filled from an Odds AI draft (even if edited
+      afterwards), with the split label and note as `aiPrompt`; absent / 'human' for hand-built plans. */
+  source?: 'human' | 'ai';
+  aiPrompt?: string | null;
 };
 
 // Plain submit fn — used by the mutation hook AND the offline outbox drainer.
 export async function submitWorkoutPlan(input: WorkoutPlanCreateInput) {
-      const { trainerId, clientId, planName, planDescription, durationWeeks, modality, bodyParts, yoga, boxing } = input;
+      const { trainerId, clientId, planName, planDescription, durationWeeks, modality, bodyParts, yoga, boxing, source, aiPrompt } = input;
       if (!clientId) throw new Error('Select a client first');
       if (!planName.trim()) throw new Error('Enter a plan name');
       if (!modality) throw new Error('Select a modality');
@@ -1814,6 +1818,9 @@ export async function submitWorkoutPlan(input: WorkoutPlanCreateInput) {
         plan_description: planDescription.trim() || null,
         plan_duration_weeks: durationWeeks,
         modality,
+        // workout_plan_exercises.source / ai_prompt (hub-track migration 20261021150000): the registry
+        // copies them into public.workout_plan at approval. Hand-built plans keep the column defaults.
+        ...(source === 'ai' ? { source: 'ai', ai_prompt: (aiPrompt ?? '').trim() || null } : {}),
       };
 
       let rows: any[] = [];

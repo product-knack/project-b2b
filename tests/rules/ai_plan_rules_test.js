@@ -72,5 +72,18 @@ eq('conditioning new exercise defaults to Cardio', bp2[1].exercises[0].notInDb.m
 eq('draftNewExercises', A.draftNewExercises(draft2), ['Pallof Press', 'Sled Push']);
 eq('draftNewExercises none', A.draftNewExercises(draft), []);
 
+// Build mode and the registry marker (21 Oct 2026)
+eq('ai prompt line: split and note, whitespace squeezed', A.aiPromptLine('Push / Pull / Legs', '  no machines at home,  wants to focus on posture '), 'Push / Pull / Legs · no machines at home, wants to focus on posture');
+eq('ai prompt line: split only', A.aiPromptLine('Bro split', ''), 'Bro split');
+eq('ai prompt line: null note', A.aiPromptLine('Full Body (Upper / Lower)', null), 'Full Body (Upper / Lower)');
+eq('ai choice: needs a client', A.aiChoice({ online: true, clientId: null, modality: null, allowed: null }), { enabled: false, reason: 'Pick the client first' });
+eq('ai choice: offline', A.aiChoice({ online: false, clientId: 'c', modality: null, allowed: true }), { enabled: false, reason: 'Needs a connection' });
+eq('ai choice: yoga stays manual', A.aiChoice({ online: true, clientId: 'c', modality: 'Yoga', allowed: true }), { enabled: false, reason: 'Strength Training plans only for now' });
+eq('ai choice: refused by the server', A.aiChoice({ online: true, clientId: 'c', modality: null, allowed: false }), { enabled: false, reason: 'Not available for this client' });
+eq('ai choice: open while the preview loads', A.aiChoice({ online: true, clientId: 'c', modality: null, allowed: null }), { enabled: true, reason: null });
+eq('ai choice: ok', A.aiChoice({ online: true, clientId: 'c', modality: 'Strength Training', allowed: true }), { enabled: true, reason: null });
+eq('source: a draft applied then edited is still ai', A.planSource(true), 'ai');
+eq('source: hand built', A.planSource(false), 'human');
+eq('no dashes in the choice copy', ['Pick the client first', 'Needs a connection', 'Strength Training plans only for now', 'Not available for this client'].some((s) => s.includes('—')), false);
 console.log(fails ? `${fails} FAILED` : 'ALL PASS');
 process.exit(fails ? 1 : 0);

@@ -12,7 +12,7 @@ import { Icon } from '../icons';
 import { Body, Mono, Serif } from './primitives';
 import { trackEvent } from '../lib/amplitude';
 import { useAiPlanDraft } from '../lib/aiPlanQueries';
-import { SPLITS, sourcesLine, draftExerciseCount, draftNewExercises, type AiPlanPreview, type AiPlanResult, type SplitKey } from '../lib/aiPlanDraft';
+import { SPLITS, splitOf, aiPromptLine, sourcesLine, draftExerciseCount, draftNewExercises, type AiPlanPreview, type AiPlanResult, type SplitKey } from '../lib/aiPlanDraft';
 
 const AI = '#A78BFA';
 const STEPS = ['Reading the QHP', 'Checking blood markers and medical history', 'Picking exercises from the Odds library', 'Setting sets, reps and rest', 'Checking every exercise against the library'];
@@ -21,8 +21,9 @@ export function AiPlanAssistant({ clientId, clientName, preview, onApply }: {
   clientId: string;
   clientName: string;
   preview: AiPlanPreview;
-  /** Drop the draft into the builder (the parent asks before replacing exercises already in the form). */
-  onApply: (r: AiPlanResult) => void;
+  /** Drop the draft into the builder (the parent asks before replacing exercises already in the form).
+      `prompt` is the registry's ai_prompt for this draft: the split label and the note as one line. */
+  onApply: (r: AiPlanResult, prompt: string) => void;
 }) {
   const draftM = useAiPlanDraft();
   const [open, setOpen] = React.useState(true);
@@ -52,7 +53,7 @@ export function AiPlanAssistant({ clientId, clientName, preview, onApply }: {
       const r = await draftM.mutateAsync({ clientId, split, note });
       setResult(r);
       trackEvent('AI Plan Generated', { client_id: clientId, split, model: r.model, exercises: draftExerciseCount(r.draft), not_in_db: draftNewExercises(r.draft).length, dropped: r.dropped.length });
-      onApply(r);
+      onApply(r, aiPromptLine(r.draft.split_label || splitOf(split)?.label || split, note));
     } catch (e: any) {
       trackEvent('AI Plan Generate Failed', { client_id: clientId, split, error: String(e?.message ?? e).slice(0, 120) });
     }
@@ -69,7 +70,7 @@ export function AiPlanAssistant({ clientId, clientName, preview, onApply }: {
         </View>
         <View style={{ flex: 1 }}>
           <Serif style={{ fontSize: 17 }}>Odds AI plan assistant</Serif>
-          <Body style={{ fontSize: 11, color: C.muted2, marginTop: 2, lineHeight: 15 }}>Essentials client · drafts {clientName.split(' ')[0]}'s plan from the QHP, medical and blood reports</Body>
+          <Body style={{ fontSize: 11, color: C.muted2, marginTop: 2, lineHeight: 15 }}>{preview.essentials ? 'Essentials client · ' : ''}Drafts {clientName.split(' ')[0]}'s Strength Training plan from the QHP, medical and blood reports</Body>
         </View>
         <Icon name={open ? 'chevUp' : 'chevDown'} size={15} color={AI} strokeWidth={2.4} />
       </Pressable>

@@ -104,6 +104,36 @@ export const sourcesLine = (s: AiPlanSources | null | undefined): string => {
 /** The plan name and description the draft fills only when the trainer has not typed their own. */
 export const shouldFill = (current: string, lastAiValue: string | null) => !current.trim() || (lastAiValue != null && current === lastAiValue);
 
+/* ---- Build mode and the registry marker (21 Oct 2026, owner: "when a trainer creates a new plan,
+   ask AI or manual; manual is the flow we have, AI offers the prompt we have in the assistant, and the
+   registry stores it accordingly"). Decisions: every client the trainer may plan for, Strength Training
+   only for now. The registry (public.workout_plan, hub-track) copies workout_plan_exercises.source and
+   ai_prompt at approval; the app only writes them on the rows. ---- */
+export type PlanSource = 'human' | 'ai';
+export type PlanBuildMode = 'ai' | 'manual';
+export type AiChoice = { enabled: boolean; reason: string | null };
+
+/** The registry's ai_prompt: the split label and the trainer's note as one line. */
+export const aiPromptLine = (splitLabel: string, note: string | null | undefined): string => {
+  const n = (note ?? '').trim().replace(/\s+/g, ' ');
+  return n ? `${splitLabel} · ${n}` : splitLabel;
+};
+
+/** Whether the "Generate with Odds AI" card can be chosen, and the reason shown when it cannot.
+    `allowed` is the server's preview answer (null while it loads: the card stays open, the panel waits). */
+export const aiChoice = (o: { online: boolean; clientId: string | null | undefined; modality: string | null | undefined; allowed: boolean | null | undefined }): AiChoice => {
+  if (!o.clientId) return { enabled: false, reason: 'Pick the client first' };
+  if (!o.online) return { enabled: false, reason: 'Needs a connection' };
+  if (o.modality && o.modality !== 'Strength Training') return { enabled: false, reason: 'Strength Training plans only for now' };
+  if (o.allowed === false) return { enabled: false, reason: 'Not available for this client' };
+  return { enabled: true, reason: null };
+};
+
+/** The rows' source: 'ai' once a draft was applied to the builder, even when the trainer changed, added
+    or deleted exercises afterwards (the draft was the base); 'human' otherwise, also when the panel was
+    opened but no draft applied. */
+export const planSource = (draftApplied: boolean): PlanSource => (draftApplied ? 'ai' : 'human');
+
 /* ---------- the home alert ---------- */
 export type PlanGapState = 'none' | 'in_review' | 'needs_revision';
 export type EssentialsPlanGap = {

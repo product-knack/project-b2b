@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, Pressable, ScrollView, Modal, TextInput, Keyboard, Platform, Alert, Animated } from 'react-native';
+import { View, Text, Pressable, ScrollView, Modal, TextInput, Keyboard, Platform, Alert, Animated, ActivityIndicator } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { C, F, hexA, ORANGE_GRAD } from '../theme';
@@ -18,7 +18,7 @@ import { enqueueOutbox, getIsOnline, useIsOnline, getOutbox, updateOutboxItem } 
 import { useDragReorder } from '../lib/useDragReorder';
 import { AiPlanAssistant } from '../components/AiPlanAssistant';
 import { useAiPlanPreview } from '../lib/aiPlanQueries';
-import { draftToBodyParts, shouldFill, draftExerciseCount, type AiPlanResult } from '../lib/aiPlanDraft';
+import { draftToBodyParts, shouldFill, draftExerciseCount, aiChoice, planSource, type AiPlanResult, type PlanBuildMode } from '../lib/aiPlanDraft';
 import { trackEvent } from '../lib/amplitude';
 
 /* ============ CREATE WORKOUT PLAN ============
@@ -237,18 +237,25 @@ export function CreatePlan() {
   /* Switching modality resets the builder (the exercise pool and builder are
      modality-specific) — when exercises are already selected, confirm first so
      a stray tap can't silently throw the work away. */
-  /* ---- Odds AI plan assistant (16 Oct 2026): Essentials clients only, new plans only ----
-     The server decides eligibility (Essentials client + a caller who may plan for them). The draft
-     fills the Strength Training builder; the name and description only when the trainer has not
-     typed their own (or still holds the previous AI text). */
+  /* ---- Odds AI plan assistant (16 Oct 2026; every client since 21 Oct 2026), new plans only ----
+     The server decides who may plan for the client. The draft fills the Strength Training builder; the
+     name and description only when the trainer has not typed their own (or still holds the previous AI
+     text). Build mode (21 Oct 2026, owner): a new plan starts with a choice, Generate with Odds AI or
+     Build it manually; Edit Plan never asks. The rows carry source 'ai' and the prompt once a draft was
+     applied, even if edited afterwards (the registry copies them at approval). */
   const aiPreviewQ = useAiPlanPreview(selectedClientId, !isEdit && isOnline);
-  const aiEligible = !isEdit && aiPreviewQ.data?.eligible === true;
-  const lastAi = React.useRef<{ name: string; desc: string } | null>(null);
-  React.useEffect(() => {
-    // An Essentials client's plan is a Strength Training plan (it covers the Strength and Cardio days).
-    if (aiEligible && !modality) setModality('Strength Training');
-  }, [aiEligible]); // eslint-disable-line react-hooks/exhaustive-deps
-  const applyAiDraft = (r: AiPlanResult) => {
+  const aiAllowed = !isEdit && aiPreviewQ.data?.allowed === true;
+  const [mode, setMode] = React.useState<PlanBuildMode | null>(isEdit ? 'manual' : null);
+  const aiPick = aiChoice({ online: isOnline, clientId: selectedClientId, modality, allowed: isEdit ? false : aiPreviewQ.data ? aiPreviewQ.data.allowed : null });
+  const chooseMode = (m: PlanBuildMode) => {
+    setMode(m);
+    // An AI draft is a Strength Training plan (it covers the Strength and Cardio days).
+    if (m === 'ai' && !modality) setModality('Strength Training');
+    trackEvent('Plan Build Mode Chosen', { client_id: selectedClientId, mode: m });
+  };
+  const lastAi = React.useRef<{ name: string; desc: string; prompt: string } | null>(null);
+  const [aiApplied, setAiApplied] = React.useState(false);
+  const applyAiDraft = (r: AiPlanResult, prompt: string) => {
     const doApply = () => {
       setOpenSet(null);
       setPickerFor(null); setSelPick({}); setExSearch('');
@@ -256,7 +263,8 @@ export function CreatePlan() {
       setBodyParts(draftToBodyParts(r.draft));
       if (shouldFill(planName, lastAi.current?.name ?? null)) setPlanName(r.draft.plan_name);
       if (shouldFill(desc, lastAi.current?.desc ?? null)) setDesc(r.draft.description);
-      lastAi.current = { name: r.draft.plan_name, desc: r.draft.description };
+      lastAi.current = { name: r.draft.plan_name, desc: r.draft.description, prompt };
+      setAiApplied(true);
       trackEvent('AI Plan Draft Applied', { client_id: selectedClientId, split: r.draft.split, exercises: draftExerciseCount(r.draft) });
     };
     if (hasContent) {
@@ -364,6 +372,9 @@ export function CreatePlan() {
         padwork,
       },
       planId: uuidv4(),
+      // Registry marker: an applied Odds AI draft makes this an AI plan, whatever was edited after.
+      source: planSource(!!lastAi.current),
+      aiPrompt: lastAi.current?.prompt ?? null,
     };
     const finishOffline = async () => {
       await enqueueOutbox('create-plan', `${planName.trim()} · ${clientName}`, input);
@@ -471,6 +482,53 @@ export function CreatePlan() {
 
   const advKey = (bpi: number, exi: number, si: number) => `${bpi}-${exi}-${si}`;
 
+  // Build mode choice (21 Oct 2026): a new plan starts here; the form shows once the trainer picks.
+  if (!isEdit && mode === null) {
+    const first = clientName.split(' ')[0] || 'the client';
+    return (
+      <View style={{ flex: 1 }}>
+        <Page gap={14} pt={6} pb={40 + insets.bottom}>
+          <BackLink label="Back" onPress={goBack} />
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 13 }}>
+            <IconChip icon="file" color={C.orange} />
+            <View style={{ flex: 1 }}>
+              <Serif style={{ fontSize: 24 }}>Create Plan</Serif>
+              <Body style={{ fontSize: 12.5, color: C.muted, marginTop: 1 }}>How do you want to build {first}'s plan?</Body>
+            </View>
+          </View>
+          <Pressable onPress={() => chooseMode('ai')} disabled={!aiPick.enabled} hitSlop={6} accessibilityRole="button" accessibilityState={{ disabled: !aiPick.enabled }}
+            style={{ padding: 16, borderRadius: 20, backgroundColor: 'rgba(76,52,140,0.32)', borderWidth: 1, borderColor: hexA('#A78BFA', aiPick.enabled ? 0.55 : 0.25), opacity: aiPick.enabled ? 1 : 0.6, gap: 10 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <View style={{ width: 42, height: 42, borderRadius: 13, backgroundColor: hexA('#A78BFA', 0.16), borderWidth: 1, borderColor: hexA('#A78BFA', 0.45), alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name="sparkle" size={19} color="#A78BFA" strokeWidth={2} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontFamily: F.bodyBold, fontSize: 16, color: '#fff' }}>Generate with Odds AI</Text>
+                <Body style={{ fontSize: 11.5, color: C.muted2, marginTop: 2, lineHeight: 16 }}>Drafts a Strength Training plan from the QHP, medical and blood reports. You edit everything before it goes for review.</Body>
+              </View>
+              <Icon name="chevRight" size={16} color="#A78BFA" strokeWidth={2.4} />
+            </View>
+            {aiPick.reason ? <Body style={{ fontSize: 11, color: C.gold }}>{aiPick.reason}</Body> : null}
+          </Pressable>
+          <Pressable onPress={() => chooseMode('manual')} hitSlop={6} accessibilityRole="button"
+            style={{ padding: 16, borderRadius: 20, backgroundColor: 'rgba(50,30,19,0.45)', borderWidth: 1, borderColor: hexA(C.orange, 0.4), gap: 10 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <View style={{ width: 42, height: 42, borderRadius: 13, backgroundColor: hexA(C.orange, 0.14), borderWidth: 1, borderColor: hexA(C.orange, 0.4), alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name="dumbbell" size={19} color={C.orange} strokeWidth={2} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontFamily: F.bodyBold, fontSize: 16, color: '#fff' }}>Build it manually</Text>
+                <Body style={{ fontSize: 11.5, color: C.muted2, marginTop: 2, lineHeight: 16 }}>The plan builder as it is today: modality, sections, exercises and sets.</Body>
+              </View>
+              <Icon name="chevRight" size={16} color={C.orange} strokeWidth={2.4} />
+            </View>
+          </Pressable>
+          <Body style={{ fontSize: 10.5, color: C.muted3, textAlign: 'center' }}>Either way the plan goes to the CRM for review before it reaches the client.</Body>
+        </Page>
+      </View>
+    );
+  }
+
   return (
     <View style={{ flex: 1 }}>
       {/* pb clears the sticky footer (+ home indicator); Page adds the keyboard height itself. */}
@@ -483,12 +541,35 @@ export function CreatePlan() {
             <Body style={{ fontSize: 12.5, color: C.muted, marginTop: 1 }}>
               {isEdit ? 'Saving resubmits the plan to the CRM for review' : 'Goes to the CRM for review before it reaches the client'}
             </Body>
+            {!isEdit ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                <Body style={{ fontSize: 11.5, color: mode === 'ai' ? '#A78BFA' : C.orange }}>{mode === 'ai' ? (aiApplied ? 'Odds AI plan, drafted' : 'Odds AI plan') : 'Manual plan'}</Body>
+                <Pressable onPress={() => (mode === 'ai' ? setMode('manual') : aiPick.enabled && chooseMode('ai'))} hitSlop={10} accessibilityRole="button" disabled={mode !== 'ai' && !aiPick.enabled}>
+                  <Body style={{ fontSize: 11.5, color: C.muted, textDecorationLine: 'underline' }}>{mode === 'ai' ? 'Switch to manual' : aiPick.enabled ? 'Try Odds AI' : `Odds AI: ${aiPick.reason ?? 'not available'}`}</Body>
+                </Pressable>
+              </View>
+            ) : null}
           </View>
         </View>
 
-        {/* Odds AI plan assistant: Essentials clients, new plans (16 Oct 2026) */}
-        {aiEligible && aiPreviewQ.data && selectedClientId ? (
-          <AiPlanAssistant clientId={selectedClientId} clientName={clientName} preview={aiPreviewQ.data} onApply={applyAiDraft} />
+        {/* Odds AI plan assistant: new plans, the AI build mode (16 Oct 2026; every client since 21 Oct 2026) */}
+        {mode === 'ai' && !isEdit && selectedClientId ? (
+          aiAllowed && aiPreviewQ.data ? (
+            <AiPlanAssistant clientId={selectedClientId} clientName={clientName} preview={aiPreviewQ.data} onApply={applyAiDraft} />
+          ) : aiPreviewQ.data && !aiPreviewQ.data.allowed ? (
+            <View style={{ padding: 12, borderRadius: 14, backgroundColor: hexA(C.gold, 0.08), borderWidth: 1, borderColor: hexA(C.gold, 0.35) }}>
+              <Body style={{ fontSize: 12, color: C.gold, lineHeight: 16 }}>Odds AI is not available for this client (you can only plan for your own or your booked clients). Build the plan manually below.</Body>
+            </View>
+          ) : aiPreviewQ.isError ? (
+            <View style={{ padding: 12, borderRadius: 14, backgroundColor: hexA(C.gold, 0.08), borderWidth: 1, borderColor: hexA(C.gold, 0.35) }}>
+              <Body style={{ fontSize: 12, color: C.gold, lineHeight: 16 }}>Odds AI could not be reached. Build the plan manually below, or try again when the connection is back.</Body>
+            </View>
+          ) : (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12, borderRadius: 14, backgroundColor: 'rgba(76,52,140,0.25)', borderWidth: 1, borderColor: hexA('#A78BFA', 0.3) }}>
+              <ActivityIndicator size="small" color="#A78BFA" />
+              <Body style={{ fontSize: 12, color: C.muted2 }}>Checking what Odds AI can read for {clientName.split(' ')[0]}…</Body>
+            </View>
+          )
         ) : null}
 
         {/* Plan details */}
