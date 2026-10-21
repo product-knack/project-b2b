@@ -521,6 +521,8 @@ export function QhpNavigation() {
       {/* ---- Right: round controls */}
       {navigating && phase !== 'saving' ? (
         <View style={{ position: 'absolute', right: 12, top: insets.top + 160, gap: 12 }}>
+          <RoundBtn path="M12 5v14M5 12h14" label="Zoom in" onPress={() => send({ type: 'zoom', delta: 1 })} />
+          <RoundBtn path="M5 12h14" label="Zoom out" onPress={() => send({ type: 'zoom', delta: -1 })} />
           <RoundBtn path="M12 3l4 9-4 9-4-9zM12 3v18" label={cameraNorth ? 'Heading up' : 'North up'} active={cameraNorth} onPress={() => { const n = !cameraNorth; setCameraNorth(n); send({ type: 'camera', mode: n ? 'north' : 'heading' }); }} />
           <RoundBtn path={muted ? 'M11 5 6 9H3v6h3l5 4zM22 9l-6 6M16 9l6 6' : 'M11 5 6 9H3v6h3l5 4zM15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13'} label={muted ? 'Unmute voice' : 'Mute voice'} tint={muted ? G.red : G.ink2} onPress={() => { const m = !muted; setMuted(m); if (m) speech.stop(); }} />
           <RoundBtn path="M6 20V9a3 3 0 0 1 3-3h6a3 3 0 0 1 3 3v11M6 20h12M12 6V3M9 3h6" label="Route overview" onPress={() => { setFollowing(false); send({ type: 'overview' }); }} />

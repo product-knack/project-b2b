@@ -62,6 +62,8 @@ ${BIKE_CSS}
 (function(){
   var post = function(m){ try { window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify(m)); } catch(e){} };
   var map, me, meEl, dest, follow = true, mode = 'heading', routePts = [], loaded = false, pending = [], wake = null, lastPos = null, userGesture = false;
+  var touching = 0, pinching = false;  // fingers on the map; while any is down the follow camera stays still (21 Oct 2026)
+  function adoptZoom(){ if (map) cam.zoom = Math.max(12, Math.min(19, map.getZoom())); }
   var cam = { zoom: 17, pitch: 55 }; // the follow camera; arrival pulls it closer and flatter
   var easeUntil = 0;                 // while a programmatic easeTo plays, the frame loop leaves the camera alone
   var errors = [];                   // the last map errors, for window.__nav.debug()
@@ -101,8 +103,19 @@ ${BIKE_CSS}
       pending.forEach(apply); pending = [];
       post({ type:'ready' });
     });
-    ['dragstart','rotatestart','pitchstart','wheel'].forEach(function(ev){ map.on(ev, function(e){ if (e && e.originalEvent) { follow = false; userGesture = true; post({ type:'drag' }); } }); });
-    map.on('zoomstart', function(e){ if (e && e.originalEvent) { follow = false; post({ type:'drag' }); } });
+    // Touch rules (21 Oct 2026, Google Maps parity). A one-finger drag or a pitch pauses the follow camera
+    // (the Re-centre pill). A pinch or a double tap only changes the zoom: the camera keeps following at
+    // the new zoom. While any finger is on the map the frame loop never moves the camera, so a gesture is
+    // never fought by the next GPS fix (the old loop re-applied zoom 17 every frame, which made pinch
+    // zoom snap back and read as "cannot zoom").
+    var el = map.getContainer();
+    var touchDone = function(e){ touching = e.touches ? e.touches.length : 0; if (touching < 2 && pinching) { pinching = false; adoptZoom(); } };
+    el.addEventListener('touchstart', function(e){ touching = e.touches.length; if (touching >= 2) pinching = true; }, { passive: true });
+    el.addEventListener('touchend', touchDone, { passive: true });
+    el.addEventListener('touchcancel', touchDone, { passive: true });
+    ['dragstart','pitchstart','wheel'].forEach(function(ev){ map.on(ev, function(e){ if (e && e.originalEvent) { follow = false; userGesture = true; post({ type:'drag' }); } }); });
+    map.on('rotatestart', function(e){ if (e && e.originalEvent && !pinching) { follow = false; userGesture = true; post({ type:'drag' }); } });
+    map.on('zoomend', function(e){ if (e && e.originalEvent) adoptZoom(); });
     applyMotion();
   }
 
@@ -127,7 +140,7 @@ ${BIKE_CSS}
       src('passed', routePts.slice(0, i + 1).concat([pos]));
       src('route', [pos].concat(routePts.slice(i + 1)));
     }
-    if (follow && anim.followOk && performance.now() > easeUntil) {
+    if (follow && anim.followOk && !touching && performance.now() > easeUntil) {
       var h = map.getContainer().clientHeight;
       map.jumpTo({ center:[pos[1], pos[0]], bearing: mode === 'heading' ? head : 0, pitch: cam.pitch, zoom: cam.zoom, offset:[0, h * 0.2] });
     }
@@ -192,7 +205,13 @@ ${BIKE_CSS}
     if (m.type === 'route') setRoute(m);
     else if (m.type === 'pos') setPos(m);
     else if (m.type === 'compass') setCompass(m);
-    else if (m.type === 'start') { follow = true; cam = { zoom: 17, pitch: 55 }; requestWake(); recenter(); }
+    else if (m.type === 'start') { follow = true; touching = 0; pinching = false; cam = { zoom: 17, pitch: 55 }; requestWake(); recenter(); }
+    else if (m.type === 'zoom') {
+      // The + / - buttons: one zoom level a tap, 12 to 19, kept by the follow camera.
+      cam.zoom = Math.max(12, Math.min(19, (follow ? cam.zoom : map.getZoom()) + (typeof m.delta === 'number' ? m.delta : 0)));
+      easeUntil = performance.now() + 320;
+      map.easeTo({ zoom: cam.zoom, duration: 260 });
+    }
     else if (m.type === 'arrived') { cam = { zoom: 18, pitch: 35 }; recenter(); }
     else if (m.type === 'stop') { releaseWake(); anim.loop = false; }
     else if (m.type === 'recenter') recenter();
