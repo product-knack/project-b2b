@@ -6,7 +6,7 @@
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import { supabase } from './supabase';
-import { invokeWithTimeout, withTimeout, NET_MS } from './withTimeout';
+import { invokeWithTimeout, withTimeout, NET_MS, isTimeoutError } from './withTimeout';
 import { enqueueOutbox, getIsOnline } from './offline';
 import { decodePolyline, type NavigationTrack, type RouteInfo } from './qhpNavigation';
 
@@ -104,7 +104,9 @@ export async function saveNavigationTrack(assessmentId: string, track: Navigatio
     return 'saved';
   } catch (e: any) {
     if (!opts?.final) return 'skipped';
-    if (/network request failed|network error|failed to fetch|fetch failed|timeout/i.test(String(e?.message))) {
+    // A stalled connection is queued too (21 Oct 2026): withTimeout says "timed out", which
+    // the old rule ("timeout") never matched, so the assessor sat behind "Could not save".
+    if (isTimeoutError(e) || /network request failed|network error|failed to fetch|fetch failed|timeout|timed out|abort|socket|ENOTFOUND|ECONN/i.test(String(e?.message))) {
       await enqueueOutbox('nav-track', 'QHP ride track', { assessmentId, track });
       return 'queued';
     }

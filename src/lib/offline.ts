@@ -23,7 +23,7 @@ const OUTBOX_KEY = 'outbox:v1';
 export type OutboxItem = {
   id: string;
   userId?: string;        // who queued it — items never drain (or show) under another account
-  kind: 'workout-log' | 'create-plan' | 'edit-plan' | 'chat-message' | 'location-log' | 'screenshot-log' | 'session-voice-note' | 'nav-track';
+  kind: 'workout-log' | 'create-plan' | 'edit-plan' | 'chat-message' | 'location-log' | 'screenshot-log' | 'session-voice-note' | 'nav-track' | 'route-ended';
   label: string;          // human line for the pending-sync UI
   createdAt: string;      // ORIGINAL device timestamp at submit time
   status: 'pending' | 'syncing' | 'failed';
@@ -287,6 +287,11 @@ async function processItem(item: OutboxItem): Promise<{ linkPending?: boolean } 
     const { submitNavigationTrack } = require('./qhpNavigationQueries');
     await submitNavigationTrack(item.payload);
     qcRef?.invalidateQueries({ queryKey: ['qhp-assessments'] });
+  } else if (item.kind === 'route-ended') {
+    // Route tracker end event (21 Oct 2026): the office's permanent ride record when the
+    // phone was offline at Arrived / Exit. Lazy require: routeTracker imports enqueue.
+    const { submitRouteEnded } = require('./routeTracker');
+    await submitRouteEnded(item.payload);
   }
 }
 
@@ -394,7 +399,7 @@ export function initOffline(queryClient: QueryClient) {
 // Location logs are captured silently and must NEVER appear in the pending-sync
 // list — the user should never see their location syncing. They still drain via
 // the internal `items` list above; this hook just hides them from the UI.
-const uiVisible = (list: OutboxItem[]) => list.filter((i) => i.kind !== 'location-log' && i.kind !== 'nav-track' && mine(i));
+const uiVisible = (list: OutboxItem[]) => list.filter((i) => i.kind !== 'location-log' && i.kind !== 'nav-track' && i.kind !== 'route-ended' && mine(i));
 export function useOutbox(): OutboxItem[] {
   const [snap, setSnap] = React.useState<OutboxItem[]>(uiVisible(items));
   React.useEffect(() => {

@@ -2,22 +2,21 @@
 
 Read this first when picking up the project on a new machine.
 
-## Built, never used, needs a process decision before any code (20 Oct 2026)
-**Live ride tracking of the assessor (route tracker).** Built 14 Oct 2026 on the app
-(`src/lib/routeTracker.ts`, `src/screens/qhpNavigation.tsx`), the server (hub-track migration
-`20261014120000_route_tracker.sql`) and the web Leads page. Audited end to end on 20 Oct 2026:
-`docs/route-tracker-audit-20oct.md`. Zero rides have ever been published. The blocker is not a bug:
-no client has a location pin before their first QHP (8 of 84 QHP clients in the last 30 days had
-one, all captured by a trainer at a session), so Start navigation, and with it the tracking, is
-almost never available. Decisions for whoever owns ops, not engineering: (1) how the pin gets onto
-the lead before the ride (Ops pastes it at QHP booking, the assessor pastes an address at Start, or
-the pin carries from lead to client); (2) who may see rides (today the lead owner, QHP managers and
-admins; 8 of 27 booked leads have an owner). Do not build any phase until those are decided.
-If the feature is ever switched on, fix these four first (details in the audit): Android back leaves
-the ride unsaved and "live"; a stalled final save blocks the end event and traps the assessor; a
-dropped start is never retried and the whole ride then fails quietly; an end sent offline is lost.
-While idle it costs nothing: the crons touch an empty table, and the Leads page host was made
-dormant on 20 Oct 2026 (one query every 5 minutes, no realtime channel until a ride exists).
+## Live ride tracking of the assessor (route tracker): LIVE since 21 Oct 2026
+Built 14 Oct 2026 on the app (`src/lib/routeTracker.ts`, `src/screens/qhpNavigation.tsx`), the
+server (hub-track migrations `20261014120000`, `20261020140000`, `20261021120000`) and the web
+Leads page; audited 20 Oct 2026 (`docs/route-tracker-audit-20oct.md`, status at its top); switched
+on 21 Oct 2026 on the owner's decision ("track live from the Leads page, also with the screen
+locked"). What changed on 21 Oct: the ride GPS runs in an Android foreground location service
+(`src/lib/rideLocationTask.ts`, expo-task-manager, `FOREGROUND_SERVICE_LOCATION`, no background
+location declaration), the publisher retries `start`, queues `ended` through the outbox kind
+`route-ended`, Android back goes through the Exit confirm; the web got an "Assessor rides" panel
+and an always-on lobby; the ops role may watch rides. Feature docs:
+`docs/features/android/trainer/route-tracker.md` and `docs/features/web/ops/route-tracker.md`.
+Still a process decision: the pin before the ride (the member app's `set_my_home_location` is the
+member-side fix). iOS: the iOS app publishes while its screen is open (5.1); the lock-screen part
+is in `docs/ios-route-tracker-background-handoff.md`. Play upload: declare the foreground service
+type (location) in Play Console App content before uploading a build with this permission.
 
 ## What this is
 React Native / Expo (SDK 54) staff app for Odds Fitness — a native port of the live web app

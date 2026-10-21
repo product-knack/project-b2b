@@ -9,7 +9,9 @@
    cues at 400 m and at the turn (expo-speech, mute button), the time left in a white
    bottom sheet with Exit, round side buttons (north / heading, mute, overview), a
    Re-centre pill when the camera is moved, and the ride saved as
-   coach_assessment.navigation_track at Arrived / End. Foreground GPS only. */
+   coach_assessment.navigation_track at Arrived / End. Since 21 Oct 2026 the ride GPS runs
+   in a foreground location service (rideLocationTask.ts), so the turns, the voice, the
+   recording and the office feed keep going with the screen locked. */
 import React from 'react';
 import { View, Text, Pressable, ActivityIndicator, Alert, AppState, Linking, AccessibilityInfo, Platform } from 'react-native';
 import { WebView } from 'react-native-webview';
@@ -23,7 +25,10 @@ import { useStore, homeRouteFor } from '../store';
 import { useSpeech } from '../lib/useSpeech';
 import { NAV_MAP_HTML } from '../lib/navMapHtml';
 import { navTargetRef, fetchNavRoute, saveNavigationTrack, appVersionLabel, type NavTarget } from '../lib/qhpNavigationQueries';
-import { RoutePublisher, liveFromFix, type RouteEta } from '../lib/routeTracker';
+import { RoutePublisher, liveFromFix, type RouteEta, type RoutePlanned } from '../lib/routeTracker';
+import { startRideService, stopRideService, setRideFixListener, type RideServiceState } from '../lib/rideLocationTask';
+import { useIsOnline } from '../lib/offline';
+import { backOverride } from '../gestureLock';
 import {
   type Fix, type LatLng, type RouteInfo, type TrackPoint, type Projection, type Maneuver, type ManeuverKind,
   projectOnRoute, isOffRoute, isArrived, estimateLeft, arrivalClock, agoText, shouldKeep, toPoint, headingFrom, isMoving,
@@ -37,6 +42,9 @@ const TRACK_KEY = (id: string) => `qhp-nav-track:${id}`;
    write to: it navigates exactly the same but nothing is stored (14 Oct 2026). */
 const savesRide = (t: NavTarget) => t.kind === 'qhp' && !!t.assessmentId;
 const PARTIAL_SAVE_MS = 60_000;
+/* One fix shape for the screen watch and the ride service. */
+const toFix = (p: Location.LocationObject): Fix => ({ t: p.timestamp || Date.now(), lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy ?? null, spd: p.coords.speed ?? null, heading: p.coords.heading ?? null });
+const plannedOf = (r: RouteInfo | null): RoutePlanned => ({ planned_km: r?.distanceKm ?? null, planned_min: r?.durationMin ?? null, planned_polyline: r?.polyline ?? null });
 
 /* Google's navigation palette */
 const G = { blue: '#1A73E8', green: '#188038', red: '#D93025', teal: '#0B6E63', tealDark: '#095A51', ink: '#202124', ink2: '#3C4043', muted: '#5F6368', line: '#DADCE0', sheet: '#FFFFFF', amber: '#B06000', amberBg: '#FEF7E0' };
@@ -100,6 +108,12 @@ export function QhpNavigation() {
   const [muted, setMuted] = React.useState(false);
   const mutedRef = React.useRef(false);
   mutedRef.current = muted;
+  // Where the ride GPS comes from once started: the foreground service (fixes continue with
+  // the screen locked) or, when it could not start, the screen watch (21 Oct 2026).
+  const [share, setShare] = React.useState<RideServiceState | null>(null);
+  const online = useIsOnline();
+  const watchRef = React.useRef<Location.LocationSubscription | null>(null);
+  const onFixRef = React.useRef<(f: Fix) => void>(() => {});
 
   // Ride recording
   const startMs = React.useRef<number | null>(null);
@@ -148,21 +162,21 @@ export function QhpNavigation() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapReady]);
 
-  // GPS: a fix every second; the compass beside it for the badge's heading.
+  // GPS: a fix every second; the compass beside it for the badge's heading. Before Start the
+  // screen watch; from Start the ride service takes over (see start()).
   React.useEffect(() => {
     if (!target) return;
-    let sub: Location.LocationSubscription | null = null;
     let alive = true;
     (async () => {
       try {
         let perm = await Location.getForegroundPermissionsAsync();
         if (!perm.granted && perm.canAskAgain) perm = await Location.requestForegroundPermissionsAsync();
         if (!perm.granted) { if (alive) setPermDenied(true); return; }
-        sub = await Location.watchPositionAsync({ accuracy: Location.Accuracy.BestForNavigation, timeInterval: 1000, distanceInterval: 0 }, (p) => {
+        const sub = await Location.watchPositionAsync({ accuracy: Location.Accuracy.BestForNavigation, timeInterval: 1000, distanceInterval: 0 }, (p) => {
           if (!alive) return;
-          const f: Fix = { t: p.timestamp || Date.now(), lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy ?? null, spd: p.coords.speed ?? null, heading: p.coords.heading ?? null };
-          onFix(f);
+          onFixRef.current(toFix(p));
         });
+        if (alive) watchRef.current = sub; else sub.remove();
         let lastSent = 0, lastDeg = -1;
         headingSubRef.current = await Location.watchHeadingAsync((h) => {
           if (!alive) return;
@@ -176,7 +190,15 @@ export function QhpNavigation() {
         });
       } catch { if (alive) setPermDenied(true); }
     })();
-    return () => { alive = false; sub?.remove(); headingSubRef.current?.remove(); headingSubRef.current = null; };
+    return () => {
+      alive = false;
+      watchRef.current?.remove(); watchRef.current = null;
+      headingSubRef.current?.remove(); headingSubRef.current = null;
+      // Leaving the screen for any reason ends the service and the start retries.
+      setRideFixListener(null);
+      void stopRideService();
+      publisher.current?.destroy();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [target?.assessmentId, target?.scheduleId]);
 
@@ -188,10 +210,14 @@ export function QhpNavigation() {
 
   const [maneuver, setManeuver] = React.useState<Maneuver | null>(null);
 
-  // Route tracker (14 Oct 2026, foreground-only): a QHP ride publishes its position to the
-  // office while this screen is open. Roster rides never publish. Failures never stop the ride.
+  // Route tracker (14 Oct 2026; background since 21 Oct 2026): a QHP ride publishes its
+  // position to the office from Start to Arrived / Exit, screen locked or not. Roster rides
+  // never publish. Failures never stop the ride.
   const publisher = React.useRef<RoutePublisher | null>(null);
   const etaNow = React.useRef<RouteEta>({ etaMin: null, distanceKm: null });
+  // The heading the office draws: the GPS course while riding, the compass while standing
+  // (the arrow pointed north at every stop before 21 Oct 2026).
+  const liveHeading = () => (movingRef.current ? headingRef.current : (compassRef.current ?? headingRef.current));
 
   const onFix = (f: Fix) => {
     const prev = prevFix.current;
@@ -221,10 +247,10 @@ export function QhpNavigation() {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
         if (publisher.current) {
           const t = currentTrack('arrived', Date.now());
-          if (t) void publisher.current.arrived(liveFromFix(f, { etaMin: 0, distanceKm: 0 }, headingRef.current), t);
+          if (t) void publisher.current.arrived(liveFromFix(f, { etaMin: 0, distanceKm: 0 }, liveHeading()), t);
         }
       }
-      publisher.current?.position(liveFromFix(f, etaNow.current, headingRef.current));
+      publisher.current?.position(liveFromFix(f, etaNow.current, liveHeading()));
       if (r && pj && isOffRoute(pj, f.acc) && !routeInFlight.current && Date.now() - lastRouteCallAt.current > ROUTE_MIN_GAP_MS) {
         setRouteState('recalculating');
         send({ type: 'route', points: r.points, dim: true });
@@ -245,6 +271,7 @@ export function QhpNavigation() {
     const intervalMs = prev ? Math.max(0, f.t - prev.t) : 1000;
     send({ type: 'pos', lat: f.lat, lng: f.lng, heading: headingRef.current, speed: f.spd ?? 0, intervalMs, moving: movingRef.current && phaseRef.current !== 'arrived', alongIndex, follow: phaseRef.current !== 'ready' });
   };
+  onFixRef.current = onFix;
 
   const refreshRoute = async (origin: LatLng, why: 'start' | 'periodic' | 'off-route') => {
     if (!target || routeInFlight.current) return;
@@ -300,9 +327,10 @@ export function QhpNavigation() {
     const t = currentTrack(null, null);
     if (!t || !target || !target.assessmentId) return;
     try { await saveNavigationTrack(target.assessmentId, t); } catch { /* best effort while riding */ }
-    // The 60 s checkpoint for the office: the trail so far (polyline + thinned points).
+    // The 60 s checkpoint for the office: the trail so far (polyline + thinned points) and the
+    // planned route as drawn now (refreshed after a reroute, and the start's if it had none).
     const f = prevFix.current;
-    if (f && publisher.current) void publisher.current.checkpoint(liveFromFix(f, etaNow.current, headingRef.current), t.points, t.polyline);
+    if (f && publisher.current) void publisher.current.checkpoint(liveFromFix(f, etaNow.current, liveHeading()), t.points, t.polyline, plannedOf(routeRef.current));
   };
 
   // Preview the route as soon as we know where the assessor is (before Start).
@@ -329,20 +357,30 @@ export function QhpNavigation() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     send({ type: 'start' });
     if (savesRide(target)) persistLocal();
-    if (!routeRef.current) await refreshRoute([fix.lat, fix.lng], 'start');
-    routeAtStart.current = routeRef.current;
     if (savesRide(target) && target.assessmentId) {
-      // Tell the office the ride started (toast on the Leads page, chip on the journey).
+      // Tell the office the ride started (toast on the Leads page, chip on the journey). Sent
+      // before the route fetch (up to 15 s) and retried until it lands; the planned route
+      // follows on the first checkpoint when the preview had none.
       publisher.current = new RoutePublisher(target.assessmentId);
-      const ra = routeAtStart.current;
       const f0 = prevFix.current ?? fix;
       void publisher.current.start(
-        liveFromFix(f0, etaNow.current, headingRef.current),
-        { planned_km: ra?.distanceKm ?? null, planned_min: ra?.durationMin ?? null, planned_polyline: ra?.polyline ?? null },
+        liveFromFix(f0, etaNow.current, liveHeading()),
+        plannedOf(routeRef.current),
         { lat: target.lat, lng: target.lng, captured_at: target.pinCapturedAt, method: target.pinMethod },
         appVersionLabel(),
       );
     }
+    // The ride GPS moves to the foreground service (a persistent notification): fixes, turns,
+    // the voice and the office feed carry on with the screen locked. Android requires the app
+    // to be in front for this call, which the Start tap guarantees.
+    const svc = await startRideService(target.clientName.split(' ')[0] || target.clientName, savesRide(target));
+    if (svc === 'service') {
+      setRideFixListener((locs) => { for (const p of locs) onFixRef.current(toFix(p)); });
+      watchRef.current?.remove(); watchRef.current = null;
+    }
+    setShare(svc);
+    if (!routeRef.current) await refreshRoute([fix.lat, fix.lng], 'start');
+    routeAtStart.current = routeRef.current;
     const r = routeRef.current;
     const first = r?.steps?.[0];
     const pj = r ? projectOnRoute([fix.lat, fix.lng], r.points) : null;
@@ -359,23 +397,29 @@ export function QhpNavigation() {
     setPhase('saving');
     speech.stop();
     send({ type: 'stop' });
+    setRideFixListener(null);
+    void stopRideService();
     const t = currentTrack(endedBy, Date.now());
+    const f = prevFix.current;
+    // The office's end event and the QHP record run side by side (21 Oct 2026): before, a
+    // stalled record save ran first and blocked the end event, so the office kept a live
+    // ride and the assessor sat behind "Could not save the ride". ended() never throws: it
+    // lands now, or the outbox replays it when the phone is back online.
+    const endedP = t && f && publisher.current ? publisher.current.ended(liveFromFix(f, etaNow.current, liveHeading()), t) : Promise.resolve(null);
     try {
       if (t && savesRide(target) && target.assessmentId) {
         const res = await saveNavigationTrack(target.assessmentId, t, { final: true });
         setSaveNote(res === 'queued' ? 'Ride saved on this phone; it syncs when you are back online.' : null);
         await AsyncStorage.removeItem(TRACK_KEY(target.assessmentId)).catch(() => {});
       }
-      // The permanent record for the office; ended() never throws (one retry inside).
-      if (t && publisher.current) {
-        const f = prevFix.current;
-        if (f) await publisher.current.ended(liveFromFix(f, etaNow.current, headingRef.current), t);
-      }
+      await endedP;
+      publisher.current?.destroy();
       publisher.current = null;
       if (endedBy === 'arrived') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       navTargetRef.current = null;
       leave(target.kind);
     } catch (e: any) {
+      await endedP;
       finishing.current = false;
       setPhase(endedBy === 'arrived' ? 'arrived' : 'navigating');
       Alert.alert('Could not save the ride', e?.message ?? 'Please try again.', [{ text: 'OK' }]);
@@ -384,11 +428,23 @@ export function QhpNavigation() {
 
   const confirmExit = () => {
     if (phase === 'ready' || phase === 'locating') { speech.stop(); navTargetRef.current = null; leave(target?.kind ?? null); return; }
+    // Exit after the pin was reached records the ride as arrived (it said "ended" before 21 Oct 2026).
+    const endedBy = reached || phase === 'arrived' ? 'arrived' : 'ended';
     Alert.alert('Exit navigation?', target && savesRide(target) ? 'The ride so far is saved with the QHP.' : 'You can start again from the roster card.', [
       { text: 'Keep going', style: 'cancel' },
-      { text: 'Exit', style: 'destructive', onPress: () => finish('ended') },
+      { text: 'Exit', style: 'destructive', onPress: () => finish(endedBy) },
     ]);
   };
+
+  // Android back goes through the same Exit confirm as the Exit button (20 Oct 2026 audit,
+  // item 1): before, back() just left the screen, the ride was never saved and the office kept
+  // seeing it live until the sweep. The edge swipe is already off on this route (Router
+  // NO_SWIPE_BACK).
+  const confirmExitRef = React.useRef(confirmExit); confirmExitRef.current = confirmExit;
+  React.useEffect(() => {
+    backOverride.handler = () => confirmExitRef.current();
+    return () => { backOverride.handler = null; };
+  }, []);
 
   React.useEffect(() => {
     const sub = AppState.addEventListener('change', (s) => { if (s === 'active' && phaseRef.current === 'navigating') send({ type: 'recenter' }); });
@@ -581,7 +637,13 @@ export function QhpNavigation() {
           </View>
         )}
         {navigating && savesRide(target) ? (
-          <Text style={{ fontFamily: F.body, fontSize: 11, color: G.muted, textAlign: 'center' }}>Sharing your position with the Odds office while this screen is open</Text>
+          <Text style={{ fontFamily: F.body, fontSize: 11, color: !online || publisher.current?.isStopped ? G.amber : G.muted, textAlign: 'center' }}>
+            {publisher.current?.isStopped
+              ? (publisher.current.reason === 'ended' ? 'The office closed this ride. Your route and record are still saved.' : 'This ride is not shared with the office.')
+              : !online ? 'Offline. The office keeps your last position until the connection is back.'
+              : share === 'service' ? 'Sharing your ride with the Odds office, also with the screen locked, until you tap Arrived or Exit.'
+              : 'Sharing your position with the Odds office while this screen is open.'}
+          </Text>
         ) : null}
         <Text style={{ fontFamily: F.body, fontSize: 9.5, color: '#9AA0A6', textAlign: 'center', marginTop: -2 }}>Map © OpenStreetMap contributors · OpenFreeMap{routeState === 'ok' && route ? ` · route ${routeAgo}` : ''}</Text>
       </View>

@@ -1,5 +1,7 @@
 import 'react-native-gesture-handler';
 import { registerRootComponent } from 'expo';
+// The ride location task must be defined at module scope before any start (21 Oct 2026).
+import './src/lib/rideLocationTask';
 
 import App from './App';
 
