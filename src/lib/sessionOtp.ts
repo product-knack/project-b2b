@@ -7,11 +7,16 @@
    code, the app saves it in the queue (kind session-otp-verify) BEFORE the workout, the form opens, and when
    the phone is back the queue verifies the code first, then inserts the log. Nothing is pre-downloaded: a
    4-digit code kept on a phone in any form can be cracked in milliseconds.
+   Expiry (22 Oct 2026, owner: "a code is valid only 2 hours after the session; after that a new code is generated,
+   history saved with the timestamp"; hub-track migration 20261022140000): a code works until 2 hours after its
+   session ends (a slot counts as 60 minutes). A trainer who types it later gets reason 'code_expired'; the server
+   has made a new code and pushed it to the member, so the trainer asks for the new one. A verified code does not
+   expire. Offline, the code in force at the time typed counts.
    Web reference: hub-track src/hooks/useSessionOtp.ts, SessionOtpDialog.tsx. No native imports here. */
 
 export type OtpStatus = 'pending' | 'verified' | 'cancelled';
 export type OtpSlotStatus = { status: OtpStatus | string; verified_at: string | null; couple: boolean; coupleGroupId?: string | null };
-export type VerifyReason = 'not_authenticated' | 'no_otp' | 'not_your_session' | 'cancelled' | 'invalid' | 'expired' | string;
+export type VerifyReason = 'not_authenticated' | 'no_otp' | 'not_your_session' | 'cancelled' | 'invalid' | 'expired' | 'code_expired' | string;
 export type VerifyAnswer =
   | { ok: true; already_verified?: boolean; verified_at?: string | null; verified_count?: number }
   | { ok: false; reason?: VerifyReason };
@@ -30,6 +35,9 @@ export const OTP_NETWORK_MESSAGE = 'The code could not be verified right now. Sa
 export const OTP_SAVED_HINT = 'Session code saved on this phone, checked when back online.';
 export const OTP_WRONG_AT_SYNC_MESSAGE = 'The code was wrong. Ask the member for the code again, then Retry.';
 export const OTP_EXPIRED_AT_SYNC_MESSAGE = 'The code was typed on a different day than the session, so it could not be used. Verify the code again now, then Retry.';
+/** The 2-hour validity (22 Oct 2026): the code ran out; the server sent the member a new one. */
+export const OTP_CODE_EXPIRED_MESSAGE = 'This code has expired. A code works until 2 hours after the session, and the member has been sent a new one. Ask them for it.';
+export const OTP_CODE_EXPIRED_AT_SYNC_MESSAGE = 'The code had already expired when it was typed. The member has been sent a new code. Verify it now, then Retry.';
 
 /** True for the server's refusal (raw) and for the app's friendly copy of it. */
 export const isOtpGateError = (e: unknown): boolean => {
@@ -65,6 +73,7 @@ export const otpReasonText = (reason: VerifyReason | undefined | null): string =
     case 'not_your_session': return 'This session belongs to another trainer.';
     case 'not_authenticated': return 'You are signed out. Sign in again and retry.';
     case 'expired': return 'The code was typed on a different day than the session, so it cannot be used.';
+    case 'code_expired': return OTP_CODE_EXPIRED_MESSAGE;
     default: return 'The code could not be verified.';
   }
 };
@@ -73,6 +82,7 @@ export const otpReasonText = (reason: VerifyReason | undefined | null): string =
 export const workoutOtpErrorText = (failedVerifyReason: VerifyReason | null | undefined): string => {
   if (failedVerifyReason === 'invalid') return OTP_WRONG_AT_SYNC_MESSAGE;
   if (failedVerifyReason === 'expired') return OTP_EXPIRED_AT_SYNC_MESSAGE;
+  if (failedVerifyReason === 'code_expired') return OTP_CODE_EXPIRED_AT_SYNC_MESSAGE;
   if (failedVerifyReason) return `${otpReasonText(failedVerifyReason)} Then Retry.`;
   return OTP_GATE_MESSAGE;
 };
@@ -91,7 +101,8 @@ export const otpDigits = (raw: string): string => raw.replace(/\D/g, '').slice(0
 
 /** Sheet body copy. */
 export const otpSheetBody = (clientName: string, couple: boolean): string =>
-  `Ask ${clientName || 'the member'} for the 4-digit code CRM sent them. The workout opens once it is verified.` + (couple ? ' One code covers both partners today.' : '');
+  `Ask ${clientName || 'the member'} for the 4-digit code CRM sent them. The workout opens once it is verified.` + (couple ? ' One code covers both partners today.' : '')
+  + ' A code works until 2 hours after the session.';
 
 /** The IST calendar day (YYYY-MM-DD) of a time, for the same-day rule. */
 export const istDayOf = (ms: number): string => new Date(ms + 330 * 60_000).toISOString().slice(0, 10);

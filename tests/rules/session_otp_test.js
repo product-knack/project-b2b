@@ -36,6 +36,13 @@ eq('reason not_your_session', O.otpReasonText('not_your_session'), 'This session
 eq('reason not_authenticated', O.otpReasonText('not_authenticated'), 'You are signed out. Sign in again and retry.');
 eq('reason expired', O.otpReasonText('expired'), 'The code was typed on a different day than the session, so it cannot be used.');
 eq('reason unknown', O.otpReasonText('something'), 'The code could not be verified.');
+// 2-hour validity (22 Oct 2026)
+eq('reason code_expired', O.otpReasonText('code_expired'), 'This code has expired. A code works until 2 hours after the session, and the member has been sent a new one. Ask them for it.');
+eq('workout line: code ran out before it was typed offline', O.workoutOtpErrorText('code_expired'), 'The code had already expired when it was typed. The member has been sent a new code. Verify it now, then Retry.');
+eq('queued failure reason code_expired is read back', O.verifyFailureReason(new Error('OTP_VERIFY_FAILED:code_expired')), 'code_expired');
+eq('sheet body names the 2 hours', O.otpSheetBody('Asha', false).endsWith('A code works until 2 hours after the session.'), true);
+eq('sheet body couple keeps both lines', O.otpSheetBody('Asha', true).includes('One code covers both partners today. A code works until 2 hours'), true);
+eq('no dashes in the new copy', /[–—]| - /.test(O.OTP_CODE_EXPIRED_MESSAGE + O.OTP_CODE_EXPIRED_AT_SYNC_MESSAGE + O.otpSheetBody('A', true)), false);
 eq('gate error: raw server text', O.isOtpGateError(new Error("OTP_NOT_VERIFIED: this member's session code has not been verified for this session")), true);
 eq('gate error: friendly text', O.isOtpGateError(O.OTP_GATE_MESSAGE), true);
 eq('gate error: other', O.isOtpGateError(new Error('DUPLICATE_SLOT: already logged')), false);
@@ -50,8 +57,8 @@ eq('parse ok', O.parseVerifyAnswer({ ok: true, already_verified: false, verified
 eq('parse not ok', O.parseVerifyAnswer({ ok: false, reason: 'invalid' }), { ok: false, reason: 'invalid' });
 eq('parse junk', O.parseVerifyAnswer(null).ok, false);
 eq('digits only, max four', O.otpDigits('12a3-45'), '1234');
-eq('body copy single', O.otpSheetBody('Vashist', false), 'Ask Vashist for the 4-digit code CRM sent them. The workout opens once it is verified.');
-eq('body copy couple', O.otpSheetBody('Vashist', true).endsWith(' One code covers both partners today.'), true);
+eq('body copy single', O.otpSheetBody('Vashist', false), 'Ask Vashist for the 4-digit code CRM sent them. The workout opens once it is verified. A code works until 2 hours after the session.');
+eq('body copy couple', O.otpSheetBody('Vashist', true).includes(' One code covers both partners today.'), true);
 eq('IST day: 21 Oct 23:30 IST is 21 Oct', O.istDayOf(Date.UTC(2026, 9, 21, 18, 0)), '2026-10-21');
 eq('IST day: 21 Oct 18:31 UTC is 22 Oct IST', O.istDayOf(Date.UTC(2026, 9, 21, 18, 31)), '2026-10-22');
 eq('no dashes in any copy', [O.OTP_GATE_MESSAGE, O.OTP_OFFLINE_MESSAGE, O.OTP_NETWORK_MESSAGE, O.OTP_SAVED_HINT, O.OTP_WRONG_AT_SYNC_MESSAGE, O.OTP_EXPIRED_AT_SYNC_MESSAGE, O.otpReasonText('invalid'), O.otpReasonText('expired'), O.otpSheetBody('A', true)].some((s) => s.includes('—')), false);
