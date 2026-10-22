@@ -5,6 +5,7 @@ import { computeEssentials, EssentialsStatus } from './essentials';
 import { invokeWithTimeout, withTimeout, NET_MS } from './withTimeout';
 import { parseCheckinInfo, type MedicineCheckinInfo, type MedicineCheckinPayload } from './medicineCheckin';
 import { OTP_GATE_MESSAGE } from './sessionOtp';
+import { parsePlanGate, isPlanGateMissing } from './planGate';
 import type { ConsultAINotes } from './consultantQueries';
 import { parseVoiceNotes, SessionVoiceNote } from './sessionVoiceTypes';
 
@@ -786,64 +787,110 @@ export type ModalityGate = {
   remaining: number;
   blocked: boolean;
   warning: boolean;
+  /** 22 Oct 2026: where the answer came from ('server' = get_workout_plan_gate, 'device' = the old count). */
+  source?: 'server' | 'device';
+  /** The server refuses the 4th session (a plan modality and not an Essentials client). */
+  enforced?: boolean;
+  essentials?: boolean;
+  planExpired?: boolean;
+  planExpiresAt?: string | null;
 };
+
+/* Since 22 Oct 2026 the server holds the rule (hub-track migration 20261022120000: get_workout_plan_gate, and
+   trg_zz_workout_plan_limit refusing the 4th plan-less session with PLAN_LIMIT on every path). The form reads the
+   server's answer; the device count below is the fallback while the function is not installed. Modalities without
+   plans (custom, other) are never gated: hasValidPlan reads true for them so no banner shows. */
+async function serverModalityGate(clientId: string, modality: string): Promise<ModalityGate | null> {
+  const { data, error } = await withTimeout(
+    Promise.resolve((supabase.rpc as any)('get_workout_plan_gate', { p_client_id: clientId, p_modality: modality })) as Promise<{ data: any; error: any }>,
+    NET_MS, 'Plan check',
+  );
+  if (error) {
+    if (isPlanGateMissing(error.message ?? error)) return null;
+    throw new Error(error.message);
+  }
+  const g = parsePlanGate(data);
+  if (!g) return null;
+  return {
+    hasValidPlan: g.gated ? g.hasValidPlan : true,
+    loggedCount: g.loggedCount,
+    limit: g.limit,
+    remaining: g.remaining,
+    blocked: g.gated && g.blocked,
+    warning: g.gated && !g.hasValidPlan && g.loggedCount === g.limit - 1,
+    source: 'server',
+    enforced: g.enforced,
+    essentials: g.essentials,
+    planExpired: g.planExpired,
+    planExpiresAt: g.planExpiresAt,
+  };
+}
+
 export function useModalityGate(clientId: string | null, trainerId: string | null, modality: string | null) {
   return useQuery({
-    queryKey: ['modality-gate', clientId, trainerId, normModality(modality)],
+    queryKey: ['modality-gate', 'v2', clientId, trainerId, normModality(modality)],
     enabled: !!clientId && !!trainerId && !!modality,
     staleTime: 30_000,
     queryFn: async (): Promise<ModalityGate> => {
-      const target = normModality(modality);
-      const isStrength = target === 'strength';
-      // 1. Distinct logged sessions for this modality (plan-less grace counter).
-      //    Paged past the 1000-row cap — undercounting would wrongly reopen the gate.
-      const exRows: any[] = [];
-      for (let from = 0; ; from += 1000) {
-        const { data, error: exErr } = await supabase
-          .from('workout_exercises')
-          .select('session_id, modality, body_part')
-          .eq('client_id', clientId)
-          .eq('trainer_id', trainerId)
-          .not('session_id', 'is', null)
-          .range(from, from + 999);
-        if (exErr) throw new Error(exErr.message);
-        exRows.push(...(data ?? []));
-        if (!data || data.length < 1000) break;
-      }
-      const sessions = new Set<string>();
-      for (const r of (exRows ?? []) as any[]) {
-        const rm = normModality(r.modality);
-        if (rm === target || (isStrength && !r.modality && r.body_part)) sessions.add(r.session_id);
-      }
-      const loggedCount = sessions.size;
-      // 2. Approved, non-expired exercise plan for this modality.
-      const { data: planRows } = await supabase
-        .from('workout_plan_exercises')
-        .select('modality, approved_at')
-        .eq('client_id', clientId)
-        .eq('status', 'approved');
-      const now = Date.now();
-      const hasExercisePlan = (planRows ?? []).some(
-        (p: any) => normModality(p.modality) === target && p.approved_at && new Date(p.approved_at).getTime() + PLAN_VALID_DAYS * 864e5 > now
-      );
-      // 3. Approved document plan (any modality) also counts as "has plan".
-      const { data: docRows } = await supabase
-        .from('client_training_plans')
-        .select('id')
-        .eq('client_id', clientId)
-        .eq('status', 'approved')
-        .limit(1);
-      const hasValidPlan = hasExercisePlan || (docRows?.length ?? 0) > 0;
-      return {
-        hasValidPlan,
-        loggedCount,
-        limit: PLANLESS_LIMIT,
-        remaining: Math.max(0, PLANLESS_LIMIT - loggedCount),
-        blocked: !hasValidPlan && loggedCount >= PLANLESS_LIMIT,
-        warning: !hasValidPlan && loggedCount === PLANLESS_LIMIT - 1,
-      };
+      const fromServer = await serverModalityGate(clientId as string, modality as string);
+      if (fromServer) return fromServer;
+      return { ...(await deviceModalityGate(clientId as string, trainerId as string, modality as string)), source: 'device' };
     },
   });
+}
+
+/* The pre-22 Oct count, kept as the fallback: distinct workout_exercises sessions of this client + trainer +
+   modality, plans of the client (any trainer) approved within 42 days, or an approved document plan. */
+async function deviceModalityGate(clientId: string, trainerId: string, modality: string): Promise<ModalityGate> {
+  const target = normModality(modality);
+  const isStrength = target === 'strength';
+  // 1. Distinct logged sessions for this modality (plan-less grace counter).
+  //    Paged past the 1000-row cap — undercounting would wrongly reopen the gate.
+  const exRows: any[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error: exErr } = await supabase
+      .from('workout_exercises')
+      .select('session_id, modality, body_part')
+      .eq('client_id', clientId)
+      .eq('trainer_id', trainerId)
+      .not('session_id', 'is', null)
+      .range(from, from + 999);
+    if (exErr) throw new Error(exErr.message);
+    exRows.push(...(data ?? []));
+    if (!data || data.length < 1000) break;
+  }
+  const sessions = new Set<string>();
+  for (const r of (exRows ?? []) as any[]) {
+    const rm = normModality(r.modality);
+    if (rm === target || (isStrength && !r.modality && r.body_part)) sessions.add(r.session_id);
+  }
+  const loggedCount = sessions.size;
+  // 2. Approved, non-expired exercise plan for this modality.
+  const { data: planRows } = await supabase
+    .from('workout_plan_exercises')
+    .select('modality, approved_at')
+    .eq('client_id', clientId)
+    .eq('status', 'approved');
+  const now = Date.now();
+  const hasExercisePlan = (planRows ?? []).some(
+    (p: any) => normModality(p.modality) === target && p.approved_at && new Date(p.approved_at).getTime() + PLAN_VALID_DAYS * 864e5 > now
+  );
+  // 3. Approved document plan (any modality) also counts as "has plan".
+  const { data: docRows } = await supabase
+    .from('client_training_plans')
+    .select('id')
+    .eq('client_id', clientId)
+    .eq('status', 'approved')
+    .limit(1);
+  const hasValidPlan = hasExercisePlan || (docRows?.length ?? 0) > 0;
+  return {
+    hasValidPlan,
+    loggedCount,
+    limit: PLANLESS_LIMIT,
+    remaining: Math.max(0, PLANLESS_LIMIT - loggedCount),
+    blocked: !hasValidPlan && loggedCount >= PLANLESS_LIMIT,
+    warning: !hasValidPlan && loggedCount === PLANLESS_LIMIT - 1,
+  };
 }
 
 /* ---------- Workout Templates ----------

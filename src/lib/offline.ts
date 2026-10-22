@@ -210,6 +210,9 @@ export function getIsOnline() {
 function isTransientError(e: any): boolean {
   if (isTimeoutError(e)) return true; // a stalled request is retried, never marked failed
   const msg = String(e?.message ?? e ?? '');
+  // The server's plan limit (22 Oct 2026) is a real refusal. Its sentence carries the client's name, which must
+  // never be read as a network word below, so it is settled first.
+  if (/PLAN_LIMIT/.test(msg)) return false;
   return /network request failed|network error|failed to fetch|fetch failed|timeout|timed out|abort|socket|ENOTFOUND|ECONN/i.test(msg);
 }
 

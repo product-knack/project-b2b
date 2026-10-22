@@ -46,6 +46,7 @@ import { enqueueOutbox, getIsOnline, useIsOnline, useOutbox, useOutboxAll, retry
 import { useClientThreadsUnread } from '../lib/clientThreadQueries';
 import { useClientsOtpFlags, useMySessionOtpStatus, saveSessionOtpOffline, savedOtpsFrom, failedVerifyReasonFor, discardSavedOtps } from '../lib/sessionOtpQueries';
 import { otpGateNeeded, isOtpGateError, savedOtpCovers, istDayOf, workoutOtpErrorText, OTP_SAVED_HINT } from '../lib/sessionOtp';
+import { isPlanLimitError, planLimitText, planBlockedText } from '../lib/planGate';
 import { SessionOtpSheet } from '../components/SessionOtpSheet';
 import { ClientThreadsCard } from '../components/clientThreadsCard';
 import { ManagerTeamChatCard } from './managerChat';
@@ -2628,7 +2629,7 @@ export function Dashboard() {
                         />
                       </View>
                       {failed && o.error ? (
-                        <Body style={{ fontSize: 11, color: '#E0A090' }} numberOfLines={3}>{isOtpGateError(o.error) ? workoutOtpErrorText(failedVerifyReasonFor(outboxAll, (o.payload as WorkoutLogOutboxPayload)?.scheduleSessionId)) : o.error}</Body>
+                        <Body style={{ fontSize: 11, color: '#E0A090' }} numberOfLines={3}>{isOtpGateError(o.error) ? workoutOtpErrorText(failedVerifyReasonFor(outboxAll, (o.payload as WorkoutLogOutboxPayload)?.scheduleSessionId)) : isPlanLimitError(o.error) ? planLimitText(o.error) : o.error}</Body>
                       ) : null}
                       {!failed && o.kind === 'workout-log' && savedOtps.some((s) => s.scheduleId === (o.payload as WorkoutLogOutboxPayload)?.scheduleSessionId) ? (
                         <Body style={{ fontSize: 11, color: C.gold }}>{OTP_SAVED_HINT}</Body>
@@ -7344,8 +7345,15 @@ export function Workout() {
     // exercisesRef (mirrored at render) is fresh below.
     flushPendingSetCommits();
     await new Promise((r) => setTimeout(r, 0));
-    if (gateBlocked) {
-      Alert.alert('Session limit reached', `You've already logged ${gate?.loggedCount ?? 3} ${modLabel} sessions without an approved plan. A valid training plan is required to log more. Create and get a ${modLabel} plan approved to continue.`);
+    // Plan limit (22 Oct 2026): online, ask the server again right before saving (a plan approved or a session
+    // logged since the form opened changes the answer); offline, the cached answer stands and the server decides
+    // at sync (a refusal there comes back as PLAN_LIMIT on the queued item).
+    let gateNow = gate;
+    if (!editingOutboxId && getIsOnline()) {
+      try { const r = await gateQ.refetch(); if (r.data) gateNow = r.data; } catch { /* the server checks again at insert */ }
+    }
+    if (gateNow?.blocked) {
+      Alert.alert('Session limit reached', `${planBlockedText({ clientName, modality: modLabel, loggedCount: gateNow.loggedCount, planExpired: !!gateNow.planExpired, planExpiresAt: gateNow.planExpiresAt ?? null })} Create and get a ${modLabel} plan approved to continue.`);
       return;
     }
     if (!canSubmit || saving) return;
@@ -7446,7 +7454,7 @@ export function Workout() {
         finishAfterSave(true);
       } else {
         // Server rejection: stays safely queued on this device, shown on Home.
-        setSyncError(isOtpGateError(res.error) ? workoutOtpErrorText(failedVerifyReasonFor(outboxAllW, workoutScheduleId)) : (res.error ?? 'The server rejected this log.'));
+        setSyncError(isOtpGateError(res.error) ? workoutOtpErrorText(failedVerifyReasonFor(outboxAllW, workoutScheduleId)) : isPlanLimitError(res.error) ? planLimitText(res.error) : (res.error ?? 'The server rejected this log.'));
         if (editingOutboxId) set({ editingOutboxId: null });
       }
     } finally {
@@ -7570,7 +7578,7 @@ export function Workout() {
                 <Text style={{ flex: 1, fontFamily: F.bodyBold, fontSize: 14.5, color: C.red }}>Session limit reached</Text>
               </View>
               <Body style={{ fontSize: 12.5, color: C.ink3, lineHeight: 18 }}>
-                You've logged {gate.loggedCount} {modLabel} sessions for {clientName} without an approved training plan. An approved {modLabel} plan is required to log more.
+                {planBlockedText({ clientName, modality: modLabel, loggedCount: gate.loggedCount, planExpired: !!gate.planExpired, planExpiresAt: gate.planExpiresAt ?? null })}
               </Body>
               <Pressable onPress={() => { set({ editingPlan: null }); go('create-plan'); }}>
                 <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 11, borderRadius: 12 }}>
