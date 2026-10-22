@@ -8183,7 +8183,6 @@ export function Workout() {
         clientId={selectedClientId}
         clientName={clientName}
         onContinue={() => setListenDone(true)}
-        onLeave={() => goBackRef.current()}
       />
 
       <Modal visible={healthOpen} transparent animationType="slide" onRequestClose={closeHealthSheet}>

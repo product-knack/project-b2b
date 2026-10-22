@@ -111,7 +111,8 @@ with `const allDone = listenAllHeard(gateNow, heard);`
 7. Footnote text becomes: `Every play is recorded with your name and the time. Red items must be heard to the end,
    then tap {LISTEN_PROCEED}.`
 Keep: `play()` still logs the listen first (the server trail), `onDone` sets `heard[which]`, `onError` opens the
-transcript and counts it as heard, `finish()` stops the voice and calls `onContinue`, Back to roster leaves.
+transcript and counts it as heard, `finish()` stops the voice and calls `onContinue`. (Back to roster was removed
+later the same day, see section 8.)
 
 ## 4. Rule test, add to `tests/rules/health_summary_rules_test.js` (before the final console.log)
 ```js
@@ -151,3 +152,23 @@ have not listened to today).
 A Play on the Today's Roster summary strip or on the client page, even stopped at once, writes the trail, so the
 Add Workout sheet does not appear for that client that day. Closing it needs a "heard to the end" mark on the
 server (web and app), not built.
+
+## 8. Follow-up the same day: no "Back to roster" button (Android, 22 Oct 2026)
+Owner: "on the workout log page there is a Back to roster button", then "fix this as not show this button".
+Found: Play each item for a second, tap **Back to roster**, tap Log Workout again for the same client, and the
+sheet does not come back (the trail already holds both plays). The sheet's only way out is now
+**Proceed to workout**.
+1. `ListenGateSheet` (`src/components/clientHealthSummaryCard.tsx`): delete the `onLeave` prop (type and
+   destructuring) and `const leave = ...`; the Modal becomes
+   `<Modal visible={visible} transparent animationType="slide" onRequestClose={() => {}}>` (on iOS this only
+   matters for a hardware keyboard Escape; keep it identical anyway); delete the Back to roster `Pressable`; the
+   button row becomes `<View style={{ flexDirection: 'row', marginTop: 12 }}>` and the Proceed `Pressable` style
+   `flex: 1` (was `flex: 1.3`).
+2. `Workout` (`src/screens/trainer.tsx`): remove `onLeave={() => goBackRef.current()}` from the `<ListenGateSheet>`
+   mount.
+3. If the iOS sheet uses a swipe-down or pageSheet presentation, turn that off for this sheet too
+   (`presentationStyle="overFullScreen"` with `transparent`, no `onDismiss` exit), or the swipe is a second door.
+Nobody gets stuck: a summary that cannot load or speak counts as heard (the transcript opens), and the form's own
+Cancel works after Proceed. Closing the app while the sheet is up still resets it (needs the server mark of
+section 7). Verify: open Log Workout on a client with both summaries due; the sheet shows one button only; the
+back gesture does nothing; Play both to the end; Proceed to workout opens the form.

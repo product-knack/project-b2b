@@ -351,8 +351,12 @@ export function ClientSummaryStrip({ clientId, date, accent = GOLD, latest = fal
 /* ---------- the mandatory listen gate (Today's Roster > add session) ----------
    Shown by the Workout form when the client's summaries are due. The trainer
    must hear each due summary to the end (or open its transcript when the device
-   cannot speak); the trail is logged on play, as on the card. No backdrop tap:
-   the only ways out are Continue (when everything due is heard) and Back. */
+   cannot speak); the trail is logged on play, as on the card. No backdrop tap.
+   Since 22 Oct 2026 (owner: "do not show the Back to roster button") the ONLY way out is Proceed to workout once
+   everything due is heard: no Back to roster button, and the phone's back does nothing while the sheet is up.
+   Before, Play then Back to roster then Log Workout again skipped the sheet, because the trail already held both
+   plays. Nobody gets stuck: a summary that cannot load or speak counts as heard (transcript), and the form's own
+   Cancel works after Proceed. */
 const gateStatus = (which: Which, state: GateState, heardNow: boolean, row: ClientHealthSummaryRow | null): { text: string; color: string } => {
   if (state === 'none') return { text: 'Nothing to hear yet', color: C.muted2 };
   if (heardNow) return { text: 'Heard just now', color: C.green };
@@ -362,8 +366,8 @@ const gateStatus = (which: Which, state: GateState, heardNow: boolean, row: Clie
   return { text: built ? `New report · ${built}` : 'Not heard yet', color: C.red };
 };
 
-export function ListenGateSheet({ visible, clientId, clientName, onContinue, onLeave }: {
-  visible: boolean; clientId: string | null; clientName: string; onContinue: () => void; onLeave: () => void;
+export function ListenGateSheet({ visible, clientId, clientName, onContinue }: {
+  visible: boolean; clientId: string | null; clientName: string; onContinue: () => void;
 }) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
@@ -407,10 +411,10 @@ export function ListenGateSheet({ visible, clientId, clientName, onContinue, onL
     });
   };
   const finish = () => { voice.stop(); onContinue(); };
-  const leave = () => { voice.stop(); onLeave(); };
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={leave}>
+    // onRequestClose is a no-op on purpose: the phone's back must not leave the sheet (22 Oct 2026).
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={() => {}}>
       <View style={{ flex: 1, justifyContent: 'flex-end' }}>
         <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.72)' }} />
         <View style={{ maxHeight: '92%', backgroundColor: '#0E0A09', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 14, paddingBottom: insets.bottom + 18 }}>
@@ -439,11 +443,8 @@ export function ListenGateSheet({ visible, clientId, clientName, onContinue, onL
             {err ? <Body style={{ fontSize: 11.5, color: C.red }}>{err}</Body> : null}
             <Body style={{ fontSize: 10.5, color: C.muted3, lineHeight: 15 }}>Every play is recorded with your name and the time. Red items must be heard to the end, then tap {LISTEN_PROCEED}.</Body>
           </ScrollView>
-          <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
-            <Pressable onPress={leave} hitSlop={10} accessibilityRole="button" style={{ flex: 1, alignItems: 'center', paddingVertical: 14, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.06)' }}>
-              <Text style={{ fontFamily: F.bodySemi, fontSize: 13.5, color: C.muted }}>Back to roster</Text>
-            </Pressable>
-            <Pressable onPress={finish} disabled={!allDone} hitSlop={10} accessibilityRole="button" accessibilityState={{ disabled: !allDone }} style={{ flex: 1.3, borderRadius: 14, overflow: 'hidden', opacity: allDone ? 1 : 0.45 }}>
+          <View style={{ flexDirection: 'row', marginTop: 12 }}>
+            <Pressable onPress={finish} disabled={!allDone} hitSlop={10} accessibilityRole="button" accessibilityState={{ disabled: !allDone }} style={{ flex: 1, borderRadius: 14, overflow: 'hidden', opacity: allDone ? 1 : 0.45 }}>
               <LinearGradient colors={allDone ? [C.green, '#1F8F5A'] : ['#5A4030', '#3A2A20']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 14 }}>
                 <Icon name="checks" size={15} color="#fff" strokeWidth={2.5} />
                 <Text style={{ fontFamily: F.bodyBold, fontSize: 14, color: '#fff' }}>{allDone ? LISTEN_PROCEED : LISTEN_WAIT}</Text>
