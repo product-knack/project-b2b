@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from './supabase';
 import { withTimeout, NET_MS } from './withTimeout';
 import { enqueueOutbox, removeOutboxItem, type OutboxItem } from './offline';
-import { parseVerifyAnswer, OTP_VERIFY_FAILED_PREFIX, verifyFailureReason, type OtpSlotStatus, type VerifyAnswer, type SavedOtp, type VerifyReason } from './sessionOtp';
+import { parseVerifyAnswer, OTP_VERIFY_FAILED_PREFIX, verifyFailureReason, type OtpSlotStatus, type VerifyAnswer, type SavedOtp, type VerifyReason, type CrmContact, type PaidCancelReason } from './sessionOtp';
 
 /* Session OTP, the server reads and the writes (20 Oct 2026; offline 21 Oct 2026). Contract (live since
    13 Oct 2026, offline arguments since migration 20261021150000):
@@ -68,6 +68,35 @@ export function useVerifySessionOtp() {
     mutationFn: (input: { scheduleId: string; code: string }) => verifySessionOtp(input.scheduleId, input.code),
     onSuccess: (answer) => { if (answer.ok) qc.invalidateQueries({ queryKey: ['session-otp-status'] }); },
   });
+}
+
+/* ---------- paid cancellation code (22 Oct 2026) ---------- */
+
+/** The client's latest active CRM (name and number), for "Ask <CRM> for the paid cancellation code". */
+export function useClientCrmContact(clientId: string | null) {
+  return useQuery({
+    queryKey: ['client-crm-contact', clientId],
+    enabled: !!clientId,
+    staleTime: 5 * 60_000,
+    queryFn: async (): Promise<CrmContact | null> => {
+      const { data, error } = await withTimeout(Promise.resolve(supabase.rpc('get_client_crm_contact', { p_client_id: clientId })), NET_MS, 'CRM contact');
+      if (error) throw new Error(error.message);
+      const d = (data && typeof data === 'object' ? data : null) as Record<string, unknown> | null;
+      if (!d || !d.name) return null;
+      return { crm_id: typeof d.crm_id === 'string' ? d.crm_id : null, name: String(d.name), phone: typeof d.phone === 'string' ? d.phone : null, source: typeof d.source === 'string' ? d.source : null };
+    },
+  });
+}
+
+export async function verifyPaidCancellationCode(scheduleId: string, code: string): Promise<{ ok: boolean; reason?: PaidCancelReason }> {
+  const { data, error } = await withTimeout(Promise.resolve(supabase.rpc('verify_paid_cancellation_code', { p_schedule_id: scheduleId, p_code: code })), NET_MS, 'Paid cancellation code');
+  if (error) throw new Error(error.message);
+  const d = (data && typeof data === 'object' ? data : {}) as Record<string, unknown>;
+  return d.ok === true ? { ok: true } : { ok: false, reason: typeof d.reason === 'string' ? d.reason : undefined };
+}
+
+export function useVerifyPaidCancellationCode() {
+  return useMutation({ mutationFn: (input: { scheduleId: string; code: string }) => verifyPaidCancellationCode(input.scheduleId, input.code) });
 }
 
 /* ---------- offline: the saved code in the queue ---------- */

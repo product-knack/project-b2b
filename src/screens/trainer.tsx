@@ -58,6 +58,7 @@ import { localToday, fetchScheduledSleepHours, useMedicineSuggestions } from '..
 import { buildCheckinItems, initialTicked, isDuplicateName, nameKey, sourceLabel, lastCheckinLine, type MedicineCheckinPayload } from '../lib/medicineCheckin';
 import { startTimer, finishTimer, clearTimer, readTimer, SessionTiming, type TimerStart } from '../lib/sessionTiming';
 import { SessionClock } from '../components/SessionClock';
+import { PaidCancelCodeStep } from '../components/PaidCancelCodeStep';
 import { useQhpAssessments, useQhpPermissions, useQhpConnectAlerts, useMarkQhpConnected, useQhpAssessors, useQhpClients, useScheduleQhp, useRequestQhpReschedule, useClientMedicalHistory, useClientHealthReports, HealthReportItem, useParqLinks, useGenerateParqLink, qhpFormatDuration, qhpUrgency, QHP_TARGET_MINS } from '../lib/qhpQueries';
 import { PdfPreview } from '../components/PdfPreview';
 import { QhpVoiceMemoButton, QhpVoiceMemoPlayer, QhpVoiceMemoDialog } from '../components/QhpVoiceMemo';
@@ -1375,16 +1376,7 @@ function RosterCard({ row, trainerName, highlight, onAddWorkout, plans, devPos, 
               </>
             ) : (
               <>
-                <Serif style={{ fontSize: 19 }}>Paid Cancellation?</Serif>
-                <Body style={{ fontSize: 12.5, color: C.muted2, lineHeight: 18 }}>This marks the session as a last-moment paid cancellation and raises a claim that goes to admin for approval. Continue?</Body>
-                <View style={{ flexDirection: 'row', gap: 10 }}>
-                  <Pressable onPress={() => setPaidStep(false)} style={{ flex: 1, alignItems: 'center', paddingVertical: 13, borderRadius: 13, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' }}>
-                    <Text style={{ fontFamily: F.bodySemi, fontSize: 13, color: C.ink }}>Back</Text>
-                  </Pressable>
-                  <Pressable onPress={() => { setCancelPaid(true); setPickerOpen(false); setModal('cancel'); }} style={{ flex: 1, alignItems: 'center', paddingVertical: 13, borderRadius: 13, backgroundColor: hexA(C.gold, 0.16), borderWidth: 1, borderColor: hexA(C.gold, 0.45) }}>
-                    <Text style={{ fontFamily: F.bodyBold, fontSize: 13, color: C.gold }}>Yes, continue</Text>
-                  </Pressable>
-                </View>
+                <PaidCancelCodeStep clientId={row.client_id} scheduleId={row.id} clientName={row.client_name} onBack={() => setPaidStep(false)} onContinue={() => { setCancelPaid(true); setPickerOpen(false); setModal('cancel'); }} />
               </>
             )}
           </Pressable>

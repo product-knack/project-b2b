@@ -42,6 +42,14 @@ eq('workout line: code ran out before it was typed offline', O.workoutOtpErrorTe
 eq('queued failure reason code_expired is read back', O.verifyFailureReason(new Error('OTP_VERIFY_FAILED:code_expired')), 'code_expired');
 eq('sheet body names the 2 hours', O.otpSheetBody('Asha', false).endsWith('A code works until 2 hours after the session.'), true);
 eq('sheet body couple keeps both lines', O.otpSheetBody('Asha', true).includes('One code covers both partners today. A code works until 2 hours'), true);
+// Paid cancellation code (22 Oct 2026)
+eq('ask line with number', O.askCrmLine({ name: 'Priya Sharma', phone: '98765 43210' }), 'Ask Priya Sharma (98765 43210)');
+eq('ask line without number', O.askCrmLine({ name: 'Priya Sharma', phone: null }), 'Ask Priya Sharma (no number on file)');
+eq('ask line no CRM', O.askCrmLine(null), 'This member has no CRM assigned. Ask the admin for the code.');
+eq('paid reasons', ['invalid', 'already_used', 'cancelled', 'no_code', 'x'].map(O.paidCancelReasonText), ['Paid cancellation code not valid. Ask CRM for the code again.', 'This code was already used for a paid cancellation of this session.', 'This session is already cancelled.', 'No paid cancellation code exists for this session. Ask CRM to check the member’s Session code setting.', 'The code could not be verified.']);
+eq('gate error detected', [O.isPaidCancelGateError(new Error('PAID_CANCEL_CODE_REQUIRED: enter the code')), O.isPaidCancelGateError(new Error('other'))], [true, false]);
+eq('intro names the member', O.PAID_CANCEL_INTRO('Asha').startsWith('If you want a paid cancellation for Asha, get the 4-digit paid cancellation code from CRM first.'), true);
+eq('no dashes in the paid copy', /[–—]| - /.test(O.PAID_CANCEL_GATE_MESSAGE + O.PAID_CANCEL_NOTICE + O.PAID_CANCEL_INTRO('A') + O.askCrmLine(null)), false);
 eq('no dashes in the new copy', /[–—]| - /.test(O.OTP_CODE_EXPIRED_MESSAGE + O.OTP_CODE_EXPIRED_AT_SYNC_MESSAGE + O.otpSheetBody('A', true)), false);
 eq('gate error: raw server text', O.isOtpGateError(new Error("OTP_NOT_VERIFIED: this member's session code has not been verified for this session")), true);
 eq('gate error: friendly text', O.isOtpGateError(O.OTP_GATE_MESSAGE), true);

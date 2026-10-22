@@ -545,7 +545,7 @@ export function DoctorTodayRoster({ accent = C.orange, onLog }: { accent?: strin
       {distFor ? <DistanceSheet row={{ client_id: distFor.client_id, client_name: distFor.client_name }} visible onClose={() => setDistFor(null)} /> : null}
 
       {/* Cancel: same flow as the trainer roster card (type picker → remark + photo) */}
-      <CancelSessionFlow row={cancelFor ? { id: cancelFor.id, client_name: cancelFor.client_name, scheduled_datetime: cancelFor.scheduled_datetime } : null} onClose={() => setCancelFor(null)} />
+      <CancelSessionFlow row={cancelFor ? { id: cancelFor.id, client_name: cancelFor.client_name, scheduled_datetime: cancelFor.scheduled_datetime, client_id: cancelFor.client_id ?? null } : null} onClose={() => setCancelFor(null)} />
     </View>
   );
 }
@@ -1524,7 +1524,7 @@ export function DoctorRoster() {
         )}
 
         {/* Cancel dialog: shared trainer flow with the Cancelled-by toggle */}
-        <CancelSessionFlow askWho row={cancelFor ? { id: cancelFor.id, client_name: cancelFor.client_name, scheduled_datetime: cancelFor.scheduled_datetime } : null} onClose={() => setCancelFor(null)} />
+        <CancelSessionFlow askWho row={cancelFor ? { id: cancelFor.id, client_name: cancelFor.client_name, scheduled_datetime: cancelFor.scheduled_datetime, client_id: cancelFor.client_id ?? null } : null} onClose={() => setCancelFor(null)} />
 
         {/* Reschedule dialog */}
         <Modal visible={!!reschedFor} transparent animationType="fade" onRequestClose={() => setReschedFor(null)}>

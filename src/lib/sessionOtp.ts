@@ -104,5 +104,39 @@ export const otpSheetBody = (clientName: string, couple: boolean): string =>
   `Ask ${clientName || 'the member'} for the 4-digit code CRM sent them. The workout opens once it is verified.` + (couple ? ' One code covers both partners today.' : '')
   + ' A code works until 2 hours after the session.';
 
+/* ---------- Paid cancellation code (22 Oct 2026) ----------
+   A second 4-digit code made with the session code (members with Session code on). CRM reads it on Session Logs;
+   a trainer, doctor or therapist must verify it before a paid cancellation is saved (server gate
+   PAID_CANCEL_CODE_REQUIRED). The sheet names the client's latest active CRM so the trainer knows who to ask. */
+export type CrmContact = { crm_id?: string | null; name: string | null; phone: string | null; source?: string | null };
+export type PaidCancelReason = 'not_authenticated' | 'no_code' | 'not_your_session' | 'already_used' | 'cancelled' | 'invalid' | string;
+
+export const PAID_CANCEL_GATE_PREFIX = 'PAID_CANCEL_CODE_REQUIRED';
+export const PAID_CANCEL_GATE_MESSAGE = "Paid cancellation needs the code from the member's CRM. Enter it in the cancel steps, then save again.";
+export const PAID_CANCEL_INTRO = (clientName: string): string =>
+  `If you want a paid cancellation for ${clientName || 'this member'}, get the 4-digit paid cancellation code from CRM first. CRM sees it on Session Logs.`;
+export const PAID_CANCEL_NOTICE = 'Without the code the paid cancellation cannot be saved. A standard cancellation needs no code.';
+
+export const isPaidCancelGateError = (e: unknown): boolean =>
+  String((e as any)?.message ?? e ?? '').includes(PAID_CANCEL_GATE_PREFIX);
+
+/** "Ask Priya Sharma (98765 43210)", "Ask Priya Sharma (no number on file)", or the no-CRM line. */
+export const askCrmLine = (c: CrmContact | null | undefined): string => {
+  if (!c?.name) return 'This member has no CRM assigned. Ask the admin for the code.';
+  return `Ask ${c.name} (${c.phone ? c.phone : 'no number on file'})`;
+};
+
+export const paidCancelReasonText = (reason: PaidCancelReason | undefined | null): string => {
+  switch (reason) {
+    case 'invalid': return 'Paid cancellation code not valid. Ask CRM for the code again.';
+    case 'no_code': return 'No paid cancellation code exists for this session. Ask CRM to check the member’s Session code setting.';
+    case 'already_used': return 'This code was already used for a paid cancellation of this session.';
+    case 'cancelled': return 'This session is already cancelled.';
+    case 'not_your_session': return 'This session belongs to another trainer.';
+    case 'not_authenticated': return 'You are signed out. Sign in again and retry.';
+    default: return 'The code could not be verified.';
+  }
+};
+
 /** The IST calendar day (YYYY-MM-DD) of a time, for the same-day rule. */
 export const istDayOf = (ms: number): string => new Date(ms + 330 * 60_000).toISOString().slice(0, 10);

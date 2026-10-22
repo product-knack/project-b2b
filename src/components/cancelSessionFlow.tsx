@@ -7,18 +7,20 @@ import { Icon } from '../icons';
 import { Serif, Body, Mono } from './primitives';
 import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import { useCancelScheduledSession } from '../lib/trainerQueries';
+import { PaidCancelCodeStep } from './PaidCancelCodeStep';
 
 /* ============ Cancel a roster session (shared flow) ============
    The trainer roster card's two-step cancel, lifted out so doctors (Today's
    Roster and the HOD roster page) get the exact same thing:
-     1. type picker: Cancel Session (no charge) vs Paid Cancellation (double
-        confirms; raises an admin-approval claim),
+     1. type picker: Cancel Session (no charge) vs Paid Cancellation (since 22 Oct 2026 the
+        paid cancellation code step from PaidCancelCodeStep for members with Session code on,
+        else the old double confirm; raises an admin-approval claim),
      2. remark (required) + optional photo, then Confirm.
    Writes through useCancelScheduledSession (session_schedule update, paid =>
    paid_cancellation + admin_approval 'pending', CRM push). `askWho` adds the
    HOD's "Cancelled by" Client / Doctor toggle (DB check accepts Client | Trainer). */
 
-export type CancelSessionRow = { id: string; client_name: string; scheduled_datetime: string };
+export type CancelSessionRow = { id: string; client_name: string; scheduled_datetime: string; client_id?: string | null };
 
 export function CancelSessionFlow({ row, onClose, askWho, who = 'Doctor', onDone }: {
   row: CancelSessionRow | null;
@@ -101,16 +103,7 @@ export function CancelSessionFlow({ row, onClose, askWho, who = 'Doctor', onDone
               </>
             ) : (
               <>
-                <Serif style={{ fontSize: 19 }}>Paid Cancellation?</Serif>
-                <Body style={{ fontSize: 12.5, color: C.muted2, lineHeight: 18 }}>This marks the session as a last-moment paid cancellation and raises a claim that goes to admin for approval. Continue?</Body>
-                <View style={{ flexDirection: 'row', gap: 10 }}>
-                  <Pressable onPress={() => setStep('pick')} style={{ flex: 1, alignItems: 'center', paddingVertical: 13, borderRadius: 13, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' }}>
-                    <Text style={{ fontFamily: F.bodySemi, fontSize: 13, color: C.ink }}>Back</Text>
-                  </Pressable>
-                  <Pressable onPress={() => { setPaid(true); setStep('form'); }} style={{ flex: 1, alignItems: 'center', paddingVertical: 13, borderRadius: 13, backgroundColor: hexA(C.gold, 0.16), borderWidth: 1, borderColor: hexA(C.gold, 0.45) }}>
-                    <Text style={{ fontFamily: F.bodyBold, fontSize: 13, color: C.gold }}>Yes, continue</Text>
-                  </Pressable>
-                </View>
+                <PaidCancelCodeStep clientId={row?.client_id ?? null} scheduleId={row?.id ?? ''} clientName={row?.client_name ?? ''} onBack={() => setStep('pick')} onContinue={() => { setPaid(true); setStep('form'); }} />
               </>
             )}
           </Pressable>
