@@ -67,9 +67,9 @@ export const savedOtpCovers = (saved: SavedOtp[], scheduleId: string, status: Ot
 /** Reason copy, mirrored from the web dialog word for word (no dashes). */
 export const otpReasonText = (reason: VerifyReason | undefined | null): string => {
   switch (reason) {
-    case 'invalid': return 'OTP not valid. Ask the member for the code again.';
+    case 'invalid': return 'Session code not valid. Ask the member for the code again.';
     case 'cancelled': return 'This session is cancelled, so its code cannot be used.';
-    case 'no_otp': return "No code exists for this session yet. Ask CRM to check the member's OTP setting.";
+    case 'no_otp': return "No code exists for this session yet. Ask CRM to check the member's Session code setting.";
     case 'not_your_session': return 'This session belongs to another trainer.';
     case 'not_authenticated': return 'You are signed out. Sign in again and retry.';
     case 'expired': return 'The code was typed on a different day than the session, so it cannot be used.';

@@ -29,9 +29,9 @@ eq('saved does not cover an unrelated slot', O.savedOtpCovers(saved, 'C', { stat
 eq('a single saved code never covers through a null group', O.savedOtpCovers([{ scheduleId: 'A', clientId: 'c1', coupleGroupId: null, day: '2026-10-21', enteredAt: 'x' }], 'B', { status: 'pending', verified_at: null, couple: false, coupleGroupId: null }, '2026-10-21'), false);
 eq('nothing saved', O.savedOtpCovers([], 'A', undefined, '2026-10-21'), false);
 
-eq('reason invalid', O.otpReasonText('invalid'), 'OTP not valid. Ask the member for the code again.');
+eq('reason invalid', O.otpReasonText('invalid'), 'Session code not valid. Ask the member for the code again.');
 eq('reason cancelled', O.otpReasonText('cancelled'), 'This session is cancelled, so its code cannot be used.');
-eq('reason no_otp', O.otpReasonText('no_otp'), "No code exists for this session yet. Ask CRM to check the member's OTP setting.");
+eq('reason no_otp', O.otpReasonText('no_otp'), "No code exists for this session yet. Ask CRM to check the member's Session code setting.");
 eq('reason not_your_session', O.otpReasonText('not_your_session'), 'This session belongs to another trainer.');
 eq('reason not_authenticated', O.otpReasonText('not_authenticated'), 'You are signed out. Sign in again and retry.');
 eq('reason expired', O.otpReasonText('expired'), 'The code was typed on a different day than the session, so it cannot be used.');
