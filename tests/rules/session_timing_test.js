@@ -72,6 +72,22 @@ const eq = (name, got, want) => { const ok = JSON.stringify(got) === JSON.string
   // a corrupt entry is ignored
   store.set('session-timer:c5:2026-10-13', '{not json');
   eq('corrupt start reads as none', await T.finishTimer('c5', 'trainer', '2026-10-13T04:00:00.000Z'), null);
+  // The visible clock (22 Oct 2026): the number shown is the number saved.
+  const S = '2026-10-22T09:35:00.000Z'; // 3:05 pm IST
+  const at = (sec) => Date.parse(S) + sec * 1000;
+  eq('clock 0 s', T.elapsedClock(S, at(0)), '0:00');
+  eq('clock 42 s', T.elapsedClock(S, at(42)), '0:42');
+  eq('clock 12 min 34 s', T.elapsedClock(S, at(12 * 60 + 34)), '12:34');
+  eq('clock past an hour', T.elapsedClock(S, at(3725)), '1:02:05');
+  eq('clock start in the future reads 0:00', T.elapsedClock(S, at(-90)), '0:00');
+  eq('clock bad start reads 0:00', T.elapsedClock('nope', at(10)), '0:00');
+  eq('saves 1 min under a minute', T.minutesIfSubmitted(S, at(20)), 1);
+  eq('saves 13 min at 12:34 (rounded, as the json)', T.minutesIfSubmitted(S, at(12 * 60 + 34)), 13);
+  eq('saves 12 min at 12:29', T.minutesIfSubmitted(S, at(12 * 60 + 29)), 12);
+  eq('saved minutes equal the json rule', T.minutesIfSubmitted(S, at(3448)), T.durationMinutes(S, new Date(at(3448)).toISOString()));
+  eq('saves 1 min when the start is in the future', T.minutesIfSubmitted(S, at(-300)), 1);
+  eq('clockOf IST', [T.clockOf(S), T.clockOf('2026-10-22T03:30:00Z'), T.clockOf(null)], ['3:05 pm', '9:00 am', '']);
+  eq('minutesText', [T.minutesText(1), T.minutesText(57), T.minutesText(60), T.minutesText(65)], ['1 min', '57 min', '1 h', '1 h 5 min']);
   console.log(fails ? `${fails} FAILED` : 'ALL PASS');
   process.exit(fails ? 1 : 0);
 })();

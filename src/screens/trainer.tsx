@@ -56,7 +56,8 @@ import { istToday, useMyManagerTeam, TRAINER_MODALITIES } from '../lib/managerCh
 import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import { localToday, fetchScheduledSleepHours, useMedicineSuggestions } from '../lib/clientQueries';
 import { buildCheckinItems, initialTicked, isDuplicateName, nameKey, sourceLabel, lastCheckinLine, type MedicineCheckinPayload } from '../lib/medicineCheckin';
-import { startTimer, finishTimer, clearTimer, SessionTiming } from '../lib/sessionTiming';
+import { startTimer, finishTimer, clearTimer, readTimer, SessionTiming, type TimerStart } from '../lib/sessionTiming';
+import { SessionClock } from '../components/SessionClock';
 import { useQhpAssessments, useQhpPermissions, useQhpConnectAlerts, useMarkQhpConnected, useQhpAssessors, useQhpClients, useScheduleQhp, useRequestQhpReschedule, useClientMedicalHistory, useClientHealthReports, HealthReportItem, useParqLinks, useGenerateParqLink, qhpFormatDuration, qhpUrgency, QHP_TARGET_MINS } from '../lib/qhpQueries';
 import { PdfPreview } from '../components/PdfPreview';
 import { QhpVoiceMemoButton, QhpVoiceMemoPlayer, QhpVoiceMemoDialog } from '../components/QhpVoiceMemo';
@@ -6682,13 +6683,30 @@ export function Workout() {
   // so backing out and returning never restarts it. Editing a queued log has no timer.
   const timerEntryRef = React.useRef<string | null>(null);
   const lastTimingRef = React.useRef<SessionTiming | null>(null);
+  // The visible clock (22 Oct 2026, owner: "the trainer should see the timer we save in duration"): the start in
+  // force for this client (read back from storage, or as a start call returns it) and, once the submit captured
+  // it, the timing the log carries. SessionClock in the sticky bar shows them.
+  const [timerStart, setTimerStart] = React.useState<TimerStart | null>(null);
+  const [savedTiming, setSavedTiming] = React.useState<SessionTiming | null>(null);
+  const clockClientRef = React.useRef<string | null>(null);
+  clockClientRef.current = selectedClientId ?? null;
+  const showStart = React.useCallback((clientId: string, p: Promise<TimerStart | null>) => {
+    p.then((e) => { if (e && clockClientRef.current === clientId) setTimerStart(e); }).catch(() => {});
+  }, []);
+  React.useEffect(() => {
+    setTimerStart(null);
+    setSavedTiming(null);
+    if (!selectedClientId || editingOutboxId) return;
+    const c = selectedClientId;
+    readTimer(c).then((r) => { if (r && clockClientRef.current === c) setTimerStart((cur) => cur ?? r.start); }).catch(() => {});
+  }, [selectedClientId, editingOutboxId]);
   React.useEffect(() => {
     if (!selectedClientId || editingOutboxId || !healthQ.isSuccess) return;
     const key = `${selectedClientId}:${workoutScheduleId ?? ''}`;
     if (timerEntryRef.current === key) return;
     timerEntryRef.current = key;
-    if (serverGateOk) startTimer(selectedClientId, workoutScheduleId ?? null, 'skipped').catch(() => {});
-  }, [selectedClientId, workoutScheduleId, editingOutboxId, healthQ.isSuccess, serverGateOk]);
+    if (serverGateOk) showStart(selectedClientId, startTimer(selectedClientId, workoutScheduleId ?? null, 'skipped'));
+  }, [selectedClientId, workoutScheduleId, editingOutboxId, healthQ.isSuccess, serverGateOk, showStart]);
   // Same Android new-arch rule as the pair picker: dismiss the keyboard and let
   // it settle BEFORE unmounting a Modal that holds a focused TextInput.
   const closeHealthSheet = React.useCallback(() => {
@@ -6758,7 +6776,7 @@ export function Workout() {
       logDate: localToday(),
     };
     // The check-in Save is the session's start (session timer, 13 Oct 2026).
-    const startNow = () => { if (selectedClientId) startTimer(selectedClientId, workoutScheduleId ?? null, 'saved').catch(() => {}); };
+    const startNow = () => { if (selectedClientId) showStart(selectedClientId, startTimer(selectedClientId, workoutScheduleId ?? null, 'saved')); };
     if (!getIsOnline()) {
       // Same required fields as online; the data rides along in the outbox
       // payload and syncs right before the workout log.
@@ -7308,6 +7326,11 @@ export function Workout() {
       : blankExercises.length ? `${blankExercises.length} blank exercise${blankExercises.length === 1 ? '' : 's'} (no values) will be removed when you submit`
       : !isOnline ? 'Offline — the log saves to this device and syncs automatically' : null)
     : null;
+  // The visible session timer (22 Oct 2026): a queued log being edited shows the minutes it already carries.
+  const queuedTiming: SessionTiming | null = editingOutboxId
+    ? ((getOutboxItem(editingOutboxId)?.payload as WorkoutLogOutboxPayload | undefined)?.sessionTiming ?? null)
+    : null;
+  const clockShown = !gateBlocking && !!(timerStart || savedTiming || queuedTiming);
 
   // After a save: hand over to the partner leg, or leave the form.
   const finishAfterSave = (offline: boolean) => {
@@ -7330,7 +7353,7 @@ export function Workout() {
         set({ selectedClientId: next.id, selectedClientName: next.name, workoutScheduleId: null });
         // The partner's leg shares the first leg's start; its end is its own submit.
         const firstLeg = lastTimingRef.current;
-        startTimer(next.id, null, firstLeg?.gate ?? 'skipped', firstLeg?.started_at).catch(() => {});
+        showStart(next.id, startTimer(next.id, null, firstLeg?.gate ?? 'skipped', firstLeg?.started_at));
         setDone(false); setSavedOffline(false); setSyncError(null);
         aerobicsPopulatedRef.current = null;
         activityPopulatedRef.current = null;
@@ -7430,6 +7453,8 @@ export function Workout() {
         const item = await enqueueOutbox('workout-log', label, payload, { autoDrain: false });
         itemId = item.id;
         notesSessionId = payload.sessionId;
+        // The clock stops on the minutes this log now carries (22 Oct 2026).
+        setSavedTiming(timed?.timing ?? null);
       }
       // Voice notes ride behind the log as their own queue items (same on-disk order,
       // so a drain always lands the session before its notes).
@@ -7486,7 +7511,7 @@ export function Workout() {
   return (
     <View style={{ flex: 1 }}>
       {/* pb clears the sticky Submit bar (+ home indicator); Page adds the keyboard height itself. */}
-      <Page ref={dragPageRef} scrollEnabled={pageScrollOk} scrollOffsetRef={dragOffsetRef} gap={14} pt={6} pb={160 + insets.bottom} kbAware>
+      <Page ref={dragPageRef} scrollEnabled={pageScrollOk} scrollOffsetRef={dragOffsetRef} gap={14} pt={6} pb={160 + insets.bottom + (clockShown ? 52 : 0)} kbAware>
         <BackLink label="Log Workout" onPress={goBack} />
         {/* Parallel / couple tabs (web ParallelWorkoutTabs): primary client + "+ Add
             Client" (or the chosen second client). One shared group id → one package
@@ -7991,6 +8016,8 @@ export function Workout() {
       </Page>
 
       <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 18, paddingTop: 12, paddingBottom: insets.bottom + 14, backgroundColor: 'rgba(8,6,6,0.96)', borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)' }}>
+        {/* The session timer, visible (22 Oct 2026): live while logging, then the minutes saved as the duration. */}
+        {clockShown ? <SessionClock startedAt={timerStart?.started_at ?? null} final={savedTiming ?? queuedTiming} /> : null}
         {missingHint ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 9 }}>
             <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: C.gold }} />

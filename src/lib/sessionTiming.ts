@@ -132,6 +132,36 @@ export async function finishTimer(clientId: string, role: string, nowIso: string
   return { timing, minutes: timing.duration_minutes };
 }
 
+/* ---------- The visible clock (22 Oct 2026) ----------
+   Owner: "show the timer clock when we log a session; the trainer should see the timer we save in duration".
+   The Add Workout form shows the running time since the stored start and the minutes a submit now would save
+   (the same durationMinutes rule as the json, so the number shown is the number written). Pure: the form passes
+   the clock's now. */
+const p2 = (n: number) => String(n).padStart(2, '0');
+
+/** "0:42", "12:34", "1:02:05": the time since the start. A start in the future (device clock moved) reads 0:00. */
+export const elapsedClock = (startedIso: string, nowMs: number): string => {
+  const t = Date.parse(startedIso);
+  const s = isFinite(t) ? Math.max(0, Math.floor((nowMs - t) / 1000)) : 0;
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  return h > 0 ? `${h}:${p2(m)}:${p2(sec)}` : `${m}:${p2(sec)}`;
+};
+
+/** The minutes a submit at `nowMs` would save as duration_minutes (at least 1). */
+export const minutesIfSubmitted = (startedIso: string, nowMs: number): number =>
+  isFinite(Date.parse(startedIso)) ? durationMinutes(startedIso, new Date(Math.max(nowMs, Date.parse(startedIso))).toISOString()) : 1;
+
+const clockFmt = new Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', hour: 'numeric', minute: '2-digit', hour12: true });
+/** "3:05 pm" in IST; '' when unparsable. */
+export const clockOf = (iso: string | null | undefined): string => {
+  const t = iso ? Date.parse(iso) : NaN;
+  return isFinite(t) ? clockFmt.format(new Date(t)).replace(/\s?(am|pm)$/i, (x) => ` ${x.trim().toLowerCase()}`) : '';
+};
+
+/** "1 min", "57 min", "1 h 5 min". */
+export const minutesText = (min: number): string =>
+  min < 60 ? `${min} min` : `${Math.floor(min / 60)} h${min % 60 ? ` ${min % 60} min` : ''}`;
+
 /** Remove the client's start (today's and yesterday's keys). */
 export async function clearTimer(clientId: string, nowIso: string = new Date().toISOString()): Promise<void> {
   const today = istDayOf(nowIso);
