@@ -155,6 +155,29 @@ export const listenGate = (row: ClientHealthSummaryRow | null | undefined, uid: 
 });
 export const gateDue = (g: ListenGate): boolean => g.weekly === 'due' || g.context === 'due';
 
+/* ---------- The Add Workout listen sheet (22 Oct 2026) ----------
+   Owner: "after both listens the trainer must tap Proceed to workout". Play records the listen on the server at
+   once, so the refreshed row reads "done" seconds into the audio. Before this fix the second Play therefore made
+   the form decide nothing was due, close the sheet (which stopped the voice) and open the workout form, and the
+   button counted an item as heard the moment Play was tapped. Two rules close it:
+   1. listenSheetUp: once the sheet has been needed it stays up until the trainer taps Proceed (armed), whatever
+      the row says after a refresh.
+   2. listenStillNeeded / listenAllHeard: what is due is judged from the row AS IT WAS WHEN THE SHEET OPENED
+      (atOpen), and an item counts only when its audio played to the end on this phone (or its transcript stood in
+      because nothing could speak). */
+export type HeardMap = Record<Which, boolean>;
+export const LISTEN_PROCEED = 'Proceed to workout';
+export const LISTEN_WAIT = 'Listen first';
+
+export const listenSheetUp = (o: { done: boolean; armed: boolean; eligible: boolean; due: boolean }): boolean =>
+  !o.done && (o.armed || (o.eligible && o.due));
+
+export const listenStillNeeded = (atOpen: ListenGate, heard: HeardMap, which: Which): boolean =>
+  atOpen[which] === 'due' && !heard[which];
+
+export const listenAllHeard = (atOpen: ListenGate, heard: HeardMap): boolean =>
+  !listenStillNeeded(atOpen, heard, 'weekly') && !listenStillNeeded(atOpen, heard, 'context');
+
 /* ---------- Speech chunking ----------
    Android TTS refuses one utterance longer than Speech.maxSpeechInputLength
    (about 4000 characters). Split a long script at sentence ends and queue the

@@ -21,6 +21,7 @@ import {
   TITLES, type Which, type ClientHealthSummaryRow, type WeeklySummary, type ContextSummary,
   durationText, fmtStamp, historyOf, summaryOf, generatedAtOf, hasScript, lastListen, isNewSince,
   listenGate, gateDue, type GateState,
+  type ListenGate, type HeardMap, listenStillNeeded, listenAllHeard, LISTEN_PROCEED, LISTEN_WAIT,
 } from '../lib/clientHealthSummary';
 
 const GOLD = C.gold;
@@ -368,15 +369,22 @@ export function ListenGateSheet({ visible, clientId, clientName, onContinue, onL
   const voice = useSummaryVoice();
   const row = q.data ?? null;
   const gate = listenGate(row, uid);
-  const [heard, setHeard] = React.useState<Record<Which, boolean>>({ weekly: false, context: false });
+  // What is due is fixed when the sheet opens (22 Oct 2026): Play records the listen at once and the refreshed
+  // row would read "done" seconds into the audio. Only a play to the end (or a transcript that stood in) counts.
+  const [atOpen, setAtOpen] = React.useState<ListenGate | null>(null);
+  React.useEffect(() => {
+    if (!visible) { setAtOpen(null); return; }
+    if (!atOpen && row) setAtOpen(gate);
+  }, [visible, row, atOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+  const gateNow: ListenGate = atOpen ?? gate;
+  const [heard, setHeard] = React.useState<HeardMap>({ weekly: false, context: false });
   const [transcript, setTranscript] = React.useState<Which | null>(null);
   const [err, setErr] = React.useState<string | null>(null);
   React.useEffect(() => {
     if (visible) { setHeard({ weekly: false, context: false }); setTranscript(null); setErr(null); } else voice.stop();
   }, [visible]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const need = (which: Which) => gate[which] === 'due' && !heard[which];
-  const allDone = !need('weekly') && !need('context');
+  const allDone = listenAllHeard(gateNow, heard);
   const play = (which: Which) => {
     const s = summaryOf(row, which);
     if (!s?.script || !clientId) return;
@@ -421,11 +429,11 @@ export function ListenGateSheet({ visible, clientId, clientName, onContinue, onL
             ) : (['weekly', 'context'] as Which[]).map((which, i) => (
               <SummaryRow key={which} which={which} row={row} uid={uid} ordinal={i + 1} {...rowVoiceProps(voice, which)} transcriptOpen={transcript === which}
                 onPlay={() => play(which)} onStop={voice.stop} onToggleTranscript={() => setTranscript((t) => (t === which ? null : which))}
-                status={gateStatus(which, gate[which], heard[which], row)} />
+                status={gateStatus(which, gateNow[which], heard[which], row)} />
             ))}
             {voice.notice ? <Body style={{ fontSize: 11, color: GOLD }}>{voice.notice}</Body> : null}
             {err ? <Body style={{ fontSize: 11.5, color: C.red }}>{err}</Body> : null}
-            <Body style={{ fontSize: 10.5, color: C.muted3, lineHeight: 15 }}>Every play is recorded with your name and the time. Red items must be heard to the end before you can continue.</Body>
+            <Body style={{ fontSize: 10.5, color: C.muted3, lineHeight: 15 }}>Every play is recorded with your name and the time. Red items must be heard to the end, then tap {LISTEN_PROCEED}.</Body>
           </ScrollView>
           <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
             <Pressable onPress={leave} hitSlop={10} accessibilityRole="button" style={{ flex: 1, alignItems: 'center', paddingVertical: 14, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.06)' }}>
@@ -434,7 +442,7 @@ export function ListenGateSheet({ visible, clientId, clientName, onContinue, onL
             <Pressable onPress={finish} disabled={!allDone} hitSlop={10} accessibilityRole="button" accessibilityState={{ disabled: !allDone }} style={{ flex: 1.3, borderRadius: 14, overflow: 'hidden', opacity: allDone ? 1 : 0.45 }}>
               <LinearGradient colors={allDone ? [C.green, '#1F8F5A'] : ['#5A4030', '#3A2A20']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 14 }}>
                 <Icon name="checks" size={15} color="#fff" strokeWidth={2.5} />
-                <Text style={{ fontFamily: F.bodyBold, fontSize: 14, color: '#fff' }}>{allDone ? 'Continue to log' : 'Listen first'}</Text>
+                <Text style={{ fontFamily: F.bodyBold, fontSize: 14, color: '#fff' }}>{allDone ? LISTEN_PROCEED : LISTEN_WAIT}</Text>
               </LinearGradient>
             </Pressable>
           </View>

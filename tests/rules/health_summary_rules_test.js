@@ -66,5 +66,22 @@ eq('split: joins back to the text', parts.join(' ').replace(/\s+/g, ' '), long.r
 eq('split: short text untouched', R.splitForSpeech('Hello there.', 200), ['Hello there.']);
 eq('split: empty', R.splitForSpeech('   ', 200), []);
 eq('split: one over-long sentence is cut', R.splitForSpeech('a'.repeat(450), 200).map((p) => p.length), [200, 200, 50]);
+
+// The Add Workout listen sheet (22 Oct 2026): the second Play no longer closes the sheet, only a play to the end counts.
+const both = { weekly: 'due', context: 'due' };
+const none = { weekly: false, context: false };
+eq('sheet: due, not armed yet', R.listenSheetUp({ done: false, armed: false, eligible: true, due: true }), true);
+eq('sheet: the refreshed row reads done after Play, but armed keeps it up', R.listenSheetUp({ done: false, armed: true, eligible: true, due: false }), true);
+eq('sheet: armed stays up through a network blip', R.listenSheetUp({ done: false, armed: true, eligible: false, due: false }), true);
+eq('sheet: Proceed tapped closes it', R.listenSheetUp({ done: true, armed: true, eligible: true, due: true }), false);
+eq('sheet: nothing due, never armed', R.listenSheetUp({ done: false, armed: false, eligible: true, due: false }), false);
+eq('sheet: not eligible (editing a queued log, offline at open)', R.listenSheetUp({ done: false, armed: false, eligible: false, due: true }), false);
+eq('heard: nothing heard, both due', R.listenAllHeard(both, none), false);
+eq('heard: first heard to the end only', R.listenAllHeard(both, { weekly: true, context: false }), false);
+eq('heard: Play tapped on the second (row now says done) is not enough: atOpen still says due', R.listenStillNeeded(both, { weekly: true, context: false }, 'context'), true);
+eq('heard: both heard to the end', R.listenAllHeard(both, { weekly: true, context: true }), true);
+eq('heard: only the weekly was due at open', R.listenAllHeard({ weekly: 'due', context: 'done' }, { weekly: true, context: false }), true);
+eq('heard: a missing summary is never required', R.listenAllHeard({ weekly: 'none', context: 'due' }, { weekly: false, context: true }), true);
+eq('button copy', [R.LISTEN_PROCEED, R.LISTEN_WAIT], ['Proceed to workout', 'Listen first']);
 console.log(fails ? `${fails} FAILED` : 'ALL PASS');
 process.exit(fails ? 1 : 0);

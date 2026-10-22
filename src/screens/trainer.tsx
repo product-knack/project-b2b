@@ -27,7 +27,7 @@ import { CycleChip, CyclePopup, CyclePopupInfo, cycleColor } from '../components
 import { EssentialsBadge } from '../components/essentialsBadge';
 import { ClientHealthSummaryCard, ListenGateSheet, ClientSummaryStrip } from '../components/clientHealthSummaryCard';
 import { useClientHealthSummary } from '../lib/clientHealthSummaryQueries';
-import { listenGate, gateDue } from '../lib/clientHealthSummary';
+import { listenGate, gateDue, listenSheetUp } from '../lib/clientHealthSummary';
 import { VoiceNotesComposer, SessionVoicePlaylistPlayer, SessionVoiceSheet, SessionVoiceSheetInfo, LatestVoiceInline, toggleTakeFlag } from '../components/SessionVoice';
 import { hasPainNote } from '../lib/sessionVoiceTypes';
 import { useClientsLatestVoiceNotes } from '../lib/sessionVoiceQueries';
@@ -6665,8 +6665,13 @@ export function Workout() {
   const listenEligible = !!workoutScheduleId && !editingOutboxId && isOnline;
   const summaryQ = useClientHealthSummary(selectedClientId, listenEligible);
   const [listenDone, setListenDone] = React.useState(false);
-  React.useEffect(() => { setListenDone(false); }, [selectedClientId, workoutScheduleId]);
-  const listenRequired = listenEligible && !listenDone && !!summaryQ.data && gateDue(listenGate(summaryQ.data, authSession?.user?.id ?? null));
+  // Once needed, the listen sheet STAYS up until the trainer taps Proceed to workout (22 Oct 2026): Play records the
+  // listen at once, so the refreshed row read "done" and closed the sheet mid-audio on the second Play.
+  const [listenArmed, setListenArmed] = React.useState(false);
+  React.useEffect(() => { setListenDone(false); setListenArmed(false); }, [selectedClientId, workoutScheduleId, editingOutboxId]);
+  const listenDue = listenEligible && !!summaryQ.data && gateDue(listenGate(summaryQ.data, authSession?.user?.id ?? null));
+  React.useEffect(() => { if (listenDue && !listenDone) setListenArmed(true); }, [listenDue, listenDone]);
+  const listenRequired = listenSheetUp({ done: listenDone, armed: listenArmed, eligible: listenEligible, due: listenDue });
   // Session timer (13 Oct 2026): a log whose health data is already complete starts its
   // timer on entry (gate 'skipped'); when the check-in sheet has to open, its Save starts
   // it instead (gate 'saved'). An existing start for the same client and IST day is kept,
