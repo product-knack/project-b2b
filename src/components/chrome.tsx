@@ -209,6 +209,7 @@ export function Drawer() {
     if (it.route === 'workout-analyst') return caps.data.workoutAnalyst;
     if (it.route === 'plans-analyst') return caps.data.workoutComplianceAnalyst;
     if (it.route === 'academy-senior-analyst') return caps.data.seniorAnalyst;
+    if (it.route === 'essentials-manager') return caps.data.isEssentialManager || role === 'essential_manager'; // specialization (the two managers), or the dedicated role
     if (it.route === 'essentials-auction') return role !== 'doctor' || !!doctorIdent.data?.isPhysio; // rehab sessions of the auction go to physios
     if (it.route === 'doctor-rehab-recommendation') return caps.data.isPhysioHod;
     if (it.route === 'doctor-reimbursement-review') return caps.data.isPhysioHod; // doctors' manager reviews reimbursements

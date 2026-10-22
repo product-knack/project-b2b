@@ -39,6 +39,8 @@ export type Capabilities = {
   isPhysioHod: boolean;
   /* Pilates Run Rate card (web: role_specialization includes 'pilates-head') */
   isPilatesHead: boolean;
+  /* Essentials Manager page (role_specialization includes 'essential_manager'; 22 Oct 2026) */
+  isEssentialManager: boolean;
 };
 
 const EMPTY: Capabilities = {
@@ -57,6 +59,7 @@ const EMPTY: Capabilities = {
   seniorAnalyst: false,
   isPhysioHod: false,
   isPilatesHead: false,
+  isEssentialManager: false,
 };
 
 /* `isPending` (no data yet — loading OR paused offline) and `isError` are exposed
@@ -93,6 +96,7 @@ export function useMyCapabilities(): { data: Capabilities; isLoading: boolean; i
         seniorAnalyst: (data as any)?.senior_analyst === true,
         isPhysioHod: Array.isArray(spec) ? spec.includes('physio_hod') : typeof spec === 'string' && spec.includes('physio_hod'),
         isPilatesHead: Array.isArray(spec) ? spec.includes('pilates-head') : typeof spec === 'string' && spec.includes('pilates-head'),
+        isEssentialManager: Array.isArray(spec) ? spec.includes('essential_manager') : typeof spec === 'string' && spec.includes('essential_manager'),
       };
     },
   });
