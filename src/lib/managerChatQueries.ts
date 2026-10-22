@@ -163,7 +163,8 @@ export type ManagerChatMessage = {
   //   schedule_id} — a session the MANAGER added into a member's day.
   // team_flags (manager-only, cron-posted at 7 PM IST): {date, flags:[{trainer_id,
   //   trainer_name, clients:[{client_id, name, sessions_per_week, modality, gap_days}]}]}
-  kind: 'text' | 'tomorrow_plan' | 'plan_remark' | 'plan_time_edit' | 'plan_reschedule_request' | 'plan_reschedule_decision' | 'plan_add' | 'team_flags' | 'session_update';
+  kind: 'text' | 'tomorrow_plan' | 'plan_remark' | 'plan_time_edit' | 'plan_reschedule_request' | 'plan_reschedule_decision' | 'plan_add' | 'team_flags' | 'session_update' | 'auction_unsold';
+  // auction_unsold (Essentials manager, 22 Oct 2026): {date, client_id, name, time, modality, score_id, pushed_by, pushed_by_name, close, source}.
   // tomorrow_plan: {date, entries}. plan_remark: {date, client_id, name, trainer_id, remark}.
   // plan_time_edit: {date, client_id, name, trainer_id, time} — manager reschedules a member's plan entry.
   // plan_time_edit also carries `history`: the cumulative reschedule chain for

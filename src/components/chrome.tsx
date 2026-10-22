@@ -7,7 +7,7 @@ import { C, F, hexA, ORANGE_GRAD } from '../theme';
 import { CX, INDIGO_GRAD } from './consultantUi';
 import { Icon, MenuIcon, IconName } from '../icons';
 import { useStore } from '../store';
-import { trainerNav, crmNav, coachNav, opsNav, adminNav, doctorNav, consultantNav, therapistNav, marketingNav, academyNav, techNav, bottomTabs, tabMap } from '../data';
+import { trainerNav, crmNav, coachNav, opsNav, adminNav, doctorNav, consultantNav, therapistNav, marketingNav, academyNav, techNav, essentialManagerNav, bottomTabs, tabMap } from '../data';
 import { useDoctorIdentity } from '../lib/doctorQueries';
 import { OddsWordmark } from './oddsAi';
 import { useAuth } from '../auth';
@@ -172,7 +172,7 @@ export function Drawer() {
   const insets = useSafeAreaInsets();
   // A consultant doctor gets the web's trimmed sidebar (Consultant Dashboard, All Calls, ...); the profile read runs for doctors only.
   const doctorIdent = useDoctorIdentity(role === 'doctor');
-  const baseGroups = role === 'tech' ? techNav : role === 'crm' ? crmNav : role === 'coach' ? coachNav : role === 'ops' ? opsNav : role === 'admin' ? adminNav : role === 'doctor' ? (doctorIdent.data.isConsultant ? consultantNav : doctorNav) : role === 'therapist' ? therapistNav : role === 'marketing' ? marketingNav : role === 'academy' ? academyNav : trainerNav;
+  const baseGroups = role === 'tech' ? techNav : role === 'essential_manager' ? essentialManagerNav : role === 'crm' ? crmNav : role === 'coach' ? coachNav : role === 'ops' ? opsNav : role === 'admin' ? adminNav : role === 'doctor' ? (doctorIdent.data.isConsultant ? consultantNav : doctorNav) : role === 'therapist' ? therapistNav : role === 'marketing' ? marketingNav : role === 'academy' ? academyNav : trainerNav;
   // Web-parity sidebar injection: any app role linked in academy_users as an
   // active teacher/student gets an Odds Academy entry — the link, not the app
   // role, decides (a doctor or trainer can be an academy teacher).

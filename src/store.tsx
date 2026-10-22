@@ -14,9 +14,10 @@ export const homeRouteFor = (role: string | null | undefined): string =>
   : role === 'marketing' ? 'marketing-dashboard'
   : role === 'academy' ? 'academy-dashboard'
   : role === 'tech' ? 'tech-desk-inbox'
+  : role === 'essential_manager' ? 'essentials-manager'
   : 'dashboard';
 
-export type Role = 'trainer' | 'crm' | 'coach' | 'ops' | 'admin' | 'doctor' | 'therapist' | 'marketing' | 'academy' | 'tech';
+export type Role = 'trainer' | 'crm' | 'coach' | 'ops' | 'admin' | 'doctor' | 'therapist' | 'marketing' | 'academy' | 'tech' | 'essential_manager';
 export type SheetKind = 'ack' | 'leave' | 'schedule' | null;
 export type CrmDialog =
   | { kind: 'approve'; id: string }
@@ -80,6 +81,8 @@ type Store = {
   workoutTemplatesOpen: boolean; // sidebar "Workout Templates" → dashboard opens the sheet
   /** Tech Desk: which ticket the detail screens show. */
   selectedTicketId: string | null;
+  /** Essentials Auction (22 Oct 2026): the client card to scroll to and highlight on the auction page (a crew card or push tap). */
+  auctionFocusClientId: string | null;
   /** Odds Nucleus (16 Oct 2026): which piece the reader / player shows. */
   nucleusPieceId: string | null;
 
@@ -153,6 +156,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     threadViewOpen: false,
     workoutTemplatesOpen: false,
     selectedTicketId: null as string | null,
+    auctionFocusClientId: null as string | null,
     nucleusPieceId: null as string | null,
   });
 
@@ -221,7 +225,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       resetSession: () => setS((prev) => ({
         ...prev, history: [], drawerOpen: false, aiOpen: false, sheet: null, crmDialog: null,
         selectedClientId: null, selectedClientName: null, clientInitialTab: null, workoutScheduleId: null,
-        editingOutboxId: null, editingPlan: null, openChatId: null, crmSection: null, threadViewOpen: false, workoutTemplatesOpen: false, selectedTicketId: null, nucleusPieceId: null,
+        editingOutboxId: null, editingPlan: null, openChatId: null, crmSection: null, threadViewOpen: false, workoutTemplatesOpen: false, selectedTicketId: null, auctionFocusClientId: null, nucleusPieceId: null,
       })),
       approve: (id: string) => setS((prev) => ({ ...prev, crmApproved: { ...prev.crmApproved, [id]: 'forwarded' }, crmDialog: null })),
       reject: (id: string) => setS((prev) => ({ ...prev, crmApproved: { ...prev.crmApproved, [id]: 'parked' }, crmDialog: null })),

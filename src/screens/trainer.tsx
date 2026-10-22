@@ -66,6 +66,7 @@ import { QhpRefreshPendingCard } from '../components/qhpRefreshPending';
 import { EssentialsAuctionHomeCard } from '../components/essentialsAuctionCard';
 import { EssentialsPlanAlertCard } from '../components/essentialsPlanAlert';
 import { AuctionResultsCards } from '../components/auctionResultsCards';
+import { EssentialsUnsoldAlert } from '../components/essentialsUnsoldAlert';
 import { NucleusHomeCard } from './nucleus';
 import { DailyQuizModal } from '../components/dailyQuizModal';
 import { MyQuizScoreCard, QuizColumnCell } from '../components/quizCards';
@@ -2040,6 +2041,8 @@ export function Dashboard() {
 
       {/* Essentials Auction — only while the window is open and tomorrow has lots
          (1 Oct 2026); tap opens the auction page. Renders nothing otherwise. */}
+      {/* Essentials Auction unsold sessions pushed into my crew (22 Oct 2026): nothing otherwise. */}
+      <EssentialsUnsoldAlert />
       {/* Essentials Auction won / lost cards (10 Oct 2026): 4 hours after the 4 PM decision */}
       <AuctionResultsCards />
       {/* Essentials client won with no valid plan: make it with Odds AI (16 Oct 2026). Nothing otherwise. */}

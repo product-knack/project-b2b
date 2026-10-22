@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, Pressable, Animated, Easing, ActivityIndicator, AppState, Modal, Image, Dimensions, Alert } from 'react-native';
+import { View, Text, Pressable, Animated, Easing, ActivityIndicator, AppState, Modal, Image, Dimensions, Alert, type ScrollView } from 'react-native';
+import { useStore } from '../store';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { C, F, hexA } from '../theme';
@@ -325,6 +326,11 @@ function LotCard({ lot, index, me, win, now, reduceMotion, photo, eta, onPhoto, 
 export function EssentialsAuction() {
   const { session, dbRole } = useAuth();
   const me = session?.user?.id ?? null;
+  // Focus (22 Oct 2026): a crew card or an unsold push names a client; the page scrolls to that card and outlines
+  // it in gold. Cleared on leave so the next visit opens at the top.
+  const { auctionFocusClientId: focusId, set: setStore } = useStore();
+  const pageRef = React.useRef<ScrollView>(null);
+  React.useEffect(() => () => { setStore({ auctionFocusClientId: null }); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // Physiotherapists see the rehab sessions, trainers the trainings (the database
   // filters the rows by role); only the wording differs here.
   const physio = dbRole === 'doctor';
@@ -416,7 +422,7 @@ export function EssentialsAuction() {
       : `Bidding closed at ${win.closesAt} IST and the sessions are decided. Sessions nobody won go to the care team to fill.`;
 
   return (
-    <Page gap={14} pt={6}>
+    <Page ref={pageRef} gap={14} pt={6}>
       {/* Won / lost cards of the last 4 hours */}
       <AuctionResultsCards />
 
@@ -492,10 +498,13 @@ export function EssentialsAuction() {
       ) : (
         <View style={{ gap: 12 }}>
           {lots.map((lot, i) => (
-            <LotCard key={`${lot.client_id}-${lot.slot_time}`} lot={lot} index={i} me={me} win={win} now={now} reduceMotion={reduceMotion}
+            <View key={`${lot.client_id}-${lot.slot_time}`} onLayout={focusId === lot.client_id ? (e) => { const y = e.nativeEvent.layout.y; setTimeout(() => pageRef.current?.scrollTo({ y: Math.max(0, y + 140), animated: true }), 250); } : undefined}
+              style={focusId === lot.client_id ? { borderRadius: 22, borderWidth: 2, borderColor: C.gold, padding: 2 } : undefined}>
+            <LotCard lot={lot} index={i} me={me} win={win} now={now} reduceMotion={reduceMotion}
               photo={photos[lot.client_id] ?? null} onPhoto={photos[lot.client_id] ? () => setPhotoFor({ url: photos[lot.client_id], name: lot.client_name }) : undefined}
               eta={etaOf(lot)}
               onBid={() => openQuiz(lot)} />
+            </View>
           ))}
         </View>
       )}

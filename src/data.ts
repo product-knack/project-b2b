@@ -547,6 +547,16 @@ export const therapistNav: NavGroup[] = [
   ] },
 ];
 
+/* Essentials manager (22 Oct 2026): profiles.role = essential_manager sees only this page (plus Learn). */
+export const essentialManagerNav: NavGroup[] = [
+  { label: 'Workspace', items: [
+    { label: 'Essentials Manager', icon: 'gavel', route: 'essentials-manager' },
+  ] },
+  { label: 'Learn', items: [
+    { label: 'Odds Nucleus', icon: 'nucleus', route: 'nucleus' },
+  ] },
+];
+
 export const techNav: NavGroup[] = [
   { label: 'Workspace', items: [
     { label: 'Tech Desk', icon: 'activity', route: 'tech-desk-inbox' },

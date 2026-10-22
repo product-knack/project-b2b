@@ -22,6 +22,7 @@ import { Payouts } from './screens/payouts';
 import { Referrals } from './screens/referrals';
 import { Incentives } from './screens/incentives';
 import { EssentialsAuction } from './screens/essentialsAuction';
+import { EssentialsManager } from './screens/essentialsManager';
 import { Nucleus, NucleusPiece } from './screens/nucleus';
 import { QhpNavigation } from './screens/qhpNavigation';
 import { WorkoutAnalyst } from './screens/workoutAnalyst';
@@ -123,6 +124,7 @@ const SCREENS: Record<string, React.ComponentType> = {
   referrals: Referrals,
   incentives: Incentives,
   'essentials-auction': EssentialsAuction,
+  'essentials-manager': EssentialsManager,
   // Odds Nucleus (16 Oct 2026): published education pieces, every role; NOT in SENSITIVE_ROUTES (no client data).
   nucleus: Nucleus,
   'nucleus-piece': NucleusPiece,

@@ -1,4 +1,5 @@
 import React from 'react';
+import { EssentialsUnsoldCrewCard } from '../components/essentialsUnsoldAlert';
 import { View, Text, Pressable, ScrollView, FlatList, Image, TextInput, Keyboard, Platform, Modal, ActivityIndicator, Animated, Easing, Alert, PanResponder } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
@@ -2224,6 +2225,17 @@ export function ManagerChat() {
         <View style={{ flex: 1, height: 1, backgroundColor: 'rgba(255,255,255,0.06)' }} />
       </View>
     ) : null;
+    if (m.kind === 'auction_unsold') {
+      // Essentials Auction unsold session pushed by the Essentials manager (22 Oct 2026): everyone sees the card.
+      return (
+        <>
+          {daySep}
+          <View style={[{ marginTop: 8 }, flashStyle]}>
+            <EssentialsUnsoldCrewCard payload={m.payload} createdAt={m.createdAt} />
+          </View>
+        </>
+      );
+    }
     if (m.kind === 'team_flags') {
       // Manager sees the whole team; a member sees only their own block.
       const flagsAll = m.payload?.flags ?? [];
