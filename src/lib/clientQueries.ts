@@ -8,6 +8,7 @@ import { OTP_GATE_MESSAGE } from './sessionOtp';
 import { parsePlanGate, isPlanGateMissing } from './planGate';
 import type { ConsultAINotes } from './consultantQueries';
 import { parseVoiceNotes, SessionVoiceNote } from './sessionVoiceTypes';
+import { pickLatestDaily, type LatestDaily } from './latestDaily';
 
 /* Same test as consultantQueries.hasAiNotes; local so this module does not pull the
    consultant workspace in at runtime. */
@@ -215,6 +216,7 @@ export function invalidateHealthViews(qc: ReturnType<typeof useQueryClient>, cli
   qc.invalidateQueries({ queryKey: [HEALTH_CHECK_KEY, 'v5', clientId] });
   qc.invalidateQueries({ queryKey: ['weekly-health-summary', clientId] });
   qc.invalidateQueries({ queryKey: ['client-daily-stats', clientId] });
+  qc.invalidateQueries({ queryKey: [LATEST_DAILY_KEY, 'v1', clientId] });
 }
 
 /* The client's scheduled sleep for the month of `ymd` (monthly_sleep_schedules), else 8,
@@ -1260,6 +1262,46 @@ export function useClientWhoopRecovery(clientId: string | null, limit = 7) {
       return ((data ?? []) as any[]).map((r) => ({
         date: String(r.metric_date), recovery: num(r.recovery_score), hrv: num(r.hrv_rmssd), rhr: num(r.resting_heart_rate), strain: num(r.strain_score), sleep: num(r.sleep_score),
       }));
+    },
+  });
+}
+
+/* Latest health data with its date (22 Oct 2026, Android only): the Today's Roster summary strip (when opened) and
+   the Log Health Data popup. One "not null, newest first, limit 1" read per item, so an old entry (a WHOOP score from
+   last month) is still found and shown with its date. Rules in src/lib/latestDaily.ts. Read only; plain-object data
+   (the 'client-' prefix is persisted, so the last result shows offline). */
+export const LATEST_DAILY_KEY = 'client-latest-daily';
+export function useClientLatestDaily(clientId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: [LATEST_DAILY_KEY, 'v1', clientId],
+    enabled: !!clientId && enabled,
+    staleTime: 60_000,
+    queryFn: async (): Promise<LatestDaily> => {
+      const c = clientId as string;
+      const newest = (table: string, cols: string, notNull: string, dateKey: string) =>
+        Promise.resolve(supabase.from(table).select(cols).eq('client_id', c).not(notNull, 'is', null)
+          .order(dateKey, { ascending: false }).limit(1)) as Promise<{ data: any[] | null; error: any }>;
+      const hydration = async (): Promise<{ data: any[] | null; error: any; supported: boolean }> => {
+        if (hydrationColumnMissing) return { data: null, error: null, supported: false };
+        const r = await newest('nutrition_tracker', 'rating_date, hydration_inputs', 'hydration_inputs', 'rating_date');
+        if (r.error && (r.error as any).code === '42703') { hydrationColumnMissing = true; return { data: null, error: null, supported: false }; }
+        return { ...r, supported: true };
+      };
+      const [rec, wSleep, wSteps, lSleep, nRate, nSteps, nHyd] = await withTimeout(Promise.all([
+        newest('daily_health_metrics', 'metric_date, recovery_score', 'recovery_score', 'metric_date'),
+        newest('daily_health_metrics', 'metric_date, sleep_duration_minutes', 'sleep_duration_minutes', 'metric_date'),
+        newest('daily_health_metrics', 'metric_date, steps_count', 'steps_count', 'metric_date'),
+        newest('daily_sleep_logs', 'log_date, hours_slept', 'hours_slept', 'log_date'),
+        newest('nutrition_tracker', 'rating_date, nutrition_rating', 'nutrition_rating', 'rating_date'),
+        newest('nutrition_tracker', 'rating_date, steps_by_trainer', 'steps_by_trainer', 'rating_date'),
+        hydration(),
+      ]), NET_MS, 'Latest health data');
+      const failed = [rec, wSleep, wSteps, lSleep, nRate, nSteps, nHyd].find((r) => r.error);
+      if (failed) throw new Error((failed.error as any).message ?? 'Could not load the latest health data');
+      return pickLatestDaily({
+        recovery: rec.data?.[0], wearSleep: wSleep.data?.[0], wearSteps: wSteps.data?.[0], logSleep: lSleep.data?.[0],
+        nutRating: nRate.data?.[0], nutSteps: nSteps.data?.[0], nutHydration: nHyd.data?.[0], hydrationSupported: nHyd.supported,
+      });
     },
   });
 }

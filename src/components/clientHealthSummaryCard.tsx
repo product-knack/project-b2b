@@ -14,6 +14,7 @@ import { C, F, hexA } from '../theme';
 import { Icon, type IconName } from '../icons';
 import { Serif, Mono, Body } from './primitives';
 import { ReplayMask } from './ReplayShield';
+import { LatestHealthDataBlock } from './LatestHealthData';
 import { useAuth } from '../auth';
 import { useClientHealthSummary, useLogSummaryListen } from '../lib/clientHealthSummaryQueries';
 import { useSummaryVoice, type SummaryVoice, type VoiceSource } from '../lib/summaryVoice';
@@ -293,7 +294,9 @@ export function ClientHealthSummaryCard({ clientId }: { clientId: string | null 
    row "Client summaries" that opens into the same two play rows as the card (Sarvam voice,
    transcript, the listen trail), for the training day the card is about: the recording
    asked for is that day's. */
-export function ClientSummaryStrip({ clientId, date, accent = GOLD }: { clientId: string | null | undefined; date?: string | null; accent?: string }) {
+/* latest (22 Oct 2026, Today's Roster only): under the two Play rows, the client's latest WHOOP recovery, sleep,
+   nutrition, steps and hydration, each with its date (LatestHealthDataBlock). Read only when the strip is open. */
+export function ClientSummaryStrip({ clientId, date, accent = GOLD, latest = false }: { clientId: string | null | undefined; date?: string | null; accent?: string; latest?: boolean }) {
   const { session } = useAuth();
   const uid = session?.user?.id ?? null;
   const [open, setOpen] = React.useState(false);
@@ -337,6 +340,7 @@ export function ClientSummaryStrip({ clientId, date, accent = GOLD }: { clientId
             ))}
             {voice.notice ? <Body style={{ fontSize: 11, color: GOLD }}>{voice.notice}</Body> : null}
             {err ? <Body style={{ fontSize: 11, color: C.red }}>{err}</Body> : null}
+            {latest ? <LatestHealthDataBlock clientId={clientId} enabled={open} /> : null}
           </View>
         ) : null}
       </View>

@@ -26,6 +26,8 @@ import { useClientCycleStatus, ClientCycle } from '../lib/cycleQueries';
 import { CycleChip, CyclePopup, CyclePopupInfo, cycleColor } from '../components/cycleLabel';
 import { EssentialsBadge } from '../components/essentialsBadge';
 import { ClientHealthSummaryCard, ListenGateSheet, ClientSummaryStrip } from '../components/clientHealthSummaryCard';
+import { LatestRecoveryLine } from '../components/LatestHealthData';
+import { dayMonth, dayBefore } from '../lib/latestDaily';
 import { useClientHealthSummary } from '../lib/clientHealthSummaryQueries';
 import { listenGate, gateDue, listenSheetUp } from '../lib/clientHealthSummary';
 import { VoiceNotesComposer, SessionVoicePlaylistPlayer, SessionVoiceSheet, SessionVoiceSheetInfo, LatestVoiceInline, toggleTakeFlag } from '../components/SessionVoice';
@@ -1262,7 +1264,9 @@ function RosterCard({ row, trainerName, highlight, onAddWorkout, plans, devPos, 
           Every play is written to the listen trail, so hearing it here also clears the gate. */}
       {row.client_id && !isCancelled ? (() => {
         const day = istDate(new Date(row.scheduled_datetime));
-        return <ClientSummaryStrip clientId={row.client_id} date={day === istDate() ? null : day} accent={C.gold} />;
+        // latest (22 Oct 2026): opened, the strip also lists the latest WHOOP recovery, sleep, nutrition, steps
+        // and hydration with their dates (Today's Roster only; the Essentials auction cards stay as they are).
+        return <ClientSummaryStrip clientId={row.client_id} date={day === istDate() ? null : day} accent={C.gold} latest />;
       })() : null}
 
       {/* Distance strip — captured home + device fix → instant estimate; tap for live route */}
@@ -8173,13 +8177,20 @@ export function Workout() {
                 <Body style={{ fontSize: 11.5, color: C.muted2, marginTop: 3, lineHeight: 16 }}>
                   {medicineOnly
                     ? `${clientName}'s health data is already logged today. Tick the medicines they are taking now; it is saved with this workout.`
-                    : `${clientName} hasn't logged last night's sleep or yesterday's nutrition. Enter it on their behalf.`}
+                    : `${clientName} hasn't logged last night's sleep or yesterday's nutrition. Enter it on their behalf. It is saved on today, ${dayMonth(localToday())}.`}
                 </Body>
               </View>
               <Pressable onPress={closeHealthSheet} style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center', justifyContent: 'center' }}>
                 <Icon name="close" size={14} color="#B8B2AC" strokeWidth={2.3} />
               </Pressable>
             </View>
+
+            {/* The client's latest WHOOP recovery with its date (22 Oct 2026, read only; latestDaily.ts). */}
+            {selectedClientId ? (
+              <ReplayMask style={{ marginBottom: 12 }}>
+                <LatestRecoveryLine clientId={selectedClientId} enabled={healthOpen} />
+              </ReplayMask>
+            ) : null}
 
             {cycle ? (
               <ReplayMask style={{ marginBottom: 12 }}>
@@ -8204,7 +8215,10 @@ export function Workout() {
                   <View style={{ width: 30, height: 30, borderRadius: 10, backgroundColor: hexA(C.gold, 0.13), alignItems: 'center', justifyContent: 'center' }}>
                     <Icon name="sparkle" size={15} color={C.gold} strokeWidth={2} />
                   </View>
-                  <Body style={{ flex: 1, fontSize: 14.5, fontFamily: F.bodySemi, color: '#fff' }}>Sleep</Body>
+                  <View style={{ flex: 1 }}>
+                    <Body style={{ fontSize: 14.5, fontFamily: F.bodySemi, color: '#fff' }}>Sleep</Body>
+                    <Mono style={{ fontSize: 9, color: C.muted3, marginTop: 2 }}>{`LAST NIGHT · ${dayMonth(dayBefore(localToday())).toUpperCase()}`}</Mono>
+                  </View>
                   <View style={{ paddingVertical: 4, paddingHorizontal: 10, borderRadius: 999, backgroundColor: hexA(C.gold, 0.12), borderWidth: 1, borderColor: hexA(C.gold, 0.25) }}>
                     <Mono style={{ fontSize: 10, color: C.gold }}>GOAL {health?.scheduledHours ?? 8}H</Mono>
                   </View>
@@ -8234,7 +8248,7 @@ export function Workout() {
                   <Body style={{ flex: 1, fontSize: 14.5, fontFamily: F.bodySemi, color: '#fff' }}>Nutrition</Body>
                   {hRating != null ? <Serif style={{ fontSize: 18, color: C.green }}>{hRating}<Text style={{ fontSize: 12, color: C.muted2 }}>/10</Text></Serif> : null}
                 </View>
-                <Body style={{ fontSize: 11, color: C.muted2 }}>Rate yesterday from 1 (Poor) to 10 (Excellent)</Body>
+                <Body style={{ fontSize: 11, color: C.muted2 }}>{`Rate yesterday, ${dayMonth(dayBefore(localToday()))}, from 1 (Poor) to 10 (Excellent)`}</Body>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
                   {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => {
                     const active = hRating === n;
@@ -8254,7 +8268,7 @@ export function Workout() {
                     <Icon name="activity" size={15} color={C.blue} strokeWidth={2} />
                   </View>
                   <Body style={{ flex: 1, fontSize: 14.5, fontFamily: F.bodySemi, color: '#fff' }}>Steps</Body>
-                  <Mono style={{ fontSize: 10, color: C.muted3 }}>YESTERDAY</Mono>
+                  <Mono style={{ fontSize: 10, color: C.muted3 }}>{`YESTERDAY · ${dayMonth(dayBefore(localToday())).toUpperCase()}`}</Mono>
                 </View>
                 <View style={{ flexDirection: 'row', alignItems: 'center', borderRadius: 13, borderWidth: 1, borderColor: hSteps ? hexA(C.blue, 0.4) : 'rgba(255,255,255,0.12)', backgroundColor: 'rgba(0,0,0,0.25)', paddingHorizontal: 14 }}>
                   <TextInput value={hSteps} onChangeText={(t) => setHSteps(t.replace(/[^0-9]/g, ''))} onFocus={() => setTimeout(() => healthScrollRef.current?.scrollToEnd({ animated: true }), 120)} keyboardType="number-pad" placeholder="0" placeholderTextColor={C.muted3} style={{ flex: 1, paddingVertical: 13, color: '#fff', fontFamily: F.mono, fontSize: 22 }} />
@@ -8280,7 +8294,7 @@ export function Workout() {
                       <Icon name="activity" path="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11Z" size={15} color={HYDRATION} strokeWidth={2} />
                     </View>
                     <Body style={{ flex: 1, fontSize: 14.5, fontFamily: F.bodySemi, color: '#fff' }}>Hydration</Body>
-                    <Mono style={{ fontSize: 10, color: C.muted3 }}>YESTERDAY</Mono>
+                    <Mono style={{ fontSize: 10, color: C.muted3 }}>{`YESTERDAY · ${dayMonth(dayBefore(localToday())).toUpperCase()}`}</Mono>
                   </View>
                   <View style={{ flexDirection: 'row', alignItems: 'center', borderRadius: 13, borderWidth: 1, borderColor: hHydration ? hexA(HYDRATION, 0.4) : 'rgba(255,255,255,0.12)', backgroundColor: 'rgba(0,0,0,0.25)', paddingHorizontal: 14 }}>
                     <TextInput value={hHydration} onChangeText={(t) => setHHydration(t.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1').slice(0, 4))} onFocus={() => setTimeout(() => healthScrollRef.current?.scrollToEnd({ animated: true }), 120)} keyboardType="decimal-pad" placeholder="e.g. 2.5" placeholderTextColor={C.muted3} style={{ flex: 1, paddingVertical: 12, fontFamily: F.bodySemi, fontSize: 16, color: '#fff' }} />
