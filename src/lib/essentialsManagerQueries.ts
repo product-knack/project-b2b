@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from './supabase';
 import { withTimeout, NET_MS } from './withTimeout';
-import { parseUnsoldLot, parseWindow, type Crew, type UnsoldLot, type UnsoldWindow } from './essentialsUnsold';
+import { parseUnsoldLot, parseWindow, parseFreeStaff, type Crew, type FreeStaff, type UnsoldLot, type UnsoldWindow } from './essentialsUnsold';
 import { useMyManagerTeam, type ManagerChatMessage } from './managerChatQueries';
 
 export function useUnsoldWindow() {
@@ -61,6 +61,35 @@ export function usePushUnsoldToCrew() {
       return { memberCount: Number(d.member_count ?? 0) || 0, teamName: String(d.team_name ?? 'the crew') };
     },
     onSettled: () => { qc.invalidateQueries({ queryKey: ['essentials-unsold'] }); qc.invalidateQueries({ queryKey: ['manager-chat'] }); },
+  });
+}
+
+/* ---------- after the close: assign someone free (22 Oct 2026) ---------- */
+export function useEssentialsFreeStaff(clientId: string | null, slotTime: string | null) {
+  return useQuery({
+    queryKey: ['essentials-free-staff', clientId, slotTime],
+    enabled: !!clientId && !!slotTime,
+    staleTime: 15_000,
+    queryFn: async (): Promise<FreeStaff[]> => {
+      const { data, error } = await withTimeout(Promise.resolve(supabase.rpc('get_essentials_free_staff', { p_client_id: clientId, p_slot_time: slotTime })), NET_MS, 'Free staff');
+      if (error) throw new Error(error.message);
+      return ((data ?? []) as any[]).map(parseFreeStaff);
+    },
+  });
+}
+
+export function useAssignUnsold() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { clientId: string; slotTime: string; trainerId: string }): Promise<{ trainerName: string; clientName: string }> => {
+      const { data, error } = await withTimeout(Promise.resolve(supabase.rpc('assign_essentials_unsold', {
+        p_client_id: input.clientId, p_slot_time: input.slotTime, p_trainer_id: input.trainerId,
+      })), NET_MS, 'Assign session');
+      if (error) throw new Error(error.message);
+      const d = (data ?? {}) as any;
+      return { trainerName: String(d.trainer_name ?? 'the trainer'), clientName: String(d.client_name ?? 'the client') };
+    },
+    onSettled: () => { ['essentials-unsold', 'essentials-free-staff', 'essentials-auction', 'manager-chat', 'trainer-roster'].forEach((k) => qc.invalidateQueries({ queryKey: [k] })); },
   });
 }
 

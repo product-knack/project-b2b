@@ -17,6 +17,8 @@ export type UnsoldLot = {
   preferred_trainer_name: string | null;
   bids_count: number;
   pushes: UnsoldPush[];
+  /** null while the auction runs; 'no_bids' after the close (assignable) */
+  round_result?: string | null;
 };
 export type Crew = { score_id: string; team_name: string; manager_id: string; manager_name: string | null; member_count: number; team_start: string; team_end: string | null };
 export type UnsoldWindow = { alert_from: string; close: string }; // "16:30", "17:30" IST
@@ -62,7 +64,7 @@ export const countdownText = (nowMs: number, w: UnsoldWindow = DEFAULT_UNSOLD_WI
 
 export const phaseText = (phase: UnsoldPhase, w: UnsoldWindow = DEFAULT_UNSOLD_WINDOW): string => {
   if (phase === 'before') return `Unsold sessions appear here from ${hm12(w.alert_from)}, one hour before the auction closes at ${hm12(w.close)}.`;
-  if (phase === 'closed') return `The auction closed at ${hm12(w.close)}. Sessions left without a bid are decided as no bids.`;
+  if (phase === 'closed') return `The auction closed at ${hm12(w.close)}. Sessions with no bid can be assigned to anyone free one hour either side.`;
   return `Sessions with no bid yet. Push one to a crew and every member gets an alert.`;
 };
 
@@ -93,6 +95,47 @@ export const unsoldAlertLive = (payloadDate: string | null | undefined, nowMs: n
   return false;
 };
 
+/* ---------- after the close: assign someone free (22 Oct 2026, owner's second step) ----------
+   A session still unsold after the close (round_result 'no_bids') can be given by the Essentials manager to any
+   active trainer, coach or physio who has nothing within one hour either side of it that day (roster rows,
+   consultations and QHP assessments count as busy; migration 20261022220000). Someone who trained the client the
+   day before is marked, not blocked (owner decision). */
+export type FreeStaff = {
+  id: string;
+  name: string;
+  role: string;             // trainer | coach | doctor
+  is_physio: boolean;
+  sessions_that_day: number;
+  nearest_session: string | null; // timestamptz of their nearest roster row that day
+  trained_yesterday: boolean;
+};
+
+export const parseFreeStaff = (r: any): FreeStaff => ({
+  id: String(r?.id ?? ''), name: String(r?.name ?? 'Staff'), role: String(r?.role ?? ''), is_physio: r?.is_physio === true,
+  sessions_that_day: Number(r?.sessions_that_day ?? 0) || 0, nearest_session: r?.nearest_session ?? null, trained_yesterday: r?.trained_yesterday === true,
+});
+
+/** The card can be assigned after the close and before the session starts. */
+export const assignOpen = (lot: Pick<UnsoldLot, 'scheduled_for'>, nowMs: number, w: UnsoldWindow = DEFAULT_UNSOLD_WINDOW): boolean =>
+  unsoldPhase(nowMs, w) === 'closed' && Date.parse(lot.scheduled_for) > nowMs;
+
+export const roleLabel = (s: Pick<FreeStaff, 'role' | 'is_physio'>): string =>
+  s.is_physio ? 'Physio' : s.role === 'coach' ? 'Coach' : s.role === 'doctor' ? 'Doctor' : 'Trainer';
+
+/** "3 sessions that day · next 9:00 AM", "Free all day". */
+export const staffDayLine = (s: Pick<FreeStaff, 'sessions_that_day' | 'nearest_session'>): string => {
+  if (!s.sessions_that_day) return 'Free all day';
+  const next = s.nearest_session ? hm12(istParts(Date.parse(s.nearest_session)).hm) : null;
+  return `${s.sessions_that_day} session${s.sessions_that_day === 1 ? '' : 's'} that day${next ? ` · nearest ${next}` : ''}`;
+};
+
+export const assignPhaseText = (w: UnsoldWindow = DEFAULT_UNSOLD_WINDOW): string =>
+  `The auction closed at ${hm12(w.close)}. Sessions with no bid can be assigned to anyone free one hour either side.`;
+
+/** The push the assignee gets, mirrored from the server for the confirm step. */
+export const assignPreview = (lot: Pick<UnsoldLot, 'client_name' | 'slot_time' | 'modality'>, staffName: string, byName: string | null): string =>
+  `${staffName}: ${lot.client_name}, ${hm12(lot.slot_time)} ${lot.modality} tomorrow, has been assigned to you${byName ? ` by ${byName}` : ' by the Essentials manager'}. It is on your Today's Roster.`;
+
 /** Tolerant parsers for the RPC rows. */
 export const parseUnsoldLot = (r: any): UnsoldLot => ({
   auction_date: String(r?.auction_date ?? ''),
@@ -104,6 +147,7 @@ export const parseUnsoldLot = (r: any): UnsoldLot => ({
   preferred_trainer_id: r?.preferred_trainer_id ?? null,
   preferred_trainer_name: r?.preferred_trainer_name ?? null,
   bids_count: Number(r?.bids_count ?? 0) || 0,
+  round_result: r?.round_result ?? null,
   pushes: Array.isArray(r?.pushes) ? r.pushes.map((p: any) => ({ score_id: String(p?.score_id ?? ''), team_name: p?.team_name ?? null, pushed_at: String(p?.pushed_at ?? ''), member_count: Number(p?.member_count ?? 0) || 0 })) : [],
 });
 
