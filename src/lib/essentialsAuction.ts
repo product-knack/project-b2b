@@ -31,6 +31,8 @@ export type AuctionLot = {
   modality: string;
   slot_time: string; // "07:00" IST
   scheduled_for: string; // timestamptz
+  /** home or virtual (23 Oct 2026, from essentials_weeks.days[].mode); older rows have no value */
+  mode?: string | null;
   status: LotStatus;
   trainer_id: string | null;
   trainer_name: string | null;

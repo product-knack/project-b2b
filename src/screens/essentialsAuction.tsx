@@ -21,7 +21,7 @@ import { ClientSummaryStrip } from '../components/clientHealthSummaryCard';
 
 /* ============ Essentials Auction (trainer sidebar page, 1 Oct 2026) ============
    Every Essentials by Odds client saves their own week in the client app
-   (clients.weekly_protocol.slots). The day before each training the auction
+   (public.essentials_weeks since 23 Oct 2026; weekly_protocol.slots before). The day before each training the auction
    offers it to trainers. Since 10 Oct 2026 (hub-track migration 20261010120000)
    a trainer bids by answering the client's five questions, one attempt each; at
    the close (5:00 PM IST since 15 Oct 2026, from the database config) the highest score wins, equal scores the earlier bid,
@@ -268,7 +268,7 @@ function LotCard({ lot, index, me, win, now, reduceMotion, photo, eta, onPhoto, 
         <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 10 }}>
           <Serif style={{ fontSize: 34, lineHeight: 38, color: grabbed && !mine ? C.muted : '#fff' }}>{formatTime12(lot.slot_time)}</Serif>
           <View style={{ paddingVertical: 4, paddingHorizontal: 10, borderRadius: 999, backgroundColor: hexA(col, 0.14), borderWidth: 1, borderColor: hexA(col, 0.4), marginBottom: 6 }}>
-            <Text style={{ fontFamily: F.bodySemi, fontSize: 11.5, color: col }}>{lot.modality || 'Training'}</Text>
+            <Text style={{ fontFamily: F.bodySemi, fontSize: 11.5, color: col }}>{lot.modality || 'Training'}{lot.mode ? ` · ${lot.mode === 'virtual' ? 'virtual' : 'at home'}` : ''}</Text>
           </View>
         </View>
 
