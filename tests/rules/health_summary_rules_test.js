@@ -36,6 +36,12 @@ eq('weekly heard after build but yesterday -> due', R.gateStateFor(row({ listen_
 eq('context heard before rebuild -> due', R.gateStateFor(row({ listen_history: [{ at: '2026-10-04T10:00:00Z', by: ME, which: 'context' }] }), 'context', ME, NOW), 'due');
 eq('someone else heard -> still due for me', R.gateStateFor(row({ listen_history: [{ at: '2026-10-09T02:00:00Z', by: OTHER, which: 'weekly' }] }), 'weekly', ME, NOW), 'due');
 // nothing to hear
+// 24 Oct 2026: the server carries a context listen from an earlier day (carried: true) and the
+// nightly build keeps the context's generated_at until a real update.
+const carried = { at: '2026-10-06T02:00:00Z', by: ME, which: 'context', carried: true, briefing_date: '2026-10-06' };
+eq('carried context listen after the build -> done', R.gateStateFor(row({ listen_history: [carried] }), 'context', ME, NOW), 'done');
+eq('carried listen never satisfies the weekly', R.gateStateFor(row({ listen_history: [carried] }), 'weekly', ME, NOW), 'due');
+eq('context rebuilt after the carried listen -> due', R.gateStateFor(row({ listen_history: [carried], context_generated_at: '2026-10-08T10:00:00Z' }), 'context', ME, NOW), 'due');
 eq('no weekly script -> none', R.gateStateFor(row({ weekly_summary: null, weekly_generated_at: null }), 'weekly', ME, NOW), 'none');
 eq('empty script -> none', R.gateStateFor(row({ context_summary: { script: '  ' } }), 'context', ME, NOW), 'none');
 eq('no row -> none/none', R.listenGate(null, ME, NOW), { weekly: 'none', context: 'none' });

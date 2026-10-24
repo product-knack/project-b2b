@@ -134,7 +134,10 @@ export const isNewSince = (row: ClientHealthSummaryRow | null | undefined, which
      today AND after its latest build (it is rebuilt every night).
    - Health context ("weekly wala jab bhi new report se update ho"): heard after
      its latest build, whenever a new report rebuilt it.
-   A summary that does not exist cannot be required ('none'). */
+   A summary that does not exist cannot be required ('none').
+   24 Oct 2026: the server keeps the context's generated_at until a real update and
+   get_client_health_summary carries each person's newest earlier-day context listen
+   (carried: true), so the context is heard once per update, not once per day. */
 export type GateState = 'none' | 'done' | 'due';
 
 export const gateStateFor = (row: ClientHealthSummaryRow | null | undefined, which: Which, uid: string | null | undefined, nowMs: number = Date.now()): GateState => {
