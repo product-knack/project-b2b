@@ -7,6 +7,7 @@ import { Serif, Body, Mono } from '../components/primitives';
 import { Page, Badge, MiniAvatar, AnimChip, HScroll, TimeDial } from './common';
 import { useServiceBookings, useUpdateServiceBooking, ServiceBooking } from '../lib/serviceQueries';
 import { SheetShell } from './reportDetail';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ CRM: Service Requests — mirrors the web CRMServiceRequests:
    approve / reject / reschedule client service bookings. ============ */
@@ -47,7 +48,7 @@ export function CrmService() {
     const verb = status === 'confirmed' ? 'Approve' : 'Reject';
     Alert.alert(`${verb} this request?`, `${b.clientName} — ${b.serviceName}\n${fmtDate(b.preferredDate)} · ${fmtTime(b.preferredTime)}`, [
       { text: 'Cancel', style: 'cancel' },
-      { text: verb, style: status === 'cancelled' ? 'destructive' : 'default', onPress: () => updateM.mutate({ id: b.id, status }, { onError: (e: any) => Alert.alert("Couldn't update", e?.message) }) },
+      { text: verb, style: status === 'cancelled' ? 'destructive' : 'default', onPress: () => updateM.mutate({ id: b.id, status }, { onError: (e: any) => Alert.alert("Couldn't update", friendlyError(e)) }) },
     ]);
   };
 
@@ -134,7 +135,7 @@ export function CrmService() {
                   </View>
                 ) : b.status === 'confirmed' ? (
                   <View style={{ flexDirection: 'row', gap: 7 }}>
-                    <Pressable disabled={updateM.isPending} onPress={() => updateM.mutate({ id: b.id, status: 'completed' }, { onError: (e: any) => Alert.alert("Couldn't update", e?.message) })} style={{ flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 10, backgroundColor: hexA(C.blue, 0.1), borderWidth: 1, borderColor: hexA(C.blue, 0.35) }}>
+                    <Pressable disabled={updateM.isPending} onPress={() => updateM.mutate({ id: b.id, status: 'completed' }, { onError: (e: any) => Alert.alert("Couldn't update", friendlyError(e)) })} style={{ flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 10, backgroundColor: hexA(C.blue, 0.1), borderWidth: 1, borderColor: hexA(C.blue, 0.35) }}>
                       <Text style={{ fontFamily: F.bodyBold, fontSize: 11, color: C.blue }}>Mark Completed</Text>
                     </Pressable>
                     <Pressable onPress={() => setReschedule(b)} style={{ flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 10, backgroundColor: hexA(C.gold, 0.1), borderWidth: 1, borderColor: hexA(C.gold, 0.35) }}>
@@ -177,7 +178,7 @@ function RescheduleSheet({ booking, onClose }: { booking: ServiceBooking | null;
     try {
       await updateM.mutateAsync({ id: booking.id, status: 'confirmed', newDate: day.iso, newTime: `${time}:00` });
       onClose();
-    } catch (e: any) { Alert.alert("Couldn't reschedule", e?.message ?? 'Try again.'); }
+    } catch (e: any) { Alert.alert("Couldn't reschedule", friendlyError(e, 'Try again.')); }
   };
 
   return (

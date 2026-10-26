@@ -16,6 +16,7 @@ import { EssentialsCancelledAlert } from '../components/essentialsCancelledAlert
 import { NucleusHomeCard } from './nucleus';
 import { useStore } from '../store';
 import { TRAINER_MODALITIES, DOCTOR_MODALITIES, useMyManagerTeam } from '../lib/managerChatQueries';
+import { friendlyError } from '../lib/friendlyError';
 
 /** A doctor's roster modalities: physio first, then every trainer workout modality. */
 const DOCTOR_ROSTER_MODALITIES = [...DOCTOR_MODALITIES, ...TRAINER_MODALITIES.filter((m) => !DOCTOR_MODALITIES.includes(m))];
@@ -1253,7 +1254,7 @@ export function DoctorProtocolApprovals() {
                 </View>
               ) : null}
               <View style={{ flexDirection: 'row', gap: 9 }}>
-                <Pressable disabled={approveM.isPending} onPress={() => { setErr(null); if (uid) approveM.mutate({ id: p.id, approved_by: uid }, { onError: (e: any) => setErr(e?.message ?? 'Failed') }); }} style={{ flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: 12, backgroundColor: hexA(C.green, 0.14), borderWidth: 1, borderColor: hexA(C.green, 0.45), opacity: approveM.isPending ? 0.6 : 1 }}>
+                <Pressable disabled={approveM.isPending} onPress={() => { setErr(null); if (uid) approveM.mutate({ id: p.id, approved_by: uid }, { onError: (e: any) => setErr(friendlyError(e, 'Something went wrong. Please try again.')) }); }} style={{ flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: 12, backgroundColor: hexA(C.green, 0.14), borderWidth: 1, borderColor: hexA(C.green, 0.45), opacity: approveM.isPending ? 0.6 : 1 }}>
                   <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: C.green }}>{approveM.isPending ? 'Approving…' : 'Approve'}</Text>
                 </Pressable>
                 <Pressable disabled={rejectM.isPending} onPress={() => { setRejectFor(p); setRejectNotes(''); }} style={{ flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: 12, backgroundColor: hexA(C.red, 0.1), borderWidth: 1, borderColor: hexA(C.red, 0.35) }}>
@@ -1277,7 +1278,7 @@ export function DoctorProtocolApprovals() {
                 </Pressable>
                 <Pressable disabled={!rejectNotes.trim() || rejectM.isPending} onPress={() => {
                   setErr(null);
-                  rejectM.mutate({ id: rejectFor.id, rejection_notes: rejectNotes }, { onSuccess: () => setRejectFor(null), onError: (e: any) => { setRejectFor(null); setErr(e?.message ?? 'Failed'); } });
+                  rejectM.mutate({ id: rejectFor.id, rejection_notes: rejectNotes }, { onSuccess: () => setRejectFor(null), onError: (e: any) => { setRejectFor(null); setErr(friendlyError(e, 'Something went wrong. Please try again.')); } });
                 }} style={{ flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: 12, backgroundColor: hexA(C.red, rejectNotes.trim() ? 0.16 : 0.06), borderWidth: 1, borderColor: hexA(C.red, rejectNotes.trim() ? 0.45 : 0.2) }}>
                   <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: rejectNotes.trim() ? C.red : C.muted3 }}>{rejectM.isPending ? 'Rejecting…' : 'Reject'}</Text>
                 </Pressable>
@@ -1307,7 +1308,7 @@ export function DoctorRoster() {
       `Permanently delete ${s.client_name}'s ${formatDoctorSessionType(s.modality)} session on ${fmtAt(s.scheduled_datetime)}? This cannot be undone. Use Cancel instead if you want a cancellation record kept.`,
       [
         { text: 'Keep', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: () => { setErr(null); deleteM.mutate(s.id, { onError: (e: any) => setErr(e?.message ?? 'Delete failed') }); } },
+        { text: 'Delete', style: 'destructive', onPress: () => { setErr(null); deleteM.mutate(s.id, { onError: (e: any) => setErr(friendlyError(e, 'Could not delete this. Please try again.')) }); } },
       ]
     );
   const [tab, setTab] = React.useState<'calendar' | 'reschedule' | 'list'>('calendar');
@@ -1553,7 +1554,7 @@ export function DoctorRoster() {
                 <Pressable disabled={reschedM.isPending || !/^\d{4}-\d{2}-\d{2}$/.test(reschedDate) || !/^\d{2}:\d{2}$/.test(reschedTime)} onPress={() => {
                   setErr(null);
                   const dt = new Date(`${reschedDate}T${reschedTime}:00`);
-                  reschedM.mutate({ session_id: reschedFor.id, new_datetime: dt.toISOString() }, { onSuccess: () => setReschedFor(null), onError: (e: any) => { setReschedFor(null); setErr(e?.message ?? 'Failed'); } });
+                  reschedM.mutate({ session_id: reschedFor.id, new_datetime: dt.toISOString() }, { onSuccess: () => setReschedFor(null), onError: (e: any) => { setReschedFor(null); setErr(friendlyError(e, 'Something went wrong. Please try again.')); } });
                 }} style={{ flex: 1, alignItems: 'center', paddingVertical: 12, borderRadius: 12, backgroundColor: hexA(C.blue, 0.14), borderWidth: 1, borderColor: hexA(C.blue, 0.4) }}>
                   <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: '#A9BCFF' }}>{reschedM.isPending ? 'Saving…' : 'Reschedule'}</Text>
                 </Pressable>
@@ -1844,7 +1845,7 @@ function BulkCreateSheet({ visible, onClose, doctors, presetClient }: { visible:
         : '';
       Alert.alert('Roster created', `${result.created} session${result.created === 1 ? '' : 's'} scheduled.${conflictNote}`);
     } catch (e: any) {
-      Alert.alert('Failed to create sessions', e?.message ?? 'Unknown error');
+      Alert.alert('Failed to create sessions', friendlyError(e, 'Something went wrong. Please try again.'));
     }
   };
 
@@ -2027,7 +2028,7 @@ function DeleteFutureSheet({ visible, onClose, doctors, presetClient }: { visibl
           onClose();
           Alert.alert('Future sessions deleted', `All upcoming non-cancelled roster sessions for ${presetClient.name}${doctorSel ? ' with the selected doctor' : ''} were removed.`);
         } catch (e: any) {
-          Alert.alert('Failed to delete sessions', e?.message ?? 'Unknown error');
+          Alert.alert('Failed to delete sessions', friendlyError(e, 'Something went wrong. Please try again.'));
         }
       }} style={{ opacity: canDelete ? 1 : 0.45, alignItems: 'center', paddingVertical: 13, borderRadius: 13, backgroundColor: hexA(C.red, 0.16), borderWidth: 1, borderColor: hexA(C.red, 0.5) }}>
         <Text style={{ fontFamily: F.bodyBold, fontSize: 13.5, color: C.red }}>{delM.isPending ? 'Deleting…' : 'Delete Future Sessions'}</Text>

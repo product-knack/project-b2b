@@ -6,6 +6,7 @@ import { Icon } from '../icons';
 import { Serif, Body, Mono, Card, Avatar } from '../components/primitives';
 import { Page, TitleBlock, Badge } from './common';
 import {
+import { friendlyError } from '../lib/friendlyError';
   useUsersByRole, useCreateUser, useUpdateUser, useUpdateSpecialization, useDeleteUser,
   useAssignments, useAssignmentOptions, useAssignTrainerToCoach, useRemoveAssignment,
   USER_ROLES, DOCTOR_SPECIALIZATIONS, userName, type ManagedRole, type ManagedUser,
@@ -117,7 +118,7 @@ function EditUserSheet({ user, onClose }: { user: ManagedUser; onClose: () => vo
           <Pressable disabled={update.isPending} onPress={() => {
             setErr(null);
             update.mutate({ userId: user.id, email: emailChanged ? email : undefined, password: password.trim() || undefined },
-              { onSuccess: onClose, onError: (e: any) => setErr(e?.message ?? 'Failed') });
+              { onSuccess: onClose, onError: (e: any) => setErr(friendlyError(e, 'Something went wrong. Please try again.')) });
           }} style={{ alignItems: 'center', paddingVertical: 12, borderRadius: 12, backgroundColor: hexA(C.orange, update.isPending ? 0.06 : 0.16), borderWidth: 1, borderColor: hexA(C.orange, update.isPending ? 0.2 : 0.5) }}>
             <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: update.isPending ? C.muted3 : C.orange }}>{update.isPending ? 'Saving…' : 'Save changes'}</Text>
           </Pressable>
@@ -153,7 +154,7 @@ export function AdminUsers() {
   const [selCoach, setSelCoach] = React.useState<string | null>(null);
   const [selTrainer, setSelTrainer] = React.useState<string | null>(null);
 
-  const fail = (e: any) => setErr(e?.message ?? 'Failed');
+  const fail = (e: any) => setErr(friendlyError(e, 'Something went wrong. Please try again.'));
 
   return (
     <Page gap={13}>

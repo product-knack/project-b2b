@@ -15,6 +15,7 @@ import { useAuth } from '../auth';
 import { istDayLabel, istTimeParts } from '../lib/trainerQueries';
 import { supabase } from '../lib/supabase';
 import {
+import { friendlyError } from '../lib/friendlyError';
   useMyManagerTeam, useManagerTeamMessages, useManagerChatRealtime, useSendManagerTeamMessage,
   useManagerChatUnread, markManagerChatRead, useTomorrowCompose, tomorrowPlanBody, fmt12h,
   usePlanOutcome, usePlanScheduleRows, useMemberClients, usePhysioHod, useHodTeams, useHodFeedMessages, useClientProtocols, useClientsEssentials, ClientProtocol, protoModalityLabel, protoEntryCount, istToday, serverNow, ManagerChatMessage, ManagerTeamInfo, TomorrowPlanEntry, PlanRescheduleHop,
@@ -1667,7 +1668,7 @@ export function ManagerChat() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       qc.invalidateQueries({ queryKey: ['manager-chat', team?.scoreId] });
     } catch (e: any) {
-      Alert.alert('Could not save remark', e?.message ?? 'Try again');
+      Alert.alert('Could not save remark', friendlyError(e, 'Try again'));
     } finally {
       setFlagSaving(null);
     }
@@ -1868,7 +1869,7 @@ export function ManagerChat() {
       await sendM.mutateAsync({ scoreId: team.scoreId, body: m.body, payload: m.payload?.reply_to ? { reply_to: m.payload.reply_to } : undefined });
     } catch (e: any) {
       setFailedSends((xs) => [...xs, m]);
-      Alert.alert('Still not sent', e?.message ?? 'Check your connection and try again.');
+      Alert.alert('Still not sent', friendlyError(e, 'Check your connection and try again.'));
     }
   };
   const discardFailed = (m: ManagerChatMessage) => setFailedSends((xs) => xs.filter((x) => x.id !== m.id));
@@ -1893,7 +1894,7 @@ export function ManagerChat() {
         });
         setEditTime(null); setEditIsRequest(false); setEditRemark('');
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      } catch (e: any) { Alert.alert('Request not sent', e?.message ?? 'Check your connection and try again.'); }
+      } catch (e: any) { Alert.alert('Request not sent', friendlyError(e, 'Check your connection and try again.')); }
       return;
     }
     // Reason is REQUIRED for direct manager reschedules: it goes into the
@@ -1914,14 +1915,14 @@ export function ManagerChat() {
       if (!editTime.scheduleId) { Alert.alert('Not linked', 'This entry has no roster session to move.'); return; }
       try {
         const { error } = await supabase.rpc('hod_doctor_reschedule', { p_schedule: editTime.scheduleId, p_date: editTime.date, p_time: newTime, p_modality: editMod, p_remark: remark });
-        if (error) { Alert.alert('Reschedule failed', error.message); return; }
+        if (error) { Alert.alert('Reschedule failed', friendlyError(error)); return; }
         qc.invalidateQueries({ queryKey: ['mgr-plan-sched'] });
         qc.invalidateQueries({ queryKey: ['trainer-roster'] });
         qc.invalidateQueries({ queryKey: ['doctor-roster'] });
         qc.invalidateQueries({ queryKey: ['manager-chat'] });
         setEditTime(null); setEditRemark(''); setEditViaHod(false);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      } catch (err: any) { Alert.alert('Reschedule failed', String(err?.message ?? err)); }
+      } catch (err: any) { Alert.alert('Reschedule failed', friendlyError(err)); }
       return;
     }
     // Linked entry → this is a REAL reschedule: the RPC moves the
@@ -1934,11 +1935,11 @@ export function ManagerChat() {
           p_score: team.scoreId, p_schedule: editTime.scheduleId, p_date: editTime.date,
           p_time: newTime, p_modality: editMod, p_remark: remark,
         });
-        if (error) { Alert.alert('Reschedule failed', error.message); return; }
+        if (error) { Alert.alert('Reschedule failed', friendlyError(error)); return; }
         qc.invalidateQueries({ queryKey: ['mgr-plan-sched'] }); // card re-reads the moved roster row
         qc.invalidateQueries({ queryKey: ['trainer-roster'] }); // my dashboard Today's Sessions
         qc.invalidateQueries({ queryKey: ['doctor-roster'] });
-      } catch (err: any) { Alert.alert('Reschedule failed', String(err?.message ?? err)); return; }
+      } catch (err: any) { Alert.alert('Reschedule failed', friendlyError(err)); return; }
     }
     // Cumulative history chain: session_schedule keeps only the LATEST approval,
     // so every edit message carries the whole chain (prior hops + this one).
@@ -1957,7 +1958,7 @@ export function ManagerChat() {
       });
       setEditTime(null); setEditRemark(''); setEditReqId(null);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-    } catch (e: any) { Alert.alert('Reschedule message not sent', e?.message ?? 'The roster was updated, but the chat message failed. Check your connection and try again.'); }
+    } catch (e: any) { Alert.alert('Reschedule message not sent', friendlyError(e, 'The roster was updated, but the chat message failed. Check your connection and try again.')); }
   };
   // Manager adds a session into a member's day: roster row first, then the message.
   // A client clash (another trainer's active session at that exact time) comes back as
@@ -1977,7 +1978,7 @@ export function ManagerChat() {
           p_score: addFor.scoreId, p_trainer: addFor.trainerId, p_client: clientId,
           p_date: addFor.date, p_time: time, p_modality: modality, ...(force ? { p_force: true } : {}),
         });
-        if (error) { Alert.alert('Add failed', error.message); return; }
+        if (error) { Alert.alert('Add failed', friendlyError(error)); return; }
         const res = data as any;
         if (res?.result === 'conflict') {
           if (res.force_blocked === 'logged') {
@@ -1996,7 +1997,7 @@ export function ManagerChat() {
         qc.invalidateQueries({ queryKey: ['trainer-roster'] });
         qc.invalidateQueries({ queryKey: ['doctor-roster'] });
         if (replaced) qc.invalidateQueries({ queryKey: ['crm-month-roster'] }); // the cancelled booking may sit on a CRM roster view
-      } catch (err: any) { Alert.alert('Add failed', String(err?.message ?? err)); return; }
+      } catch (err: any) { Alert.alert('Add failed', friendlyError(err)); return; }
       try {
         const first = addFor.trainerName.split(' ')[0];
         await sendM.mutateAsync({
@@ -2017,13 +2018,13 @@ export function ManagerChat() {
     if (sendM.isPending) return;
     try {
       const { error } = await supabase.rpc('hod_act_on_request', { p_request: m.id, p_approve: approve });
-      if (error) { Alert.alert(approve ? 'Approve failed' : 'Reject failed', error.message); return; }
+      if (error) { Alert.alert(approve ? 'Approve failed' : 'Reject failed', friendlyError(error)); return; }
       qc.invalidateQueries({ queryKey: ['manager-chat'] });
       qc.invalidateQueries({ queryKey: ['mgr-plan-sched'] });
       qc.invalidateQueries({ queryKey: ['trainer-roster'] });
       qc.invalidateQueries({ queryKey: ['doctor-roster'] });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-    } catch (err: any) { Alert.alert('Failed', String(err?.message ?? err)); }
+    } catch (err: any) { Alert.alert('Failed', friendlyError(err)); }
   };
   const saveHodRemark = async () => {
     if (!hodRemFor || sendM.isPending) return;
@@ -2031,11 +2032,11 @@ export function ManagerChat() {
     if (!txt || !hodRemCat) { Alert.alert('Incomplete', 'Pick a category and write the remark.'); return; }
     try {
       const { error } = await supabase.rpc('hod_doctor_missed_remark', { p_schedule: hodRemFor.scheduleId, p_category: hodRemCat, p_remark: txt });
-      if (error) { Alert.alert('Remark failed', error.message); return; }
+      if (error) { Alert.alert('Remark failed', friendlyError(error)); return; }
       qc.invalidateQueries({ queryKey: ['mgr-plan-sched'] });
       setHodRemFor(null); setHodRemText(''); setHodRemCat(null);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-    } catch (err: any) { Alert.alert('Remark failed', String(err?.message ?? err)); }
+    } catch (err: any) { Alert.alert('Remark failed', friendlyError(err)); }
   };
   // Manager acting on a member's reschedule request. ONE-TAP when the request
   // carries schedule_id + to_time; otherwise fall back to the dialog PREFILLED
@@ -2059,11 +2060,11 @@ export function ManagerChat() {
         p_score: team.scoreId, p_schedule: p.schedule_id, p_date: p.date,
         p_time: p.to_time, p_modality: modality, p_remark: reason,
       });
-      if (error) { Alert.alert('Approve failed', error.message); return; }
+      if (error) { Alert.alert('Approve failed', friendlyError(error)); return; }
       qc.invalidateQueries({ queryKey: ['mgr-plan-sched'] });
       qc.invalidateQueries({ queryKey: ['trainer-roster'] });
       qc.invalidateQueries({ queryKey: ['doctor-roster'] });
-    } catch (err: any) { Alert.alert('Approve failed', String(err?.message ?? err)); return; }
+    } catch (err: any) { Alert.alert('Approve failed', friendlyError(err)); return; }
     const prevEdit = timeEditsByDate.get(p.date)?.get(`${p.trainer_id}:${p.client_id}`);
     const history: PlanRescheduleHop[] = [
       ...(prevEdit?.history ?? []),
@@ -2128,7 +2129,7 @@ export function ManagerChat() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       Alert.alert('Booked', `${r.name.split(' ')[0]} is on the roster at ${fmt12h(r.time)}.`);
     } catch (e: any) {
-      Alert.alert("Couldn't book", e?.message ?? 'Check your connection and try again.');
+      Alert.alert("Couldn't book", friendlyError(e, 'Check your connection and try again.'));
     } finally {
       setRetryingKey(null);
     }
@@ -2164,7 +2165,7 @@ export function ManagerChat() {
     }
     // Roster failures are never silent: name what didn't reach session_schedule.
     if (syncError) {
-      Alert.alert('Roster sync failed', `${syncError}\n\nThe plan still posts to the chat, but NO roster sessions were saved.`);
+      Alert.alert('Roster not saved', `${friendlyError(syncError)}\n\nThe plan still goes to the chat, but no roster sessions were saved.`);
     } else {
       // Only NEW conflicts get the popup — entries already known to conflict
       // from the previous share just keep their red tag on the card, so adding

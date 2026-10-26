@@ -12,6 +12,7 @@ import { useMyCapabilities } from '../lib/capabilities';
 import { generateNarratives, buildQhpHtml, saveQhpDetails, renderAndUploadPdf, getAssessmentSource, deepGet, CancelToken, isCancelled } from '../lib/qhpPdf';
 import { withTimeout, NET_MS } from '../lib/withTimeout';
 import { qhpFullLabel } from '../lib/coachClientQueries';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ Assessment Details (web /trainer/assessments/:id) ============
    Overview + captured assessment data + AI biomechanical + notes, and the
@@ -198,7 +199,7 @@ function GeneratePdfModal({ assessment, onClose }: { assessment: any; onClose: (
       setPhase('preview');
     } catch (e: any) {
       if (isCancelled(e)) return; // user cancelled — the modal is already closing
-      setErr(e?.message ?? 'Generation failed.');
+      setErr(friendlyError(e, 'Could not generate this. Please try again.'));
       setPhase('error');
     }
   };
@@ -236,7 +237,7 @@ function GeneratePdfModal({ assessment, onClose }: { assessment: any; onClose: (
       setPhase('done');
     } catch (e: any) {
       if (isCancelled(e)) return;
-      setErr(e?.message ?? 'Finalize failed.');
+      setErr(friendlyError(e, 'Could not finalize this. Please try again.'));
       setPhase('error');
     }
   };

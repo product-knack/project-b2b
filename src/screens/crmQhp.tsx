@@ -10,6 +10,7 @@ import { useAuth } from '../auth';
 import { useCrmQhp, useMarkQhpExplained, useScheduleQhp, STAGE_META, CrmQhpRow } from '../lib/crmQhpQueries';
 import { useCrmClientList } from '../lib/crmClientQueries';
 import { SheetShell } from './reportDetail';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ CRM: QHP Tracker — mirrors the web QHPList: refresh cycle
    (38 days), report review journey (Senior → HOD), explained-to-client. ============ */
@@ -46,7 +47,7 @@ export function CrmQhp() {
   const markExplained = (r: CrmQhpRow) => {
     Alert.alert('Mark as explained?', `Confirm you walked ${r.clientName} through their QHP report.`, [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Yes, explained', onPress: () => explainM.mutate(r.assessmentId, { onError: (e: any) => Alert.alert("Couldn't mark", e?.message) }) },
+      { text: 'Yes, explained', onPress: () => explainM.mutate(r.assessmentId, { onError: (e: any) => Alert.alert("Couldn't mark", friendlyError(e)) }) },
     ]);
   };
 
@@ -227,7 +228,7 @@ export function ScheduleQhpSheet({ visible, onClose, crmId, presetClient }: { vi
       await scheduleM.mutateAsync({ clientId: client.id, scheduledBy: crmId, date: day.iso, time, address, notes });
       onClose();
       Alert.alert('QHP scheduled', `${client.name} · ${day.iso} at ${time}`);
-    } catch (e: any) { Alert.alert("Couldn't schedule", e?.message ?? 'Try again.'); }
+    } catch (e: any) { Alert.alert("Couldn't schedule", friendlyError(e, 'Try again.')); }
   };
 
   return (

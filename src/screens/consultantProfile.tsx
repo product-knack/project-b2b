@@ -9,6 +9,7 @@ import { useDoctorIdentity } from '../lib/doctorQueries';
 import { useSidebarProfile, useUploadAvatar } from '../lib/navQueries';
 import { useDoctorConsultationSlots, useConsultantConsultations, ymdLocal, MONTHS_LONG } from '../lib/consultantQueries';
 import { CX, INDIGO_GRAD, ConsultantShell, LCard, initialsOf } from '../components/consultantUi';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ CONSULTANT PROFILE (the drawer's "Dr. Name" strip, 23 Sep 2026) ============
    The shared Profile screen is the trainer page (dark, certifications, session
@@ -74,7 +75,7 @@ export function ConsultantProfile() {
     try {
       await uploadAvatarM.mutateAsync({ uri: a.uri, mime: a.mimeType ?? 'image/jpeg', fileName: a.fileName ?? null });
       Alert.alert('Profile photo updated');
-    } catch (e: any) { Alert.alert('Upload failed', e?.message ?? 'Unknown error'); }
+    } catch (e: any) { Alert.alert('Upload failed', friendlyError(e, 'Something went wrong. Please try again.')); }
   };
 
   const name = doctorName || sideProf.fullName || 'Doctor';

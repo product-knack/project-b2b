@@ -14,6 +14,7 @@ import { DoctorTodayRoster } from './doctor';
 import { useMyManagerTeam } from '../lib/managerChatQueries';
 import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import {
+import { friendlyError } from '../lib/friendlyError';
   useTherapistId, useTherapistClients, useTherapistTodayRoster, useTherapySessions,
   useAddTherapySession, fmtTherapyAt, fmtTherapyTime, TherapistClient, THERAPY_MODALITIES,
 } from '../lib/therapistQueries';
@@ -105,7 +106,7 @@ function AddTherapySessionSheet({ open, clients, presetClient, onClose }: {
               { workoutSessionId: sid, clientId, userId: meId, uri: t.uri, durationMs: t.durationMs, source: 'workout_form', painDiscomfort: t.painDiscomfort === true },
               `${clientName} · voice note`,
             );
-            if (r.status === 'failed') failed = r.error ?? 'The server rejected a voice note.';
+            if (r.status === 'failed') failed = friendlyError(r.error, 'A voice note was not accepted. Try again.');
           }
           setVoiceTakes([]);
           if (failed) Alert.alert('Session saved, voice note not saved', failed);
@@ -115,7 +116,7 @@ function AddTherapySessionSheet({ open, clients, presetClient, onClose }: {
         }
         onClose();
       },
-      onError: (e: any) => Alert.alert('Could not save session', e?.message ?? 'Please try again.'),
+      onError: (e: any) => Alert.alert('Could not save session', friendlyError(e, 'Please try again.')),
     });
   };
   const scrollRef = React.useRef<ScrollView>(null);

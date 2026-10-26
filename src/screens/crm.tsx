@@ -32,6 +32,7 @@ import { CommAgendaBlock } from '../components/commAgenda';
 import { ensureAiCacheFresh } from '../lib/aiCache';
 import { CrmWorkspace, RetentionBreakdownSheet } from './crmTabs';
 import {
+import { friendlyError } from '../lib/friendlyError';
   crmStats, crmBanners, crmRenewals, roadmapDef, stageDefs, onboardCards, journeyCards,
   salesRows, salesCtas, apprTabDefs, apprItems, bloodTabDefs, bloodRows, consumeList,
   serviceRows, rosterList, qhpCrmList, qhpSteps, escTabDefs, escRows, tasksCols, chipDays,
@@ -891,7 +892,7 @@ export function CrmComms() {
                   <CommAgendaBlock agenda={r.agenda} style={{ marginLeft: 17 }} />
                   {r.status !== 'Follow Up Done' ? (
                     <View style={{ flexDirection: 'row', paddingLeft: 17 }}>
-                      <Pressable onPress={() => doneM.mutate({ id: r.commId, clientId: r.clientId }, { onError: (e: any) => Alert.alert("Couldn't mark done", e?.message ?? "Try again.") })} disabled={doneM.isPending} hitSlop={6} style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 5, paddingHorizontal: 11, borderRadius: 999, backgroundColor: hexA(C.green, 0.12), borderWidth: 1, borderColor: hexA(C.green, 0.35) }}>
+                      <Pressable onPress={() => doneM.mutate({ id: r.commId, clientId: r.clientId }, { onError: (e: any) => Alert.alert("Couldn't mark done", friendlyError(e, "Try again.")) })} disabled={doneM.isPending} hitSlop={6} style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 5, paddingHorizontal: 11, borderRadius: 999, backgroundColor: hexA(C.green, 0.12), borderWidth: 1, borderColor: hexA(C.green, 0.35) }}>
                         <Icon name="checks" size={11} color={C.green} strokeWidth={2.6} />
                         <Text style={{ fontFamily: F.bodyBold, fontSize: 10.5, color: C.green }}>Mark Done</Text>
                       </Pressable>
@@ -1065,7 +1066,7 @@ export function CrmApprovals() {
       { text: 'Approve & Move', onPress: async () => {
         setBusyId(req.id);
         try { await approveM.mutateAsync({ req, crmId: crmId! }); Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}); }
-        catch (e: any) { Alert.alert("Couldn't approve", e?.message ?? 'Try again.'); }
+        catch (e: any) { Alert.alert("Couldn't approve", friendlyError(e, 'Try again.')); }
         finally { setBusyId(null); }
       } },
     ]);
@@ -1074,7 +1075,7 @@ export function CrmApprovals() {
     if (!rejectReason.trim()) return;
     setBusyId(req.id);
     try { await rejectM.mutateAsync({ id: req.id, crmId: crmId!, reason: rejectReason }); setRejectingId(null); setRejectReason(''); }
-    catch (e: any) { Alert.alert("Couldn't reject", e?.message ?? 'Try again.'); }
+    catch (e: any) { Alert.alert("Couldn't reject", friendlyError(e, 'Try again.')); }
     finally { setBusyId(null); }
   };
   const doReviewRoster = (req: RosterReq, action: 'approve' | 'reject') => {
@@ -1083,7 +1084,7 @@ export function CrmApprovals() {
       setBusyId(req.id);
       reviewM.mutateAsync({ req, crmId: crmId!, action: 'reject', note: rejectReason })
         .then(() => { setRejectingId(null); setRejectReason(''); })
-        .catch((e: any) => Alert.alert("Couldn't reject", e?.message ?? 'Try again.'))
+        .catch((e: any) => Alert.alert("Couldn't reject", friendlyError(e, 'Try again.')))
         .finally(() => setBusyId(null));
       return;
     }
@@ -1099,7 +1100,7 @@ export function CrmApprovals() {
       { text: 'Approve', onPress: async () => {
         setBusyId(req.id);
         try { await reviewM.mutateAsync({ req, crmId: crmId!, action: 'approve' }); Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}); }
-        catch (e: any) { Alert.alert("Couldn't approve", e?.message ?? 'Try again.'); }
+        catch (e: any) { Alert.alert("Couldn't approve", friendlyError(e, 'Try again.')); }
         finally { setBusyId(null); }
       } },
     ]);

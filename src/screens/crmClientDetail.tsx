@@ -16,6 +16,7 @@ import { ScheduleQhpSheet } from './crmQhp';
 import { SessionActionSheet } from './crmRoster';
 import { RosterSession } from '../lib/rosterQueries';
 import {
+import { friendlyError } from '../lib/friendlyError';
   useCrmClientDetail, usePackageCycle, useCrmClientSessions, useTrainingFrequency, useClientWorkoutLog,
   useClientComms, useLogCommunication, useMarkCommDone, useSetClientStatus, useToggleIrregularClient, readIrregularMark,
   COMM_CATEGORIES, COMM_STATUSES, COMM_MEDIUMS, FREQ_PERIODS, FreqPeriod, SessionCategory,
@@ -215,7 +216,7 @@ export function CrmClientDetail() {
     Alert.alert(marking ? 'Mark as irregular client?' : 'Remove irregular mark?',
       marking ? `${name} will be flagged as an irregular client. The time and your name are recorded.` : `${name} will no longer be flagged as irregular.`, [
       { text: 'Cancel', style: 'cancel' },
-      { text: marking ? 'Mark irregular' : 'Remove mark', style: marking ? 'destructive' : 'default', onPress: () => irregularM.mutate({ clientId: client.id }, { onError: (e: any) => Alert.alert("Couldn't update", e?.message ?? 'Try again.') }) },
+      { text: marking ? 'Mark irregular' : 'Remove mark', style: marking ? 'destructive' : 'default', onPress: () => irregularM.mutate({ clientId: client.id }, { onError: (e: any) => Alert.alert("Couldn't update", friendlyError(e, 'Try again.')) }) },
     ]);
   };
 
@@ -224,12 +225,12 @@ export function CrmClientDetail() {
     if (isActive) { setInactivating(true); return; }
     Alert.alert('Reactivate client?', `${name} will be marked active again.`, [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Mark Active', onPress: () => statusM.mutate({ clientId: client.id, crmId, toStatus: 'active', crmName: profileQ.data?.firstName }, { onError: (e: any) => Alert.alert("Couldn't update status", e?.message ?? "Try again.") }) },
+      { text: 'Mark Active', onPress: () => statusM.mutate({ clientId: client.id, crmId, toStatus: 'active', crmName: profileQ.data?.firstName }, { onError: (e: any) => Alert.alert("Couldn't update status", friendlyError(e, "Try again.")) }) },
     ]);
   };
   const confirmInactive = () => {
     if (!client || !crmId || !inactiveReason.trim()) return;
-    statusM.mutate({ clientId: client.id, crmId, toStatus: 'inactive', reason: inactiveReason.trim(), crmName: profileQ.data?.firstName }, { onError: (e: any) => Alert.alert("Couldn't update status", e?.message ?? "Try again.") });
+    statusM.mutate({ clientId: client.id, crmId, toStatus: 'inactive', reason: inactiveReason.trim(), crmName: profileQ.data?.firstName }, { onError: (e: any) => Alert.alert("Couldn't update status", friendlyError(e, "Try again.")) });
     setInactivating(false);
     setInactiveReason('');
   };
@@ -413,7 +414,7 @@ export function CrmClientDetail() {
                           <Pressable
                             key={s.key}
                             disabled={journeyToggleM.isPending || !crmId}
-                            onPress={() => journeyToggleM.mutate({ crmId: crmId!, clientId: client.id, stepKey: s.key, value: !done }, { onError: (e: any) => Alert.alert("Couldn't update step", e?.message ?? "Try again.") })}
+                            onPress={() => journeyToggleM.mutate({ crmId: crmId!, clientId: client.id, stepKey: s.key, value: !done }, { onError: (e: any) => Alert.alert("Couldn't update step", friendlyError(e, "Try again.")) })}
                             style={{ flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 8, paddingHorizontal: 10, borderRadius: 10, backgroundColor: done ? hexA(C.green, 0.05) : hexA(C.gold, 0.05), borderWidth: 1, borderColor: done ? hexA(C.green, 0.16) : hexA(C.gold, 0.22), opacity: journeyToggleM.isPending && !busy ? 0.6 : 1 }}
                           >
                             <View style={{ width: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: done ? hexA(C.green, 0.18) : 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: done ? hexA(C.green, 0.5) : hexA(C.gold, 0.4) }}>
@@ -883,7 +884,7 @@ function CommsTab({ clientId, crmId, formOpen, setFormOpen }: { clientId: string
       });
       memoRef.current = null; // now owned by the row: the unmount sweep must not delete it
       resetForm();
-    } catch (e: any) { Alert.alert("Couldn't log", e?.message ?? 'Try again.'); }
+    } catch (e: any) { Alert.alert("Couldn't log", friendlyError(e, 'Try again.')); }
   };
 
   return (
@@ -987,7 +988,7 @@ function CommsTab({ clientId, crmId, formOpen, setFormOpen }: { clientId: string
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 {cm.followUp ? <Body style={{ flex: 1, fontSize: 10.5, color: C.muted3 }}>Follow-up {istD(cm.followUp)}{cm.medium ? ` · ${cm.medium}` : ''}</Body> : <View style={{ flex: 1 }} />}
                 {cm.status !== 'Follow Up Done' ? (
-                  <Pressable disabled={doneM.isPending} onPress={() => doneM.mutate({ id: cm.id, clientId }, { onError: (e: any) => Alert.alert("Couldn't mark done", e?.message ?? "Try again.") })} style={{ opacity: doneM.isPending ? 0.5 : 1, paddingVertical: 5, paddingHorizontal: 10, borderRadius: 999, backgroundColor: hexA(C.green, 0.12), borderWidth: 1, borderColor: hexA(C.green, 0.35) }}>
+                  <Pressable disabled={doneM.isPending} onPress={() => doneM.mutate({ id: cm.id, clientId }, { onError: (e: any) => Alert.alert("Couldn't mark done", friendlyError(e, "Try again.")) })} style={{ opacity: doneM.isPending ? 0.5 : 1, paddingVertical: 5, paddingHorizontal: 10, borderRadius: 999, backgroundColor: hexA(C.green, 0.12), borderWidth: 1, borderColor: hexA(C.green, 0.35) }}>
                     <Text style={{ fontFamily: F.bodyBold, fontSize: 10.5, color: C.green }}>Mark Done</Text>
                   </Pressable>
                 ) : null}
@@ -1452,14 +1453,14 @@ function NotesTab({ clientId, crmId }: { clientId: string; crmId: string | null 
   const addNote = async () => {
     if (!crmId || !note.trim()) return;
     try { await addRemarkM.mutateAsync({ clientId, authorId: crmId, content: note }); setNote(''); }
-    catch (e: any) { Alert.alert("Couldn't save note", e?.message ?? 'Try again.'); }
+    catch (e: any) { Alert.alert("Couldn't save note", friendlyError(e, 'Try again.')); }
   };
   const addStatement = async () => {
     if (!crmId || !stmt.trim()) return;
     try {
       await addStmtM.mutateAsync({ clientId, crmId, statement: stmt, context: stmtCtx || null, approved: stmtApproved });
       setStmt(''); setStmtCtx(''); setStmtApproved(false); setStmtOpen(false);
-    } catch (e: any) { Alert.alert("Couldn't save statement", e?.message ?? 'Try again.'); }
+    } catch (e: any) { Alert.alert("Couldn't save statement", friendlyError(e, 'Try again.')); }
   };
 
   return (
@@ -1583,7 +1584,7 @@ function TaskSheet({ visible, onClose, crmId, taggedId, clientName }: { visible:
       setTitle(''); setDesc(''); setPriority('medium'); setDueDays(null);
       onClose();
       Alert.alert('Task created', `Task added for ${clientName}.`);
-    } catch (e: any) { Alert.alert("Couldn't create task", e?.message ?? 'Try again.'); }
+    } catch (e: any) { Alert.alert("Couldn't create task", friendlyError(e, 'Try again.')); }
   };
   return (
     <SheetShell visible={visible} onClose={onClose} accent={C.blue} icon="checks" title="New Task" subtitle={`TAGGED · ${clientName.toUpperCase()}`}>
@@ -1631,7 +1632,7 @@ function ConsultSheet({ visible, onClose, clientId, crmId, clientName }: { visib
       setProblem(''); setRemark('');
       onClose();
       Alert.alert('Request sent', 'The doctor team will schedule this consultation.');
-    } catch (e: any) { Alert.alert("Couldn't book", e?.message ?? 'Try again.'); }
+    } catch (e: any) { Alert.alert("Couldn't book", friendlyError(e, 'Try again.')); }
   };
   return (
     <SheetShell visible={visible} onClose={onClose} accent={C.red} icon="heart" title="Book Doctor Consultation" subtitle={clientName.toUpperCase()}>
@@ -1675,7 +1676,7 @@ function BioSheet({ visible, onClose, clientId }: { visible: boolean; onClose: (
         },
       });
       onClose();
-    } catch (e: any) { Alert.alert("Couldn't save bio", e?.message ?? 'Try again.'); }
+    } catch (e: any) { Alert.alert("Couldn't save bio", friendlyError(e, 'Try again.')); }
   };
   const GROUPS: { title: string; icon: string; color: string; keys: string[] }[] = [
     { title: 'Personality', icon: 'user', color: C.blue, keys: ['behaviour_type', 'decision_making_style', 'communication_preference'] },
@@ -1814,7 +1815,7 @@ function AssignSheet({ visible, onClose, clientId }: { visible: boolean; onClose
     const existing = rows.get(staffId);
     toggleM.mutate(
       { clientId, trainerId: staffId, existingRowId: existing?.id ?? null, makeActive: !(existing?.actively_training ?? false) },
-      { onError: (e: any) => Alert.alert("Couldn't update", e?.message ?? 'Try again.') },
+      { onError: (e: any) => Alert.alert("Couldn't update", friendlyError(e, 'Try again.')) },
     );
   };
   return (
@@ -1922,7 +1923,7 @@ function PauseSheet({ visible, onClose, clientId, crmId, activePause }: { visibl
     try {
       await pauseM.mutateAsync({ clientId, crmId, pauseStart: startDate, pauseEnd: endDate.trim() || null, reason });
       setReason(''); onClose();
-    } catch (e: any) { Alert.alert("Couldn't pause", e?.message ?? 'Try again.'); }
+    } catch (e: any) { Alert.alert("Couldn't pause", friendlyError(e, 'Try again.')); }
   };
   const resume = () => {
     if (!crmId || !activePause) return;
@@ -1933,7 +1934,7 @@ function PauseSheet({ visible, onClose, clientId, crmId, activePause }: { visibl
           try {
             await resumeM.mutateAsync({ pauseId: activePause.id, clientId, crmId, pausedSince: activePause.pause_start });
             onClose();
-          } catch (e: any) { Alert.alert("Couldn't resume", e?.message ?? 'Try again.'); }
+          } catch (e: any) { Alert.alert("Couldn't resume", friendlyError(e, 'Try again.')); }
         },
       },
     ]);
@@ -1998,7 +1999,7 @@ function DiscontinueSheet({ visible, onClose, clientId, crmId, clientName }: { v
           try {
             await reqM.mutateAsync({ clientId, requestedBy: crmId, category, details });
             setDetails('');
-          } catch (e: any) { Alert.alert("Couldn't send", e?.message ?? 'Try again.'); }
+          } catch (e: any) { Alert.alert("Couldn't send", friendlyError(e, 'Try again.')); }
         },
       },
     ]);

@@ -6,6 +6,7 @@ import { Serif, Body, Mono, Card, Avatar } from '../components/primitives';
 import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import { Page, TitleBlock, Badge } from './common';
 import {
+import { friendlyError } from '../lib/friendlyError';
   useClientBasicInfo, useClientSessionMetrics, useGenerationMemberMap,
   useUpdateRenewalDate, useRenewPackage, useRenewalOpportunities,
   type ClientBasicInfo, type RenewalOpportunity,
@@ -87,7 +88,7 @@ function RenewalDateSheet({ target, onClose }: { target: RenewTarget; onClose: (
         <Body style={{ fontSize: 10.5, color: C.muted3 }}>Updates the latest renewal record; if the client has none, a renewal entry is created with the current package.</Body>
         {err ? <Body style={{ fontSize: 11, color: C.red }}>{err}</Body> : null}
         <PrimaryBtn label={update.isPending ? 'Saving…' : 'Save renewal date'} disabled={update.isPending || !/^\d{4}-\d{2}-\d{2}$/.test(date)}
-          onPress={() => { setErr(null); update.mutate({ clientId: target.id, dateYmd: date, packageSessions: target.packageSessions, packageType: target.packageType }, { onSuccess: onClose, onError: (e: any) => setErr(e?.message ?? 'Failed') }); }} />
+          onPress={() => { setErr(null); update.mutate({ clientId: target.id, dateYmd: date, packageSessions: target.packageSessions, packageType: target.packageType }, { onSuccess: onClose, onError: (e: any) => setErr(friendlyError(e, 'Something went wrong. Please try again.')) }); }} />
       </View>
     </SheetShell>
   );
@@ -136,7 +137,7 @@ function RenewSheet({ target, onClose }: { target: RenewTarget; onClose: () => v
               onPress={() => {
                 setErr(null);
                 renew.mutate({ clientId: target.id, packageSessions: Number(sessions), cycleSessions: Number(cycleSessions), packageDuration: Number(duration), packageAmount: amount.trim() ? parseFloat(amount) : null, cycleType, notes },
-                  { onSuccess: onClose, onError: (e: any) => setErr(e?.message ?? 'Failed') });
+                  { onSuccess: onClose, onError: (e: any) => setErr(friendlyError(e, 'Something went wrong. Please try again.')) });
               }} />
           </>
         )}

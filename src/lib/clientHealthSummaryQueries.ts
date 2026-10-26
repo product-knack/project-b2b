@@ -10,6 +10,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from './supabase';
 import { withTimeout, NET_MS } from './withTimeout';
 import type { ClientHealthSummaryRow, ListenEntry, Which } from './clientHealthSummary';
+import { friendlyError } from './friendlyError';
 
 export const HEALTH_SUMMARY_KEY = 'client-health-summary';
 
@@ -54,7 +55,7 @@ export function useClientHealthSummary(clientId: string | null | undefined, enab
 }
 
 const friendlyListenError = (e: { code?: string; message: string }): string =>
-  e.code === 'PGRST202' ? 'The listen trail is not set up on the server yet.' : e.message;
+  e.code === 'PGRST202' ? 'Listening is not set up on the server yet. Tell the tech team.' : e.message;
 
 /** log_summary_listen(p_client_id, p_which): appends {at, by, by_name, role, which, version, briefing_date}
     to the row in effect today. */

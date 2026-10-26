@@ -35,6 +35,7 @@ export type { SessionVoiceNote } from './sessionVoiceTypes';
 export { parseVoiceNotes, hasPainNote } from './sessionVoiceTypes';
 import { parseVoiceNotes } from './sessionVoiceTypes';
 import type { SessionVoiceNote } from './sessionVoiceTypes';
+import { friendlyError } from './friendlyError';
 
 /** A take waiting to be saved: a durable local copy plus its length and the pain / discomfort
     answer (14 Oct 2026). JSON-safe (drafts, outbox); an old draft without the flag reads false. */
@@ -110,7 +111,7 @@ export async function submitSessionVoiceNote(p: SessionVoiceOutboxPayload): Prom
   } catch (e: any) {
     // The row did not take it: remove the object again (own upload, allowed).
     try { await supabase.storage.from(SESSION_VOICE_BUCKET).remove([path]); } catch { /* best effort */ }
-    if (/Session not found yet/i.test(String(e?.message ?? ''))) throw new Error('Session not found yet (timeout, retrying)');
+    if (/Session not found yet/i.test(String(e?.message ?? ''))) { const retry = new Error('The session is still being saved. This note will be sent again shortly.'); retry.name = 'TimeoutError'; throw retry; }
     throw e;
   }
   discardTake(p.uri);

@@ -32,7 +32,7 @@ function Gate({ children }: { children: React.ReactNode }) {
         setBusy(true); setErr(null);
         try {
           const { data, error } = await invokeWithTimeout('verify-revenue-tracker-password', { body: { password: pw } });
-          if (error) setErr(isTimeoutError(error) ? 'Verification timed out — check your connection and try again.' : 'Incorrect password.');
+          if (error) setErr(isTimeoutError(error) ? 'Verification took too long. Check your connection and try again.' : 'Incorrect password.');
           else if (!(data as any)?.ok) setErr('Incorrect password.');
           else { unlocked = true; setOk(true); }
         } catch { setErr('Could not verify — try again.'); }

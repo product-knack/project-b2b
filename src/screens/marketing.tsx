@@ -13,6 +13,7 @@ import { Serif, Body, Mono, Card, Avatar } from '../components/primitives';
 import { Page, TitleBlock, Badge, GreetingHeader, HScroll } from './common';
 import { useSidebarProfile } from '../lib/navQueries';
 import {
+import { friendlyError } from '../lib/friendlyError';
   useInfluencers, useInfluencer, useInfluencerCampaignLogs, useCampaignLogMutations,
   useInfluencerOpenTickets, currentIstMonth, InfluencerClient, MonthBucket, MARKETING_ADMIN_ID, Ticket,
   useMarketingBloodReports, markerStatusOf, useLeadsAnalytics,
@@ -792,7 +793,7 @@ function TicketsTab({ clientId }: { clientId: string }) {
                 <Pressable onPress={() => { setReplyFor({ month, parentId: root.id }); setReplyDraft(''); }} style={{ flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }}>
                   <Text style={{ fontFamily: F.bodySemi, fontSize: 11, color: C.muted }}>Reply</Text>
                 </Pressable>
-                <Pressable disabled={muts.closeTicket.isPending} onPress={() => muts.closeTicket.mutate({ month, ticketId: root.id, closedBy: session?.user?.id ?? 'marketing' }, { onError: (e: any) => Alert.alert("Couldn't close ticket", e?.message ?? "Try again.") })} style={{ opacity: muts.closeTicket.isPending ? 0.5 : 1, flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 10, backgroundColor: hexA(C.green, 0.1), borderWidth: 1, borderColor: hexA(C.green, 0.35) }}>
+                <Pressable disabled={muts.closeTicket.isPending} onPress={() => muts.closeTicket.mutate({ month, ticketId: root.id, closedBy: session?.user?.id ?? 'marketing' }, { onError: (e: any) => Alert.alert("Couldn't close ticket", friendlyError(e, "Try again.")) })} style={{ opacity: muts.closeTicket.isPending ? 0.5 : 1, flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 10, backgroundColor: hexA(C.green, 0.1), borderWidth: 1, borderColor: hexA(C.green, 0.35) }}>
                   <Text style={{ fontFamily: F.bodyBold, fontSize: 11, color: C.green }}>Close Ticket</Text>
                 </Pressable>
               </View>

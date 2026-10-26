@@ -12,6 +12,7 @@ import { useVoiceRecorder, VoiceTapButton, VoicePlayer, RecordedVoice } from './
 import { clockOf } from '../lib/techDesk';
 import { claimAudioFocus, releaseAudioFocus, type AudioHolder } from '../lib/audioFocus';
 import {
+import { friendlyError } from '../lib/friendlyError';
   SessionVoiceNote, PendingVoiceTake, SESSION_VOICE_MAX_MS, SESSION_VOICE_MAX_NOTES, ClientLatestVoice,
   persistTake, discardTake, queueSessionVoiceNote, useSignedSessionVoiceUrls, useInvalidateSessionVoice,
 } from '../lib/sessionVoiceQueries';
@@ -79,7 +80,7 @@ export function VoiceNotesComposer({ takes, onAdd, onRemove, onToggleFlag, saved
       onAdd(await persistTake(f.uri, f.durationMs, painRef.current === true));
       setPain(null); // a fresh answer for the next note
     }
-    catch (e: any) { Alert.alert("Couldn't keep the recording", e?.message ?? 'Try again.'); }
+    catch (e: any) { Alert.alert("Couldn't keep the recording", friendlyError(e, 'Try again.')); }
     finally { setBusy(false); }
   }, { maxMs: SESSION_VOICE_MAX_MS });
   const answered = pain != null;
@@ -169,7 +170,7 @@ function PlaylistInner({ urls, notes }: { urls: string[]; notes: SessionVoiceNot
       if (!started) { await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }); setStarted(true); }
       if (playlist.playing) { playlist.pause(); releaseAudioFocus(holder); } else { claimAudioFocus(holder); playlist.play(); }
     } catch (e: any) {
-      Alert.alert('Playback failed', e?.message ?? 'Could not play these voice notes.');
+      Alert.alert('Playback failed', friendlyError(e, 'Could not play these voice notes.'));
     }
   };
   const pct = totalMs > 0 ? Math.min(1, posMs / totalMs) : 0;
@@ -252,7 +253,7 @@ export function SessionVoiceSheet({ info, userId, onClose }: { info: SessionVoic
           { workoutSessionId: info.workoutSessionId, clientId: info.clientId, userId, uri: t.uri, durationMs: t.durationMs, source: 'roster', painDiscomfort: t.painDiscomfort === true },
           `${info.clientName} · voice note`,
         );
-        if (res.status === 'failed') { setErr(res.error ?? 'The server rejected this note.'); setSaving(false); return; }
+        if (res.status === 'failed') { setErr(friendlyError(res.error, 'This note was not accepted. Try again.')); setSaving(false); return; }
         if (res.status === 'queued') queued++; else synced++;
       }
       setTakes([]);

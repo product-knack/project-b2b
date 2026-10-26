@@ -11,6 +11,7 @@ import { useAuth } from '../auth';
 import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import { useMyReferralClients, ReferralClientOption } from '../lib/referralQueries';
 import {
+import { friendlyError } from '../lib/friendlyError';
   UGC_TYPES, UgcContentType, MyIncentiveEvent, EVENT_TYPE_LABEL,
   useMyIncentiveEvents, useSubmitUgc, ugcTypeOf, fmtInr, incentiveTodayYmd,
 } from '../lib/incentiveUgcQueries';
@@ -105,7 +106,7 @@ function UgcSheet({ visible, onClose, userId }: { visible: boolean; onClose: () 
         onClose();
         Alert.alert('Submitted for approval', 'Admin reviews the post. Once approved it counts towards your incentive payout.');
       },
-      onError: (e: any) => { sentRef.current = false; Alert.alert("Couldn't submit", e?.message ?? 'Check your connection and try again.'); },
+      onError: (e: any) => { sentRef.current = false; Alert.alert("Couldn't submit", friendlyError(e, 'Check your connection and try again.')); },
     });
   };
 

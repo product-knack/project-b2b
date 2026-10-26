@@ -13,6 +13,7 @@ import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import { istDate } from '../lib/trainerQueries';
 import { useQhpRefreshPending, buildQhpRefreshMessage, fmtProposedSlot, QhpRefreshRow, QHP_REFRESH_DAYS } from '../lib/qhpRefreshQueries';
 import { useOpenClientThread, useSendClientThreadMessage, pendingThreadClientRef } from '../lib/clientThreadQueries';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ QHP Refresh Pending (trainer dashboard section) ============
    Clients whose last QHP was 40+ days ago. Tap a client → propose a date and
@@ -185,7 +186,7 @@ function QhpRefreshRequestSheet({ row, onClose, onSent }: { row: QhpRefreshRow |
         { text: 'Done', style: 'cancel' },
       ]);
     } catch (e: any) {
-      Alert.alert("Couldn't send", e?.message ?? 'Try again.');
+      Alert.alert("Couldn't send", friendlyError(e, 'Try again.'));
     } finally { setBusy(false); }
   };
 

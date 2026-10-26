@@ -7,6 +7,7 @@ import { Icon } from '../icons';
 import { Mono } from './primitives';
 import { clockOf } from '../lib/techDesk';
 import { claimAudioFocus, releaseAudioFocus, type AudioHolder } from '../lib/audioFocus';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ Voice notes (record + play) ============
    One expo-audio implementation shared by the Tech Desk (ticket memos) and the
@@ -53,7 +54,7 @@ export function useVoiceRecorder(onRecorded: (f: RecordedVoice) => void, opts?: 
       onRecordedRef.current({ uri, name: `voice-${Date.now()}.m4a`, mime: 'audio/m4a', size: 0, durationMs: elapsed });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     } catch (e: any) {
-      if (keep) Alert.alert('Recording failed', e?.message ?? 'Unknown error');
+      if (keep) Alert.alert('Recording failed', friendlyError(e, 'Something went wrong. Please try again.'));
     }
   }, [recorder]);
   const finishRef = React.useRef(finish); finishRef.current = finish;
@@ -77,7 +78,7 @@ export function useVoiceRecorder(onRecorded: (f: RecordedVoice) => void, opts?: 
       }, 250);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     } catch (e: any) {
-      Alert.alert('Could not start recording', e?.message ?? 'Unknown error');
+      Alert.alert('Could not start recording', friendlyError(e, 'Something went wrong. Please try again.'));
     }
   }, [recorder, maxMs]);
 
@@ -271,7 +272,7 @@ export function VoicePlayer({ url, accent = C.orange, label = 'VOICE', knownMs }
       const p = playerRef.current;
       if (p.playing) { p.pause(); releaseAudioFocus(holder); } else { claimAudioFocus(holder); p.play(); }
     } catch (e: any) {
-      Alert.alert('Playback failed', e?.message ?? 'Could not play this voice memo.');
+      Alert.alert('Playback failed', friendlyError(e, 'Could not play this voice memo.'));
     }
   };
   const pct = durMs > 0 ? Math.min(1, posMs / durMs) : 0;

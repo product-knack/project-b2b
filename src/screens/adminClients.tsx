@@ -7,6 +7,7 @@ import { Page, TitleBlock, Badge, HScroll } from './common';
 import { useAuth } from '../auth';
 import { useStore } from '../store';
 import {
+import { friendlyError } from '../lib/friendlyError';
   useAdminClients, useClientTabCounts, useDeleteClient, useToggleOddsConversion, useUpdateClientSubscription, useReactivateClient,
   SUBSCRIPTION_OPTIONS, CLIENTS_PER_PAGE, type UnifiedClient, type ClientFilter, type StatusTab,
 } from '../lib/adminClientQueries';
@@ -28,7 +29,7 @@ function ClientSheet({ c, profileId, onClose }: { c: UnifiedClient; profileId: s
   const [confirmDelete, setConfirmDelete] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
   const busy = del.isPending || toggle.isPending || updateSub.isPending || reactivate.isPending;
-  const fail = (e: any) => setErr(e?.message ?? 'Failed');
+  const fail = (e: any) => setErr(friendlyError(e, 'Something went wrong. Please try again.'));
   const row = (label: string, color: string, onPress: () => void, danger = false) => (
     <Pressable disabled={busy} onPress={onPress} style={{ paddingVertical: 11, paddingHorizontal: 13, borderRadius: 11, backgroundColor: hexA(color, danger ? 0.1 : 0.12), borderWidth: 1, borderColor: hexA(color, 0.4) }}>
       <Text style={{ fontFamily: F.bodyBold, fontSize: 12, color }}>{label}</Text>

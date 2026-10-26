@@ -10,6 +10,7 @@ import { useAuth } from '../auth';
 import { useBirthdaysToday, useSetClientDob, BirthdayClient } from '../lib/crmQueries';
 import { SheetShell } from './reportDetail';
 import { Alert } from 'react-native';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ CRM: Birthdays — everyone's upcoming birthdays in one place.
    Today (celebrate now) → This Week → Later This Month. ============ */
@@ -181,7 +182,7 @@ function AddDobSheet({ target, onClose }: { target: { id: string; name: string }
       await saveM.mutateAsync({ clientId: target.id, dob });
       onClose();
       Alert.alert('Birthday saved 🎂', `${target.name} — ${preview}. They'll now appear in birthday reminders.`);
-    } catch (e: any) { Alert.alert("Couldn't save", e?.message ?? 'Try again.'); }
+    } catch (e: any) { Alert.alert("Couldn't save", friendlyError(e, 'Try again.')); }
   };
 
   return (

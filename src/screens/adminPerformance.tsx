@@ -9,6 +9,7 @@ import { useAuth } from '../auth';
 import { useStore } from '../store';
 import { useCrmLeaderboard, useTrainerPerformance, type LeaderboardEntry } from '../lib/adminPerformanceQueries';
 import {
+import { friendlyError } from '../lib/friendlyError';
   useAdminIncentiveRequests, useReviewIncentiveRequest, usePendingIncentiveCount,
   formatIncentiveMonth, formatIncentiveDate, EVENT_META, AdminIncentiveRequest,
 } from '../lib/incentiveQueries';
@@ -192,7 +193,7 @@ function IncentiveRequestsPanel() {
       { text: 'Cancel', style: 'cancel' },
       { text: 'Approve', onPress: async () => {
         try { await reviewM.mutateAsync({ request: r, decision: 'approved', adminId }); }
-        catch (e: any) { Alert.alert("Couldn't approve", e?.message ?? 'Try again.'); }
+        catch (e: any) { Alert.alert("Couldn't approve", friendlyError(e, 'Try again.')); }
       } },
     ]);
   };
@@ -202,7 +203,7 @@ function IncentiveRequestsPanel() {
       await reviewM.mutateAsync({ request: rejectFor, decision: 'rejected', adminId, adminNotes: note });
       Keyboard.dismiss();
       setTimeout(() => { setRejectFor(null); setNote(''); }, 80);
-    } catch (e: any) { Alert.alert("Couldn't reject", e?.message ?? 'Try again.'); }
+    } catch (e: any) { Alert.alert("Couldn't reject", friendlyError(e, 'Try again.')); }
   };
   const raisedAt = (iso: string) => new Date(iso).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true });
 

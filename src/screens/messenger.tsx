@@ -7,6 +7,7 @@ import * as Haptics from 'expo-haptics';
 import { createAudioPlayer, setAudioModeAsync, requestRecordingPermissionsAsync, useAudioRecorder, RecordingPresets, type AudioPlayer } from 'expo-audio';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { WebView } from 'react-native-webview';
+import { friendlyError } from '../lib/friendlyError';
 
 /* Short recording cues (WhatsApp-style blips) — tiny bundled WAVs. Resolves when
    the blip finishes so the START cue can complete BEFORE the recorder claims the
@@ -221,7 +222,7 @@ function ChatRescheduleChip({ conversationId }: { conversationId: string }) {
     try {
       await acceptM.mutateAsync({ suggestionId: s.id, conversationId });
     } catch (e: any) {
-      Alert.alert('Could not reschedule', String(e?.message ?? e));
+      Alert.alert('Could not reschedule', friendlyError(e));
     }
   };
   return (
@@ -243,7 +244,7 @@ function ChatRescheduleChip({ conversationId }: { conversationId: string }) {
           </View>
         ) : null}
         <View style={{ flexDirection: 'row', gap: 8, marginTop: 2 }}>
-          <Pressable disabled={busy} onPress={() => dismissM.mutate({ suggestionId: s.id, conversationId }, { onError: (e: any) => Alert.alert("Couldn't dismiss", e?.message ?? 'Try again.') })} style={{ flex: 1, paddingVertical: 9, borderRadius: 11, alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', opacity: busy ? 0.6 : 1 }}>
+          <Pressable disabled={busy} onPress={() => dismissM.mutate({ suggestionId: s.id, conversationId }, { onError: (e: any) => Alert.alert("Couldn't dismiss", friendlyError(e, 'Try again.')) })} style={{ flex: 1, paddingVertical: 9, borderRadius: 11, alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', opacity: busy ? 0.6 : 1 }}>
             <Text style={{ fontFamily: F.bodySemi, fontSize: 12.5, color: C.ink }}>Dismiss</Text>
           </Pressable>
           <Pressable disabled={busy} onPress={accept} style={{ flex: 1, borderRadius: 11, overflow: 'hidden', opacity: busy ? 0.6 : 1 }}>
@@ -297,7 +298,7 @@ function MessageThread({ meId, conv, onBack, subtabs }: { meId: string; conv: Ch
     if (!editMsg || !t || t === editMsg.message) return;
     editM.mutate({ messageId: editMsg.id, body: t }, {
       onSuccess: () => { setEditMsg(null); setEditText(''); },
-      onError: (e: any) => Alert.alert('Edit failed', e?.message ?? 'Please try again.'),
+      onError: (e: any) => Alert.alert('Edit failed', friendlyError(e, 'Please try again.')),
     });
   };
   // In-app media viewer (image / video / document) — never leaves the app.
@@ -411,7 +412,7 @@ function MessageThread({ meId, conv, onBack, subtabs }: { meId: string; conv: Ch
         // Server rejection: put the text (and quote) back so nothing is lost.
         setDraft((d) => (d.trim() ? d : t));
         if (quoted) setReplyTo(quoted);
-        Alert.alert('Message not sent', e?.message ?? 'Check your connection and try again.');
+        Alert.alert('Message not sent', friendlyError(e, 'Check your connection and try again.'));
       },
     });
   };
@@ -475,7 +476,7 @@ function MessageThread({ meId, conv, onBack, subtabs }: { meId: string; conv: Ch
       recActiveRef.current = true;
       setRecording(true);
       tickRec(Date.now());
-    } catch (e: any) { recordingRef.current = false; micRest(); Alert.alert('Could not start recording', e?.message ?? 'Unknown error'); }
+    } catch (e: any) { recordingRef.current = false; micRest(); Alert.alert('Could not start recording', friendlyError(e, 'Something went wrong. Please try again.')); }
   };
   const stopRecording = async (sendIt: boolean) => {
     const wasActive = recActiveRef.current;
@@ -495,9 +496,9 @@ function MessageThread({ meId, conv, onBack, subtabs }: { meId: string; conv: Ch
       playCue('end');
       mediaM.mutate(
         { uri, name: `voice-${Date.now()}.m4a`, mime: 'audio/m4a', size: null },
-        { onError: (e: any) => Alert.alert('Send failed', e?.message || 'Please try again.') }
+        { onError: (e: any) => Alert.alert('Send failed', friendlyError(e, 'Please try again.')) }
       );
-    } catch (e: any) { if (sendIt) Alert.alert('Recording failed', e?.message ?? 'Unknown error'); }
+    } catch (e: any) { if (sendIt) Alert.alert('Recording failed', friendlyError(e, 'Something went wrong. Please try again.')); }
   };
   // Hold gesture — the PanResponder is created once; latest handlers via refs.
   const beginHoldRef = React.useRef(() => {});
@@ -547,13 +548,13 @@ function MessageThread({ meId, conv, onBack, subtabs }: { meId: string; conv: Ch
     const a = res.assets[0];
     const mime = a.mimeType || (a.type === 'video' ? 'video/mp4' : 'image/jpeg');
     const name = a.fileName || (mime.startsWith('video') ? 'video.mp4' : 'photo.jpg');
-    mediaM.mutate({ uri: a.uri, name, mime, size: (a as any).fileSize ?? null }, { onError: (e: any) => Alert.alert('Upload failed', e?.message || 'Please try again.') });
+    mediaM.mutate({ uri: a.uri, name, mime, size: (a as any).fileSize ?? null }, { onError: (e: any) => Alert.alert('Upload failed', friendlyError(e, 'Please try again.')) });
   };
   const pickDocument = async () => {
     const res = await DocumentPicker.getDocumentAsync({ type: 'application/pdf', copyToCacheDirectory: true });
     if (res.canceled || !res.assets?.length) return;
     const a = res.assets[0];
-    mediaM.mutate({ uri: a.uri, name: a.name || 'document.pdf', mime: a.mimeType || 'application/pdf', size: a.size ?? null }, { onError: (e: any) => Alert.alert('Upload failed', e?.message || 'Please try again.') });
+    mediaM.mutate({ uri: a.uri, name: a.name || 'document.pdf', mime: a.mimeType || 'application/pdf', size: a.size ?? null }, { onError: (e: any) => Alert.alert('Upload failed', friendlyError(e, 'Please try again.')) });
   };
   const attach = () => {
     Alert.alert('Send attachment', undefined, [
@@ -991,7 +992,7 @@ function VoiceBubble({ url, mine, pending, timeText, onLongPress, ticks }: { url
       else { claimAudioFocus(holder); p.play(); }
     } catch (e: any) {
       setLoading(false);
-      Alert.alert('Playback failed', e?.message ?? 'Could not play this voice message.');
+      Alert.alert('Playback failed', friendlyError(e, 'Could not play this voice message.'));
     }
   };
 
@@ -1288,7 +1289,7 @@ function MessengerHome({ meId, onOpen, onOpenClient, tab, setTab }: { meId: stri
       qc.invalidateQueries({ queryKey: ['chat-overview', meId] });
       onOpen({ conversationId: convId, type: 'team', title: member.name, subtitle: member.roleLabel, otherUserId: member.userId, isAnnouncements: false, clientId: null, participantIds: [], memberCount: 2, lastMessage: null, lastMessageType: null, lastMessageAt: null, lastSenderId: null, unreadCount: 0, myLastReadAt: null });
     } catch (e: any) {
-      Alert.alert('Could not open chat', e?.message || 'Please try again.');
+      Alert.alert('Could not open chat', friendlyError(e, 'Please try again.'));
     } finally { setOpening(null); }
   };
 

@@ -10,6 +10,7 @@ import { Page, TitleBlock, AccessPending } from './common';
 import { useAuth } from '../auth';
 import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import {
+import { friendlyError } from '../lib/friendlyError';
   MyReferral, ReferralClientOption, ReferralStatus,
   useCreateReferral, useMyReferralClients, useMyReferrals,
 } from '../lib/referralQueries';
@@ -109,7 +110,7 @@ function AddReferralSheet({ visible, onClose, referrerId }: { visible: boolean; 
     sentRef.current = true;
     createM.mutate({ referrerId, name, source, linkedClientId: linkedId, notes }, {
       onSuccess: () => { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}); onClose(); },
-      onError: (e: any) => { sentRef.current = false; Alert.alert("Couldn't add the referral", e?.message ?? 'Check your connection and try again.'); },
+      onError: (e: any) => { sentRef.current = false; Alert.alert("Couldn't add the referral", friendlyError(e, 'Check your connection and try again.')); },
     });
   };
 

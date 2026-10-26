@@ -1,3 +1,4 @@
+import { friendlyError } from '../lib/friendlyError';
 /* Odds Nucleus, "The core of longevity knowledge" (16 Oct 2026): the staff reading room
    over the member app's Odds Library. Every signed-in role gets the drawer entry
    Learn > Odds Nucleus. Two screens: the hub (search, hero, topics, courses, Continue,
@@ -455,7 +456,7 @@ function ListenBar({ piece, startAt, onPosition, onEnd }: { piece: NucleusPiece;
       const p = await ensure();
       if (!playedRef.current) { playedRef.current = true; trackEvent('Nucleus Audio Played', { id: piece.id }); }
       p.play();
-    } catch (e: any) { setLoading(false); setErr(e?.message ?? 'Could not play the audio.'); }
+    } catch (e: any) { setLoading(false); setErr(friendlyError(e, 'Could not play the audio.')); }
   };
   const cycleSpeed = () => {
     const s = nextSpeed(speed);

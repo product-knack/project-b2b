@@ -6,6 +6,7 @@ import { invokeWithTimeout, uploadWithTimeout } from './withTimeout';
 import { OTP_GATE_MESSAGE } from './sessionOtp';
 import { useAuth } from '../auth';
 import { THERAPY_MODALITIES, therapyModalityLabel, ROSTER_FRESH_START_MS } from './therapistQueries';
+import { friendlyError } from './friendlyError';
 
 /* ============ DOCTOR WORKSPACE DATA LAYER ============
    Verbatim port of the web /doctor/* hooks (usePhysiotherapistMetrics,
@@ -199,7 +200,7 @@ export function useSeniorDashboard(selectedMonth: Date, enabled: boolean, select
         monthStartUTC: rangeStart, nextMonthStartUTC: rangeEnd, dayStartUTC: day.startISO, nextDayStartUTC: day.endISO,
       });
       if (error) throw new Error(error.message);
-      if (!data?.ok) throw new Error(data?.error ?? 'Failed to load senior physio dashboard');
+      if (!data?.ok) throw new Error(data?.error ?? 'Could not load the senior physio dashboard. Pull to refresh.');
       return {
         monthlyCount: data.monthlyCount ?? 0,
         todayCount: data.todayCount ?? 0,
@@ -1336,7 +1337,7 @@ export function useGenerateCounsellingAI() {
       const { data, error } = await invokeFn('analyze-physiotherapy-counselling', { counsellingDetails: input.counsellingDetails });
       if (error) throw new Error(error.message);
       const simplified = (data as any)?.simplifiedAnalysis;
-      if (!simplified) throw new Error('AI analysis returned no content');
+      if (!simplified) throw new Error('The AI analysis came back empty. Try again.');
       const { error: uErr } = await supabase.from('physiotherapy_counselling').update({ ai_simplified_analysis: simplified }).eq('id', input.id);
       if (uErr) throw new Error(uErr.message);
       return simplified as string;

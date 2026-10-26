@@ -11,6 +11,7 @@ import { PdfPreview } from '../components/PdfPreview';
 import { PhysioHodStatusBadge, PhysioHodNotesThread, PHYSIO_ACC } from '../components/physioHodThread';
 import { usePushToPhysioHod, useQhpDetailsRealtime, pushStatus, PHYSIO_NOTE_MAX } from '../lib/physioHodQueries';
 import {
+import { friendlyError } from '../lib/friendlyError';
   useQhpReviewQueue, useSignAsSenior, useSignAsHod, useHoldReport, useQhpReportMissing,
   reviewPdfUrl, stageOf, type QhpReviewRow, type ReviewNote,
 } from '../lib/qhpReviewQueries';
@@ -89,7 +90,7 @@ function ReviewSheet({ row, onClose }: { row: QhpReviewRow; onClose: () => void 
   const canHold = canSignSenior || canSignHod;
   const holdAsHod = canSignHod;
   const busy = signSenior.isPending || signHod.isPending || hold.isPending;
-  const fail = (e: any) => setErr(e?.message ?? 'Action failed.');
+  const fail = (e: any) => setErr(friendlyError(e, 'Something went wrong. Please try again.'));
   // Keyboard-aware bottom padding: the hold-note input lives at the sheet's foot
   // and the keyboard covered it (and its Send button) on small screens.
   const [kb, setKb] = React.useState(0);

@@ -12,6 +12,7 @@ import { useAuth } from '../auth';
 import { ClientThreadsUnreadBanner } from '../components/clientThreadsCard';
 import { useSidebarProfile } from '../lib/navQueries';
 import {
+import { friendlyError } from '../lib/friendlyError';
   useCoachDashboard, useCoachClients, useCoachClientsOverview, useCoachTrainers, useTrainerDetail, useTrainerSessions,
   useCoachAssessments, useCoachProgramsV2, usePlanExercises, useCoachPendingPlanCount, useCoachProgression, useCoachApprovedPlans,
   useCoachPlansOverview, useCoachCalendar, qhpWindows,
@@ -366,7 +367,7 @@ export function CoachClientsOverview() {
 /* ---- Clients Overview → client detail (web /coach/clients-overview/:id) ---- */
 function RatingButtons({ clientId, value }: { clientId: string; value: Improvement }) {
   const m = useSetImprovementStatus();
-  const run = (next: 'good' | 'average' | 'poor') => { if (m.isPending) return; m.mutate({ clientId, next: value === next ? null : next }, { onError: (e: any) => Alert.alert("Couldn't save rating", e?.message ?? "Try again.") }); };
+  const run = (next: 'good' | 'average' | 'poor') => { if (m.isPending) return; m.mutate({ clientId, next: value === next ? null : next }, { onError: (e: any) => Alert.alert("Couldn't save rating", friendlyError(e, "Try again.")) }); };
   return (
     <View style={{ gap: 8 }}>
       <View style={{ flexDirection: 'row', gap: 8 }}>
@@ -876,7 +877,7 @@ function ProgramPendingCard({ plan, coachId, onView }: { plan: ProgramPlan; coac
   const run = (action: PlanAction) => {
     if ((action === 'reject' || action === 'needs_revision') && !feedback.trim()) { setOpen(true); return; }
     if (m.isPending) return;
-    m.mutate({ kind: plan.kind, id: plan.id, action, feedback, coachId }, { onError: (e: any) => Alert.alert("Couldn't update plan", e?.message ?? "Try again.") });
+    m.mutate({ kind: plan.kind, id: plan.id, action, feedback, coachId }, { onError: (e: any) => Alert.alert("Couldn't update plan", friendlyError(e, "Try again.")) });
   };
   const busy = m.isPending;
   return (

@@ -14,6 +14,7 @@ import { useAuth } from '../auth';
 import { backOverride } from '../gestureLock';
 import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import {
+import { friendlyError } from '../lib/friendlyError';
   ALL_PLATFORMS, ALL_TYPES, PRIORITY_COLOR, PRIORITY_LABEL, PLATFORM_LABEL, PLATFORM_ON_TICKET, RESOLUTION_LABEL,
   STAGE_LABEL, STAGE_ORDER, STATUS_COLOR, STATUS_LABEL, TECH, TIME_PRESETS, TYPE_ICON, TYPE_LABEL, TYPE_LABEL_LONG, TYPE_LABEL_MAX,
   statusColor, TechPlatform, TechPriority, TechResolution, TechStatus,
@@ -298,7 +299,7 @@ function TimeTakenPill({ ticket, busy }: { ticket: TechTicket; busy: boolean }) 
     Keyboard.dismiss();
     setM.mutate({ id: ticket.id, minutes }, {
       onSuccess: () => setOpen(false),
-      onError: (e: any) => Alert.alert("Couldn't save the time", e?.message ?? 'Try again.'),
+      onError: (e: any) => Alert.alert("Couldn't save the time", friendlyError(e, 'Try again.')),
     });
   };
 
@@ -385,7 +386,7 @@ function DeleteTicketSheet({ ticket, messageCount, visible, onClose, onDeleted }
     sentRef.current = true;
     delM.mutate(ticket.id, {
       onSuccess: () => { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}); onDeleted(); },
-      onError: (e: any) => { sentRef.current = false; Alert.alert("Couldn't delete", e?.message ?? 'Check your connection and try again.'); },
+      onError: (e: any) => { sentRef.current = false; Alert.alert("Couldn't delete", friendlyError(e, 'Check your connection and try again.')); },
     });
   };
 
@@ -786,7 +787,7 @@ export function TechDeskInboxTicket() {
   const closed = t.status === 'closed';
   const waiting = t.status === 'waiting_on_reporter';
   const currentIdx = stageIndexOf(t.status);
-  const patch = (p: any) => updateM.mutate({ id: t.id, patch: p }, { onError: (e: any) => Alert.alert("Couldn't update", e?.message ?? 'Try again.') });
+  const patch = (p: any) => updateM.mutate({ id: t.id, patch: p }, { onError: (e: any) => Alert.alert("Couldn't update", friendlyError(e, 'Try again.')) });
   // Moving to Resolved carries a resolution; the trigger clears it when the status leaves resolved/closed.
   const move = (s: TechStatus) => patch(s === 'resolved' ? { status: s, resolution: t.resolution ?? 'fixed' } : { status: s });
 

@@ -8,6 +8,7 @@ import { Page, TitleBlock, HScroll, Badge, MiniAvatar, AnimChip } from './common
 import { SheetShell } from './reportDetail';
 import { useAuth } from '../auth';
 import {
+import { friendlyError } from '../lib/friendlyError';
   useRevenueForecastClients, usePriorityRows, useForecastMonths, derivePrioritySets,
   useMarkPriority, useRemovePriority, useMarkFallShort, useConsumedSinceMark, useAddForecastRemark,
   remarkDue, hasUnansweredRemark, latestRemarkAt, monthKey, monthLabel, shiftMonth,
@@ -42,7 +43,7 @@ export function RemarkThread({ row, canReply, authorName, month }: { row: Priori
     try {
       await addM.mutateAsync({ clientId: row.client_id, month, authorName, entry: { type: 'reply', parent_id: parentId, message: replyText.trim() } });
       setReplyText(''); setReplyFor(null); Keyboard.dismiss();
-    } catch (e: any) { Alert.alert("Couldn't send reply", e?.message ?? 'Try again.'); }
+    } catch (e: any) { Alert.alert("Couldn't send reply", friendlyError(e, 'Try again.')); }
   };
   return (
     <View style={{ gap: 8 }}>
@@ -152,7 +153,7 @@ export function AdminRevenueForecast() {
           ids.forEach((id) => map.set(id, byId.get(id)?.sessionsLeft ?? null));
           await markM.mutateAsync({ clientIds: ids, month, markedBy: adminId, sessionsLeft: map });
           setSelected(new Set());
-        } catch (e: any) { Alert.alert("Couldn't mark priority", e?.message ?? 'Try again.'); }
+        } catch (e: any) { Alert.alert("Couldn't mark priority", friendlyError(e, 'Try again.')); }
       } },
     ]);
   };
@@ -161,7 +162,7 @@ export function AdminRevenueForecast() {
       { text: 'Keep', style: 'cancel' },
       { text: 'Remove', style: 'destructive', onPress: async () => {
         try { await removeM.mutateAsync({ clientId: row.client_id, month }); }
-        catch (e: any) { Alert.alert("Couldn't remove", e?.message ?? 'Try again.'); }
+        catch (e: any) { Alert.alert("Couldn't remove", friendlyError(e, 'Try again.')); }
       } },
     ]);
   };
@@ -171,7 +172,7 @@ export function AdminRevenueForecast() {
       await fallShortM.mutateAsync({ row: fallShortFor, reason: fsReason, markedBy: adminId });
       Keyboard.dismiss();
       setTimeout(() => { setFallShortFor(null); setFsReason(''); }, 80);
-    } catch (e: any) { Alert.alert("Couldn't mark fall short", e?.message ?? 'Try again.'); }
+    } catch (e: any) { Alert.alert("Couldn't mark fall short", friendlyError(e, 'Try again.')); }
   };
 
   const monthIdx = (monthsQ.data ?? [monthKey()]).indexOf(month);
@@ -363,7 +364,7 @@ export function AdminRevenueForecast() {
                   try {
                     const map = new Map<string, number | null>([[row.client_id, byId.get(row.client_id)?.sessionsLeft ?? null]]);
                     await markM.mutateAsync({ clientIds: [row.client_id], month, markedBy: adminId, sessionsLeft: map });
-                  } catch (e: any) { Alert.alert("Couldn't reassign", e?.message ?? 'Try again.'); }
+                  } catch (e: any) { Alert.alert("Couldn't reassign", friendlyError(e, 'Try again.')); }
                 }} style={{ alignItems: 'center', paddingVertical: 9, borderRadius: 11, backgroundColor: hexA(ACC, 0.1), borderWidth: 1, borderColor: hexA(ACC, 0.35) }}>
                   <Text style={{ fontFamily: F.bodySemi, fontSize: 12, color: ACC }}>Reassign as priority</Text>
                 </Pressable>

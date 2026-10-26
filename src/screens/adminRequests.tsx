@@ -9,6 +9,7 @@ import { Page, TitleBlock, Badge, HScroll } from './common';
 import { useAuth } from '../auth';
 import { useStore } from '../store';
 import {
+import { friendlyError } from '../lib/friendlyError';
   useAdminReferrals, useUpdateReferralStatus, useAdminUpgradeRequests, useUpdateUpgradeStatus,
   useAdminRenewalRequests, useUpdateRenewalRequestStatus, useAdminCrossSellRequests, useUpdateCrossSellStatus,
   useAdminNewLeadRows, useConvertLeadToClient, useReferredLeads, useUpdateReferredLeadStatus, useAddReferredClient,
@@ -173,12 +174,12 @@ function ReferralCard({ r, profileId }: { r: Referral; profileId: string | null 
       {err ? <Body style={{ fontSize: 10.5, color: C.red }}>{err}</Body> : null}
       {r.status === 'pending' ? (
         <ApproveRejectRow busy={update.isPending}
-          onApprove={() => { setErr(null); update.mutate({ referralId: r.id, status: 'approved', profileId }, { onError: (e: any) => setErr(e?.message ?? 'Failed') }); }}
+          onApprove={() => { setErr(null); update.mutate({ referralId: r.id, status: 'approved', profileId }, { onError: (e: any) => setErr(friendlyError(e, 'Something went wrong. Please try again.')) }); }}
           onReject={() => setRejectOpen(true)} />
       ) : null}
       {rejectOpen ? (
         <ConfirmSheet action="reject" title="Referral" clientName={r.referred_client_name} busy={update.isPending} onClose={() => setRejectOpen(false)}
-          onConfirm={(notes) => { setErr(null); update.mutate({ referralId: r.id, status: 'rejected', rejectionReason: notes.trim() || undefined, profileId }, { onSuccess: () => setRejectOpen(false), onError: (e: any) => setErr(e?.message ?? 'Failed') }); }} />
+          onConfirm={(notes) => { setErr(null); update.mutate({ referralId: r.id, status: 'rejected', rejectionReason: notes.trim() || undefined, profileId }, { onSuccess: () => setRejectOpen(false), onError: (e: any) => setErr(friendlyError(e, 'Something went wrong. Please try again.')) }); }} />
       ) : null}
     </Card>
   );
@@ -265,7 +266,7 @@ function UpgradesTab({ profileId }: { profileId: string | null }) {
           onConfirm={(notes) => {
             setErr(null);
             update.mutate({ requestId: sel.id, status: act.action === 'approve' ? 'approved' : 'rejected', adminNotes: notes.trim() || undefined, clientId: sel.client_id, newSubscriptionType: sel.new_subscription_type, profileId },
-              { onSuccess: () => setAct(null), onError: (e: any) => { setAct(null); setErr(e?.message ?? 'Failed'); } });
+              { onSuccess: () => setAct(null), onError: (e: any) => { setAct(null); setErr(friendlyError(e, 'Something went wrong. Please try again.')); } });
           }} />
       ) : null}
     </View>
@@ -321,7 +322,7 @@ function RenewalsTab({ profileId }: { profileId: string | null }) {
           onConfirm={(notes) => {
             setErr(null);
             update.mutate({ requestId: sel.id, status: act.action === 'approve' ? 'approved' : 'rejected', adminNotes: notes.trim() || undefined, clientId: sel.client_id, profileId },
-              { onSuccess: () => setAct(null), onError: (e: any) => { setAct(null); setErr(e?.message ?? 'Failed'); } });
+              { onSuccess: () => setAct(null), onError: (e: any) => { setAct(null); setErr(friendlyError(e, 'Something went wrong. Please try again.')); } });
           }} />
       ) : null}
     </View>
@@ -377,7 +378,7 @@ function CrossSellTab({ profileId }: { profileId: string | null }) {
           onConfirm={(notes) => {
             setErr(null);
             update.mutate({ requestId: sel.id, status: act.action === 'approve' ? 'approved' : 'rejected', adminNotes: notes.trim() || undefined, clientId: sel.client_id, profileId },
-              { onSuccess: () => setAct(null), onError: (e: any) => { setAct(null); setErr(e?.message ?? 'Failed'); } });
+              { onSuccess: () => setAct(null), onError: (e: any) => { setAct(null); setErr(friendlyError(e, 'Something went wrong. Please try again.')); } });
           }} />
       ) : null}
     </View>
@@ -471,7 +472,7 @@ function NewLeadsTab({ profileId }: { profileId: string | null }) {
       })}
       {active ? (
         <ClientFormSheet title="Convert Lead to Client" initFirst={splitName(active.name).first} initLast={splitName(active.name).last} initPhone={active.contact_no ?? ''} busy={convert.isPending} onClose={() => setActive(null)}
-          onSubmit={(f) => { setErr(null); convert.mutate({ lead: active, ...f, profileId }, { onSuccess: () => setActive(null), onError: (e: any) => { setActive(null); setErr(e?.message ?? 'Failed'); } }); }} />
+          onSubmit={(f) => { setErr(null); convert.mutate({ lead: active, ...f, profileId }, { onSuccess: () => setActive(null), onError: (e: any) => { setActive(null); setErr(friendlyError(e, 'Something went wrong. Please try again.')); } }); }} />
       ) : null}
     </View>
   );
@@ -536,7 +537,7 @@ function RefLeadsTab() {
             {statusOpen === l.id ? (
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
                 {REF_LEAD_STATUSES.map((s) => (
-                  <Pressable key={s} disabled={s === l.status || updateStatus.isPending} onPress={() => { setErr(null); updateStatus.mutate({ id: l.id, status: s }, { onSuccess: () => setStatusOpen(null), onError: (e: any) => setErr(e?.message ?? 'Failed') }); }}
+                  <Pressable key={s} disabled={s === l.status || updateStatus.isPending} onPress={() => { setErr(null); updateStatus.mutate({ id: l.id, status: s }, { onSuccess: () => setStatusOpen(null), onError: (e: any) => setErr(friendlyError(e, 'Something went wrong. Please try again.')) }); }}
                     style={{ paddingVertical: 6, paddingHorizontal: 10, borderRadius: 999, backgroundColor: s === l.status ? hexA(refStatusColor(s), 0.2) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: s === l.status ? hexA(refStatusColor(s), 0.6) : 'rgba(255,255,255,0.09)' }}>
                     <Text style={{ fontFamily: F.bodySemi, fontSize: 10, color: s === l.status ? refStatusColor(s) : C.muted }}>{s.replace('_', ' ')}</Text>
                   </Pressable>
@@ -554,7 +555,7 @@ function RefLeadsTab() {
       })}
       {adding ? (
         <ClientFormSheet title="Add Referred Client" initFirst={splitName(adding.name).first} initLast={splitName(adding.name).last} initPhone={adding.phone} busy={addClient.isPending} onClose={() => setAdding(null)}
-          onSubmit={(f) => { setErr(null); addClient.mutate({ leadId: adding.id, ...f }, { onSuccess: () => setAdding(null), onError: (e: any) => { setAdding(null); setErr(e?.message ?? 'Failed'); } }); }} />
+          onSubmit={(f) => { setErr(null); addClient.mutate({ leadId: adding.id, ...f }, { onSuccess: () => setAdding(null), onError: (e: any) => { setAdding(null); setErr(friendlyError(e, 'Something went wrong. Please try again.')); } }); }} />
       ) : null}
     </View>
   );
@@ -628,7 +629,7 @@ function RenewalPayTab({ profileId }: { profileId: string | null }) {
       )}
       {act && sel ? (
         <ConfirmSheet action={act.action} title="Renewal Payment" clientName={personName(sel.client)} busy={decide.isPending} onClose={() => setAct(null)}
-          onConfirm={(notes) => { setErr(null); decide.mutate({ requestId: sel.id, decision: act.action === 'approve' ? 'approved' : 'rejected', adminNotes: notes.trim() || undefined, profileId }, { onSuccess: () => setAct(null), onError: (e: any) => { setAct(null); setErr(e?.message ?? 'Failed'); } }); }} />
+          onConfirm={(notes) => { setErr(null); decide.mutate({ requestId: sel.id, decision: act.action === 'approve' ? 'approved' : 'rejected', adminNotes: notes.trim() || undefined, profileId }, { onSuccess: () => setAct(null), onError: (e: any) => { setAct(null); setErr(friendlyError(e, 'Something went wrong. Please try again.')); } }); }} />
       ) : null}
       {payingId ? (
         <Modal visible transparent animationType="slide" onRequestClose={() => setPayingId(null)}>
@@ -642,7 +643,7 @@ function RenewalPayTab({ profileId }: { profileId: string | null }) {
                 <Pressable onPress={() => setPayingId(null)} style={{ flex: 1, alignItems: 'center', paddingVertical: 11, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }}>
                   <Text style={{ fontFamily: F.bodySemi, fontSize: 12, color: C.muted }}>Cancel</Text>
                 </Pressable>
-                <Pressable disabled={markPaid.isPending} onPress={() => { setErr(null); markPaid.mutate({ requestId: payingId, cashReference: utr.trim() || null }, { onSuccess: () => setPayingId(null), onError: (e: any) => { setPayingId(null); setErr(e?.message ?? 'Failed'); } }); }}
+                <Pressable disabled={markPaid.isPending} onPress={() => { setErr(null); markPaid.mutate({ requestId: payingId, cashReference: utr.trim() || null }, { onSuccess: () => setPayingId(null), onError: (e: any) => { setPayingId(null); setErr(friendlyError(e, 'Something went wrong. Please try again.')); } }); }}
                   style={{ flex: 1, alignItems: 'center', paddingVertical: 11, borderRadius: 12, backgroundColor: hexA(C.green, 0.16), borderWidth: 1, borderColor: hexA(C.green, 0.5) }}>
                   <Text style={{ fontFamily: F.bodyBold, fontSize: 12, color: C.green }}>{markPaid.isPending ? 'Saving…' : 'Mark Paid'}</Text>
                 </Pressable>
@@ -740,13 +741,13 @@ function InvoiceRaisedTab({ profileId }: { profileId: string | null }) {
               {sub === 'processing' ? (
                 <View style={{ flexDirection: 'row', gap: 8 }}>
                   {r.payment_method === 'razorpay' ? (
-                    <Pressable disabled={retry.isPending} onPress={() => { setErr(null); setGenUrl(null); retry.mutate(r.id, { onSuccess: (res) => setGenUrl(res.url), onError: (e: any) => setErr(e?.message ?? 'Failed') }); }}
+                    <Pressable disabled={retry.isPending} onPress={() => { setErr(null); setGenUrl(null); retry.mutate(r.id, { onSuccess: (res) => setGenUrl(res.url), onError: (e: any) => setErr(friendlyError(e, 'Something went wrong. Please try again.')) }); }}
                       style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10, backgroundColor: hexA(C.blue, 0.12), borderWidth: 1, borderColor: hexA(C.blue, 0.4) }}>
                       <Icon name="swap" size={11} color={C.blue} strokeWidth={2.2} />
                       <Text style={{ fontFamily: F.bodyBold, fontSize: 11, color: C.blue }}>{retry.isPending ? 'Working…' : r.payment_status === 'failed' ? 'Retry link' : 'Regenerate link'}</Text>
                     </Pressable>
                   ) : (
-                    <Pressable disabled={markPaid.isPending} onPress={() => { setErr(null); markPaid.mutate(r.id, { onError: (e: any) => setErr(e?.message ?? 'Failed') }); }}
+                    <Pressable disabled={markPaid.isPending} onPress={() => { setErr(null); markPaid.mutate(r.id, { onError: (e: any) => setErr(friendlyError(e, 'Something went wrong. Please try again.')) }); }}
                       style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10, backgroundColor: hexA(C.green, 0.12), borderWidth: 1, borderColor: hexA(C.green, 0.4) }}>
                       <Icon name="rupee" size={11} color={C.green} strokeWidth={2.2} />
                       <Text style={{ fontFamily: F.bodyBold, fontSize: 11, color: C.green }}>{markPaid.isPending ? 'Saving…' : 'Mark Cash Received'}</Text>
@@ -777,7 +778,7 @@ function InvoiceRaisedTab({ profileId }: { profileId: string | null }) {
                 setErr(null);
                 generate.mutate({ lead: genLead, method, profileId }, {
                   onSuccess: (res) => { setGenUrl(res.url); setGenLead(null); setSub('processing'); },
-                  onError: (e: any) => { setGenLead(null); setErr(e?.message ?? 'Failed'); },
+                  onError: (e: any) => { setGenLead(null); setErr(friendlyError(e, 'Something went wrong. Please try again.')); },
                 });
               }} style={{ alignItems: 'center', paddingVertical: 12, borderRadius: 12, backgroundColor: hexA(C.purple, generate.isPending ? 0.06 : 0.16), borderWidth: 1, borderColor: hexA(C.purple, generate.isPending ? 0.2 : 0.5) }}>
                 <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: generate.isPending ? C.muted3 : C.purple }}>{generate.isPending ? 'Generating…' : 'Confirm & Generate'}</Text>
@@ -845,7 +846,7 @@ function PaidCancelTab() {
           detail={<Body style={{ fontSize: 11, color: C.muted2 }}>{confirm.action === 'approve' ? 'Logs a cancelled paid session against the package and approves the request.' : 'Marks the request rejected — no session is recorded.'}</Body>}
           onConfirm={() => {
             setErr(null);
-            const done = { onSuccess: () => setConfirm(null), onError: (e: any) => { setConfirm(null); setErr(e?.message ?? 'Failed'); } };
+            const done = { onSuccess: () => setConfirm(null), onError: (e: any) => { setConfirm(null); setErr(friendlyError(e, 'Something went wrong. Please try again.')); } };
             if (confirm.action === 'approve') approve.mutate(confirm.row, done);
             else reject.mutate(confirm.row.id, done);
           }} />

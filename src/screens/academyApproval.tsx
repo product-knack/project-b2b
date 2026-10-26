@@ -8,6 +8,7 @@ import { Badge, AnimChip } from './common';
 import { SheetShell } from './reportDetail';
 import { ATT_STATUSES, AttStatus, prettyDate } from '../lib/academyQueries';
 import {
+import { friendlyError } from '../lib/friendlyError';
   usePendingAttendanceCount, useAttendanceByApproval, useSetAttendanceApproval, useUpdateAttendanceRow,
   type ApprovalRow,
 } from '../lib/academyAttendanceQueries';
@@ -90,7 +91,7 @@ export function AttendanceApprovalPanel({ adminId }: { adminId: string }) {
           style: to === 'rejected' ? 'destructive' : 'default',
           onPress: () => decideM.mutate({ ids: selectedIds, to, adminId }, {
             onSuccess: () => setSelected(new Set()),
-            onError: (e: any) => Alert.alert('Failed', e?.message ?? 'Try again'),
+            onError: (e: any) => Alert.alert('Failed', friendlyError(e, 'Try again')),
           }),
         },
       ]
@@ -228,7 +229,7 @@ function EditRowSheet({ row, onClose }: { row: ApprovalRow; onClose: () => void 
           { id: row.id, status, remarks: remarks.trim() ? remarks.trim() : null },
           {
             onSuccess: () => close(),
-            onError: (e: any) => Alert.alert('Could not save', e?.message ?? 'Try again'),
+            onError: (e: any) => Alert.alert('Could not save', friendlyError(e, 'Try again')),
           }
         ),
       },

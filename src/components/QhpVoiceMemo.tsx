@@ -6,6 +6,7 @@ import { Body, Mono } from './primitives';
 import { useVoiceRecorder, VoiceTapButton, VoicePlayer, RecordedVoice } from './VoiceNote';
 import { useAttachQhpVoiceMemo, useSignedQhpMemoUrl, QHP_MEMO_MAX_MS, QhpRow } from '../lib/qhpQueries';
 import { clockOf } from '../lib/techDesk';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ QHP voice memo (web QHPVoiceMemoDialog / QHPVoiceMemoPlayer parity) ============
    Every completed QHP card offers the assessor one "Voice memo": record, listen
@@ -66,7 +67,7 @@ export function QhpVoiceMemoDialog({ row, userId, onClose }: { row: QhpRow | nul
       onClose();
       Alert.alert('Voice memo saved', 'It is now attached to this QHP and cannot be changed.');
     } catch (e: any) {
-      Alert.alert("Couldn't save the memo", e?.message ?? 'Try again.');
+      Alert.alert("Couldn't save the memo", friendlyError(e, 'Try again.'));
     }
   };
 

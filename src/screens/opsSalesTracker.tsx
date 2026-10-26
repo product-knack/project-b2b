@@ -7,6 +7,7 @@ import { Page, TitleBlock, Badge, HScroll, AnimChip } from './common';
 import { SheetShell } from './reportDetail';
 import { useAuth } from '../auth';
 import {
+import { friendlyError } from '../lib/friendlyError';
   useDerivedDailySales, useSalesTargets, useUpsertMonthTarget, useUpdateTarget, useDeleteTarget, useProfilesByIds,
   computeMonthlySummaries, monthLabelOf, inr, SALES_TRACKER_START,
   type DerivedSaleRow, type MonthlySummary, type SalesTargetRow, type SalesProfileInfo,
@@ -161,13 +162,13 @@ function TargetRow({ t }: { t: SalesTargetRow }) {
     if (!valid || update.isPending) return;
     update.mutate({ id: t.id, target: n }, {
       onSuccess: () => { Keyboard.dismiss(); setEditing(false); },
-      onError: (e: any) => Alert.alert('Could not update target', e?.message ?? 'Try again.'),
+      onError: (e: any) => Alert.alert('Could not update target', friendlyError(e, 'Try again.')),
     });
   };
   const confirmDelete = () =>
     Alert.alert('Delete target?', `Delete the ${label} target?`, [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: () => del.mutate(t.id, { onError: (e: any) => Alert.alert('Could not delete target', e?.message ?? 'Try again.') }) },
+      { text: 'Delete', style: 'destructive', onPress: () => del.mutate(t.id, { onError: (e: any) => Alert.alert('Could not delete target', friendlyError(e, 'Try again.')) }) },
     ]);
 
   return (
@@ -231,7 +232,7 @@ function SetTargetSheet({ visible, onClose, targets }: { visible: boolean; onClo
     if (!valid || upsert.isPending) return;
     upsert.mutate({ monthKey, target: n }, {
       onSuccess: onClose, // parent's onClose already dismisses the keyboard first
-      onError: (e: any) => Alert.alert('Could not save target', e?.message ?? 'Try again.'),
+      onError: (e: any) => Alert.alert('Could not save target', friendlyError(e, 'Try again.')),
     });
   };
 

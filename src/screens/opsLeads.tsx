@@ -9,6 +9,7 @@ import { Page, TitleBlock, Badge, HScroll } from './common';
 import { useStore } from '../store';
 import { OpsSearch } from './ops';
 import {
+import { friendlyError } from '../lib/friendlyError';
   LEAD_STAGES, LEAD_SOURCES, CANDIDATE_TYPES, SUBSCRIPTION_TYPES, LEAD_CATEGORIES, RESCHEDULE_REASONS, LEAD_ASSIGNEES,
   useLeadsList, useLeadStats, useColdLeads, useDumpLeadsCount, useMyOpsProfile, useLeadOptions, useAddLeadOption, useDeleteLeadOption,
   useCreateLead, useUpdateLead, useScheduleFollowUp, useCompleteFollowUp, useAddLeadRemark, useConvertWithPackage,
@@ -121,7 +122,7 @@ function StageFlowSheet({ kind, lead, profile, onClose }: { kind: FlowKind; lead
   const markApplicant = useMarkLeadAsApplicant();
   const [err, setErr] = React.useState<string | null>(null);
   const busy = update.isPending || schedule.isPending || addRemark.isPending || convertPkg.isPending || markApplicant.isPending;
-  const fail = (e: any) => setErr(e?.message ?? 'Failed.');
+  const fail = (e: any) => setErr(friendlyError(e, 'Something went wrong. Please try again.'));
   const close = kbClose(onClose);
   const ok = () => close();
 
@@ -439,10 +440,10 @@ function LeadFormSheet({ lead, profile, onClose }: { lead: Lead | null; profile:
           referral_name: source === 'Referral' ? referral.trim() || null : null,
           lead_type: isInfluencerType ? 'influencer' : null,
         },
-      }, { onSuccess: close, onError: (e: any) => setErr(e?.message ?? 'Failed') });
+      }, { onSuccess: close, onError: (e: any) => setErr(friendlyError(e, 'Something went wrong. Please try again.')) });
     } else {
       create.mutate({ name, contact_no: contact.trim(), source, lead_date: leadDate, stage: 'New', description: desc.trim() || null, influencer, ads_creative: creative, referral_name: referral, lead_type: isInfluencerType ? 'influencer' : null, profile },
-        { onSuccess: close, onError: (e: any) => setErr(e?.message ?? 'Failed') });
+        { onSuccess: close, onError: (e: any) => setErr(friendlyError(e, 'Something went wrong. Please try again.')) });
     }
   };
 
@@ -485,7 +486,7 @@ function AssignSheet({ lead, onClose }: { lead: Lead; onClose: () => void }) {
   const close = kbClose(onClose);
   const pick = (assignee: string | null) => {
     setErr(null);
-    assign.mutate({ leadId: lead.id, assignee }, { onSuccess: close, onError: (e: any) => setErr(e?.message ?? 'Failed.') });
+    assign.mutate({ leadId: lead.id, assignee }, { onSuccess: close, onError: (e: any) => setErr(friendlyError(e, 'Something went wrong. Please try again.')) });
   };
   return (
     <SheetShell title="Assign lead" sub={lead.name} onClose={close}>
@@ -531,13 +532,13 @@ function CoupleSheet({ lead, partnerName, onClose }: { lead: Lead; partnerName: 
     setErr(null);
     setPartner.mutate({ leadId: lead.id, partnerLeadId: p.id }, {
       onSuccess: (status) => { close(); setTimeout(() => partnerSyncAlert(status), 350); },
-      onError: (e: any) => setErr(e?.message ?? 'Failed.'),
+      onError: (e: any) => setErr(friendlyError(e, 'Something went wrong. Please try again.')),
     });
   };
   const unlink = () => {
     Alert.alert('Remove couple marking?', 'This removes the couple link between both leads. Client cards already linked as training partners are not changed.', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Unlink', style: 'destructive', onPress: () => clearPartner.mutate({ leadId: lead.id }, { onSuccess: close, onError: (e: any) => setErr(e?.message ?? 'Failed.') }) },
+      { text: 'Unlink', style: 'destructive', onPress: () => clearPartner.mutate({ leadId: lead.id }, { onSuccess: close, onError: (e: any) => setErr(friendlyError(e, 'Something went wrong. Please try again.')) }) },
     ]);
   };
 
@@ -609,7 +610,7 @@ function LeadSheet({ leadId, rows, profile, partnerName, onClose }: { leadId: st
   const toggleCategory = (val: string) => {
     if (!editable) return;
     const next = val === 'not_defined' ? [] : selCats.includes(val) ? selCats.filter((c) => c !== val) : [...selCats, val];
-    update.mutate({ id: lead.id, patch: { categories: next, category: next[0] ?? 'not_defined' } }, { onError: (e: any) => setErr(e?.message) });
+    update.mutate({ id: lead.id, patch: { categories: next, category: next[0] ?? 'not_defined' } }, { onError: (e: any) => setErr(friendlyError(e)) });
   };
 
   /* Web stage-change interception, ported (2026-08 delta: Potential is no longer
@@ -621,7 +622,7 @@ function LeadSheet({ leadId, rows, profile, partnerName, onClose }: { leadId: st
     if (stage === 'Converted') return setFlow(lead.client_id ? 'converted_package' : 'converted_date');
     if (stage === 'QHP Booked') {
       if (lead.qhp_pref_date && lead.qhp_pref_location) {
-        update.mutate({ id: lead.id, patch: { stage: 'QHP Booked' } }, { onError: (e: any) => setErr(e?.message) });
+        update.mutate({ id: lead.id, patch: { stage: 'QHP Booked' } }, { onError: (e: any) => setErr(friendlyError(e)) });
         return;
       }
       return setFlow('qhp_booking');
@@ -630,7 +631,7 @@ function LeadSheet({ leadId, rows, profile, partnerName, onClose }: { leadId: st
     if (stage === 'Follow Up') return setFlow('followup');
     if (stage === 'Lost') return setFlow('lost');
     if (stage === 'Raise invoice') return setFlow('raise_invoice');
-    update.mutate({ id: lead.id, patch: { stage } }, { onError: (e: any) => setErr(e?.message) });
+    update.mutate({ id: lead.id, patch: { stage } }, { onError: (e: any) => setErr(friendlyError(e)) });
   };
 
   return (
@@ -662,7 +663,7 @@ function LeadSheet({ leadId, rows, profile, partnerName, onClose }: { leadId: st
             </Pressable>
           ) : null}
           {editable ? (
-            <Pressable disabled={togglePotential.isPending} onPress={() => togglePotential.mutate({ lead, profile }, { onError: (e: any) => setErr(e?.message) })} style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 7, paddingHorizontal: 11, borderRadius: 10, backgroundColor: hexA(AMBER, isPotential ? 0.16 : 0.06), borderWidth: 1, borderColor: hexA(AMBER, isPotential ? 0.5 : 0.28) }}>
+            <Pressable disabled={togglePotential.isPending} onPress={() => togglePotential.mutate({ lead, profile }, { onError: (e: any) => setErr(friendlyError(e)) })} style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 7, paddingHorizontal: 11, borderRadius: 10, backgroundColor: hexA(AMBER, isPotential ? 0.16 : 0.06), borderWidth: 1, borderColor: hexA(AMBER, isPotential ? 0.5 : 0.28) }}>
               <Icon path="M12 3l2.5 5.6 6.1.6-4.6 4.1 1.3 6L12 16.2 6.7 19.3 8 13.3 3.4 9.2l6.1-.6z" size={11} color={AMBER} strokeWidth={2} />
               <Text style={{ fontFamily: isPotential ? F.bodyBold : F.bodySemi, fontSize: 11, color: AMBER }}>{togglePotential.isPending ? '…' : isPotential ? 'Unmark Potential' : 'Mark as Potential'}</Text>
             </Pressable>
@@ -685,7 +686,7 @@ function LeadSheet({ leadId, rows, profile, partnerName, onClose }: { leadId: st
             </Pressable>
           ) : null}
           {spamAllowed ? (
-            <Pressable disabled={toggleSpam.isPending} onPress={() => toggleSpam.mutate(lead.id, { onError: (e: any) => setErr(e?.message) })} style={{ opacity: toggleSpam.isPending ? 0.5 : 1, paddingVertical: 7, paddingHorizontal: 11, borderRadius: 10, backgroundColor: hexA(C.red, 0.08), borderWidth: 1, borderColor: hexA(C.red, 0.3) }}>
+            <Pressable disabled={toggleSpam.isPending} onPress={() => toggleSpam.mutate(lead.id, { onError: (e: any) => setErr(friendlyError(e)) })} style={{ opacity: toggleSpam.isPending ? 0.5 : 1, paddingVertical: 7, paddingHorizontal: 11, borderRadius: 10, backgroundColor: hexA(C.red, 0.08), borderWidth: 1, borderColor: hexA(C.red, 0.3) }}>
               <Text style={{ fontFamily: F.bodySemi, fontSize: 11, color: C.red }}>{lead.is_spam ? 'Unmark spam' : 'Mark spam'}</Text>
             </Pressable>
           ) : null}
@@ -699,7 +700,7 @@ function LeadSheet({ leadId, rows, profile, partnerName, onClose }: { leadId: st
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
               <Icon name="clock" size={13} color={C.gold} strokeWidth={2.2} />
               <Body style={{ flex: 1, fontSize: 11.5, fontFamily: F.bodySemi, color: C.gold }}>Follow-up {fmtAt(pendingFu.scheduled_at)}</Body>
-              <Pressable disabled={completeFu.isPending} onPress={() => completeFu.mutate({ leadId: lead.id, entryId: pendingFu.id, profile }, { onError: (e: any) => setErr(e?.message) })} style={{ paddingVertical: 5, paddingHorizontal: 10, borderRadius: 9, backgroundColor: hexA(C.green, 0.14), borderWidth: 1, borderColor: hexA(C.green, 0.45) }}>
+              <Pressable disabled={completeFu.isPending} onPress={() => completeFu.mutate({ leadId: lead.id, entryId: pendingFu.id, profile }, { onError: (e: any) => setErr(friendlyError(e)) })} style={{ paddingVertical: 5, paddingHorizontal: 10, borderRadius: 9, backgroundColor: hexA(C.green, 0.14), borderWidth: 1, borderColor: hexA(C.green, 0.45) }}>
                 <Text style={{ fontFamily: F.bodyBold, fontSize: 10, color: C.green }}>{completeFu.isPending ? '…' : 'Mark done'}</Text>
               </Pressable>
             </View>
@@ -760,7 +761,7 @@ function LeadSheet({ leadId, rows, profile, partnerName, onClose }: { leadId: st
           <Mono style={{ fontSize: 9, letterSpacing: 0.9, color: C.muted3 }}>REMARKS · {remarks.length}</Mono>
           <View style={{ flexDirection: 'row', gap: 8, alignItems: 'flex-end' }}>
             <TextInput value={newRemark} onChangeText={(v) => setNewRemark(v.slice(0, 600))} placeholder="Add a remark…" placeholderTextColor={C.muted3} multiline style={[inputSt, { flex: 1, minHeight: 42, maxHeight: 90 }]} />
-            <Pressable onPress={() => addRemark.mutate({ lead, text: newRemark, profile }, { onSuccess: () => setNewRemark(''), onError: (e: any) => setErr(e?.message) })} disabled={addRemark.isPending || newRemark.trim().length < 3} style={{ paddingVertical: 11, paddingHorizontal: 13, borderRadius: 11, backgroundColor: hexA(C.orange, newRemark.trim().length < 3 ? 0.06 : 0.16), borderWidth: 1, borderColor: hexA(C.orange, newRemark.trim().length < 3 ? 0.2 : 0.5) }}>
+            <Pressable onPress={() => addRemark.mutate({ lead, text: newRemark, profile }, { onSuccess: () => setNewRemark(''), onError: (e: any) => setErr(friendlyError(e)) })} disabled={addRemark.isPending || newRemark.trim().length < 3} style={{ paddingVertical: 11, paddingHorizontal: 13, borderRadius: 11, backgroundColor: hexA(C.orange, newRemark.trim().length < 3 ? 0.06 : 0.16), borderWidth: 1, borderColor: hexA(C.orange, newRemark.trim().length < 3 ? 0.2 : 0.5) }}>
               <Icon name="send" size={14} color={newRemark.trim().length < 3 ? C.muted3 : C.orange} strokeWidth={2.2} />
             </Pressable>
           </View>
@@ -829,7 +830,7 @@ function ReminderCard({ r, profile }: { r: FollowUpReminder; profile: any }) {
   const stCol = stageColor(r.stage);
   const pending = [...(r.follow_ups ?? [])].reverse().find((e) => e.status === 'pending');
   const busy = update.isPending || complete.isPending || markApplicant.isPending;
-  const fail = (e: any) => setErr(e?.message ?? 'Failed.');
+  const fail = (e: any) => setErr(friendlyError(e, 'Something went wrong. Please try again.'));
 
   return (
     <View style={{ borderRadius: 13, backgroundColor: 'rgba(0,0,0,0.25)', borderWidth: 1, borderColor: hexA(col, 0.18), padding: 11, gap: 8 }}>
@@ -1014,7 +1015,7 @@ export function OpsLeads() {
             if (row.is_dump) Alert.alert('Moved to Dump Leads', `${row.name} auto-moved after 2 attempts on a cold lead`);
             else Alert.alert('Attempt logged', 'Call attempt saved');
           },
-          onError: (e: any) => Alert.alert('Could not log attempt', e?.message ?? 'Please try again'),
+          onError: (e: any) => Alert.alert('Could not log attempt', friendlyError(e, 'Please try again')),
         }),
       },
     ]);
@@ -1026,7 +1027,7 @@ export function OpsLeads() {
         text: 'Restore',
         onPress: () => restoreDump.mutate({ leadId: l.id, profile }, {
           onSuccess: () => Alert.alert('Restored from Dump', 'Lead moved back to Cold list'),
-          onError: (e: any) => Alert.alert('Restore failed', e?.message ?? 'Please try again'),
+          onError: (e: any) => Alert.alert('Restore failed', friendlyError(e, 'Please try again')),
         }),
       },
     ]);

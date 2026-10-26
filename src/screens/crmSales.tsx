@@ -10,6 +10,7 @@ import { useAuth } from '../auth';
 import { useCrmClientList, useCrmClientDetail, usePackageCycle } from '../lib/crmClientQueries';
 import { useSalesTargets, useCreateSalesTarget, useUpdateSalesTarget, useGenerationInfo, TARGET_TYPES, SalesTarget, SalesTargetType, SalesStatus } from '../lib/salesQueries';
 import { SheetShell } from './reportDetail';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ CRM: Sales Tracker — live pipeline over sales_tracker.
    List mirrors the web CRMSalesTracker (status tabs, KPIs, urgency);
@@ -39,14 +40,14 @@ function TargetCard({ t }: { t: SalesTarget }) {
 
   const markWon = () => Alert.alert('Mark as won?', `${t.clientName} — ${t.value}`, [
     { text: 'Cancel', style: 'cancel' },
-    { text: 'Won 🏆', onPress: () => updateM.mutate({ id: t.id, status: 'won' }, { onError: (e: any) => Alert.alert("Couldn't update", e?.message) }) },
+    { text: 'Won 🏆', onPress: () => updateM.mutate({ id: t.id, status: 'won' }, { onError: (e: any) => Alert.alert("Couldn't update", friendlyError(e)) }) },
   ]);
   const confirmLost = () => {
     if (!lostReason.trim()) return;
-    updateM.mutate({ id: t.id, status: 'lost', lostReason: lostReason.trim() }, { onError: (e: any) => Alert.alert("Couldn't update", e?.message) });
+    updateM.mutate({ id: t.id, status: 'lost', lostReason: lostReason.trim() }, { onError: (e: any) => Alert.alert("Couldn't update", friendlyError(e)) });
     setLosing(false); setLostReason('');
   };
-  const reopen = () => updateM.mutate({ id: t.id, status: 'open' }, { onError: (e: any) => Alert.alert("Couldn't update", e?.message) });
+  const reopen = () => updateM.mutate({ id: t.id, status: 'open' }, { onError: (e: any) => Alert.alert("Couldn't update", friendlyError(e)) });
 
   return (
     <View style={{ padding: 11, borderRadius: 12, backgroundColor: 'rgba(0,0,0,0.24)', borderWidth: 1, borderColor: hexA(col, 0.2), borderLeftWidth: 3, borderLeftColor: col, gap: 7 }}>
@@ -431,7 +432,7 @@ function AddCtaSheet({ visible, onClose, crmId, clientId, clientName, currentSub
       await createM.mutateAsync({ crmId, clientId, type, value: composedValue, status, lostReason: lostReason.trim() || null, expectedClose, notes: notes || null });
       setSessions(''); setDuration(''); setValue(''); setNotes(''); setStatus('open'); setLostReason(''); setType('package'); setCloseDays(14);
       onClose();
-    } catch (e: any) { Alert.alert("Couldn't create CTA", e?.message ?? 'Try again.'); }
+    } catch (e: any) { Alert.alert("Couldn't create CTA", friendlyError(e, 'Try again.')); }
   };
 
   return (

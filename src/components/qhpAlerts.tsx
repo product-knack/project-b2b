@@ -9,6 +9,7 @@ import { useAuth } from '../auth';
 import { useStore } from '../store';
 import { useMyCapabilities } from '../lib/capabilities';
 import { useQhpReviewQueue, useHeldOwnReports, useResubmitReport, type HeldOwnRow } from '../lib/qhpReviewQueries';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ Dashboard alerts for the QHP review flow ============
    1. QhpReviewAlert  — reviewers (junior_researcher / hod): reports awaiting MY
@@ -120,7 +121,7 @@ export function ResubmitSheet({ row, onClose }: { row: HeldOwnRow; onClose: () =
           <TextInput value={msg} onChangeText={(v) => setMsg(v.slice(0, 500))} placeholder="What did you change?" placeholderTextColor={C.muted3} multiline style={{ minHeight: 70, borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', padding: 11, color: '#fff', fontFamily: F.body, fontSize: 13, textAlignVertical: 'top' }} />
           {err ? <Body style={{ fontSize: 11, color: C.red }}>{err}</Body> : null}
           <Pressable
-            onPress={() => { setErr(null); m.mutate({ id: row.id, message: msg.trim() }, { onSuccess: onClose, onError: (e: any) => setErr(e?.message ?? 'Failed to resubmit.') }); }}
+            onPress={() => { setErr(null); m.mutate({ id: row.id, message: msg.trim() }, { onSuccess: onClose, onError: (e: any) => setErr(friendlyError(e, 'Could not resubmit. Please try again.')) }); }}
             disabled={m.isPending || !msg.trim()}
             style={{ alignItems: 'center', paddingVertical: 12, borderRadius: 12, backgroundColor: hexA(C.green, !msg.trim() ? 0.06 : 0.15), borderWidth: 1, borderColor: hexA(C.green, !msg.trim() ? 0.2 : 0.5) }}
           >

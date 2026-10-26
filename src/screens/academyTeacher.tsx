@@ -10,6 +10,7 @@ import { useAuth } from '../auth';
 import { istToday, prettyDate, useBatchStudents, AttStatus } from '../lib/academyQueries';
 import { parseTimeRange } from './academyCalendar';
 import {
+import { friendlyError } from '../lib/friendlyError';
   useMyAcademyLink, useTeacherBatches, useWeekAttendance, useBatchDateMarks, useSubmitTeacherAttendance,
   TeacherBatch, BatchDateMark,
 } from '../lib/academyAttendanceQueries';
@@ -324,7 +325,7 @@ function LogAttendanceSheet({ open, onClose }: { open: { batch: TeacherBatch; da
           onClose();
           Alert.alert('Submitted for approval', `${marks.length} student${marks.length === 1 ? '' : 's'} recorded for ${prettyDate(open.date)}. The academy office will review it.`);
         },
-        onError: (e: any) => Alert.alert('Could not submit', e?.message ?? 'Try again'),
+        onError: (e: any) => Alert.alert('Could not submit', friendlyError(e, 'Try again')),
       }
     );
   };

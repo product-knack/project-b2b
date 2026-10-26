@@ -9,6 +9,7 @@ import { useStore } from '../store';
 import { useAuth } from '../auth';
 import { useCrmClientList } from '../lib/crmClientQueries';
 import { useClientDistribution, useUpsertDistribution, DIST_CATEGORIES, DistributionCategory } from '../lib/distributionQueries';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ CRM: Client Distribution — mirrors the web CRMClientDistribution:
    sort the assigned book into care buckets, one tap per client. ============ */
@@ -40,7 +41,7 @@ export function CrmDistribution() {
   const assign = (clientId: string, category: DistributionCategory) => {
     if (!crmId) return;
     upsertM.mutate({ crmId, clientId, category }, {
-      onError: (e: any) => Alert.alert("Couldn't update", e?.message ?? 'Try again.'),
+      onError: (e: any) => Alert.alert("Couldn't update", friendlyError(e, 'Try again.')),
     });
   };
   const openClient = (id: string, name: string) => { set({ selectedClientId: id, selectedClientName: name }); go('crm-client'); };

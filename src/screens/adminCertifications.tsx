@@ -7,6 +7,7 @@ import { Icon } from '../icons';
 import { Serif, Body, Mono, Card, Avatar } from '../components/primitives';
 import { Page, TitleBlock, Badge } from './common';
 import { useCertifications, useSaveCertification, useDeleteCertification, useCertTrainers, certTrainerName, overallPct, unweightedGrade, type Certification } from '../lib/adminCertQueries';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ ADMIN — ODDS Certifications ============ */
 
@@ -91,7 +92,7 @@ function CertFormSheet({ existing, onClose }: { existing: Certification | null; 
             <Pressable disabled={save.isPending} onPress={() => {
               setErr(null);
               save.mutate({ id: existing?.id, trainerId: trainerId ?? '', courseName: course, written: Number(written), viva: Number(viva), english: Number(english) },
-                { onSuccess: onClose, onError: (e: any) => setErr(e?.message ?? 'Failed') });
+                { onSuccess: onClose, onError: (e: any) => setErr(friendlyError(e, 'Something went wrong. Please try again.')) });
             }} style={{ overflow: 'hidden', borderRadius: 12 }}>
               <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ alignItems: 'center', paddingVertical: 13 }}>
                 <Text style={{ fontFamily: F.bodyBold, fontSize: 13, color: '#fff' }}>{save.isPending ? 'Saving…' : existing ? 'Save Changes' : 'Add Certification'}</Text>
@@ -160,7 +161,7 @@ export function AdminCertifications() {
               </Pressable>
               <Pressable disabled={del.isPending} onPress={() => {
                 setErr(null);
-                if (delArm === c.id) del.mutate(c.id, { onSuccess: () => setDelArm(null), onError: (e: any) => { setDelArm(null); setErr(e?.message ?? 'Failed'); } });
+                if (delArm === c.id) del.mutate(c.id, { onSuccess: () => setDelArm(null), onError: (e: any) => { setDelArm(null); setErr(friendlyError(e, 'Something went wrong. Please try again.')); } });
                 else setDelArm(c.id);
               }} hitSlop={10} style={{ width: 28, height: 28, borderRadius: 9, backgroundColor: hexA(C.red, delArm === c.id ? 0.28 : 0.08), borderWidth: 1, borderColor: hexA(C.red, 0.4), alignItems: 'center', justifyContent: 'center' }}>
                 <Icon name="close" size={11} color={C.red} strokeWidth={2.5} />

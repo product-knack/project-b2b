@@ -1,3 +1,4 @@
+import { friendlyError } from './friendlyError';
 /* Essentials by Odds trainer auction (1 Oct 2026): the pure half, ported from the
    web's src/lib/essentialsAuction.ts so both apps read the clock the same way.
    Every rule about "which day" and "is the window open" lives here, in India
@@ -318,7 +319,7 @@ export const describeGrabError = (e: unknown): string => {
   if (err?.code === '55P03' || /lock timeout/i.test(clean)) return 'Another trainer is booking this training right now. Give it a moment, then pull to refresh.';
   if (err?.code === '23505' || /duplicate key|unique/i.test(clean)) return 'Someone already booked this training.';
   if (/failed to fetch|network request failed|network/i.test(clean)) return 'Network problem. Check your connection and try again.';
-  if (/timed out|timeout/i.test(clean)) return 'The bid took too long. Pull to refresh to see whether it went through, then try again.';
+  if (/timed out|timeout|took too long/i.test(clean)) return 'The bid took too long. Pull to refresh to see whether it went through, then try again.';
   return clean || 'Could not place this bid.';
 };
 

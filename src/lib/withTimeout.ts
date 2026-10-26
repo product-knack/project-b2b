@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { friendlyError } from './friendlyError';
 
 /* ============ Bounded waits ============
    Nothing the user waits on may hang forever: every edge-function call, storage
@@ -6,7 +7,7 @@ import { supabase } from './supabase';
    into an error the UI can show (and a busy flag can clear) instead of a spinner
    that never ends. */
 export class TimeoutError extends Error {
-  constructor(message = 'The request timed out — check your connection and try again.') {
+  constructor(message = 'This took too long. Check your connection and try again.') {
     super(message);
     this.name = 'TimeoutError';
   }
@@ -21,7 +22,7 @@ export const GPS_MS = 15_000;     // a High-accuracy fix indoors can wait foreve
 export function withTimeout<T>(p: Promise<T>, ms: number, label?: string): Promise<T> {
   let t: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
-    t = setTimeout(() => reject(new TimeoutError(label ? `${label} timed out — check your connection and try again.` : undefined)), ms);
+    t = setTimeout(() => reject(new TimeoutError(label ? `${label} took too long. Check your connection and try again.` : undefined)), ms);
   });
   return Promise.race([p, timeout]).finally(() => { if (t) clearTimeout(t); }) as Promise<T>;
 }

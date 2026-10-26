@@ -14,6 +14,7 @@ import { Icon, TrophyIcon, IconName } from '../icons';
 import { useStore, useStoreActions, homeRouteFor, Role } from '../store';
 import { navTargetRef } from '../lib/qhpNavigationQueries';
 import {
+import { friendlyError } from '../lib/friendlyError';
   Serif, Body, Mono, Card, StatCard, QuickAction, IconChip, GradientButton, ProgressBar, Pill, Avatar, AvatarPhoto, CountUp,
 } from '../components/primitives';
 import { useSidebarProfile, useUploadAvatar } from '../lib/navQueries';
@@ -1318,7 +1319,7 @@ function RosterCard({ row, trainerName, highlight, onAddWorkout, plans, devPos, 
               {queued.status === 'syncing' ? <ActivityIndicator size="small" color={col} /> : <Icon name={queued.status === 'failed' ? 'alert' : 'checks'} size={13} color={col} strokeWidth={2.3} />}
               <View style={{ flex: 1 }}>
                 <Text style={{ fontFamily: F.bodySemi, fontSize: 12, color: col }}>Workout logged · {line.text}</Text>
-                {queued.status === 'failed' && queued.error ? <Body style={{ fontSize: 10.5, color: '#E0A090', marginTop: 2 }} numberOfLines={2}>{queued.error}</Body> : null}
+                {queued.status === 'failed' && queued.error ? <Body style={{ fontSize: 10.5, color: '#E0A090', marginTop: 2 }} numberOfLines={2}>{friendlyError(queued.error)}</Body> : null}
               </View>
             </View>
             {onEditQueued && queued.status !== 'syncing' ? (
@@ -2632,7 +2633,7 @@ export function Dashboard() {
                         />
                       </View>
                       {failed && o.error ? (
-                        <Body style={{ fontSize: 11, color: '#E0A090' }} numberOfLines={3}>{isOtpGateError(o.error) ? workoutOtpErrorText(failedVerifyReasonFor(outboxAll, (o.payload as WorkoutLogOutboxPayload)?.scheduleSessionId)) : isPlanLimitError(o.error) ? planLimitText(o.error) : o.error}</Body>
+                        <Body style={{ fontSize: 11, color: '#E0A090' }} numberOfLines={3}>{isOtpGateError(o.error) ? workoutOtpErrorText(failedVerifyReasonFor(outboxAll, (o.payload as WorkoutLogOutboxPayload)?.scheduleSessionId)) : isPlanLimitError(o.error) ? planLimitText(o.error) : friendlyError(o.error)}</Body>
                       ) : null}
                       {!failed && o.kind === 'workout-log' && savedOtps.some((s) => s.scheduleId === (o.payload as WorkoutLogOutboxPayload)?.scheduleSessionId) ? (
                         <Body style={{ fontSize: 11, color: C.gold }}>{OTP_SAVED_HINT}</Body>
@@ -4513,7 +4514,7 @@ export function ClientTrendsSection({ clientId, scrollRef, scrollOffsetRef, canE
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       closeHd();
     } catch (e: any) {
-      Alert.alert("Couldn't save health data", e?.message ?? 'Try again.');
+      Alert.alert("Couldn't save health data", friendlyError(e, 'Try again.'));
     } finally { hdBusyRef.current = false; setHdSaving(false); }
   };
   // 7-slot arrays (Mon..Sun), built LIVE from useWeeklyHealthSummary (web
@@ -5096,7 +5097,7 @@ export function ClientDetail() {
       await saveLocM.mutateAsync({ clientId, lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy ?? null });
       Alert.alert('Location saved', `${clientName}'s home location has been captured.`);
     } catch (e: any) {
-      Alert.alert('Could not capture', e?.message ?? 'Turn on GPS and try again.');
+      Alert.alert('Could not capture', friendlyError(e, 'Turn on GPS and try again.'));
     } finally {
       setCapturingLoc(false);
     }
@@ -5264,7 +5265,7 @@ export function ClientDetail() {
       setGAlso(new Set());
       setGSteps(''); setGSleep(''); setGNutrition(''); setGCardio(''); setGRecommend('');
     } catch (e: any) {
-      Alert.alert("Couldn't save goals", e?.message ?? 'Try again.');
+      Alert.alert("Couldn't save goals", friendlyError(e, 'Try again.'));
     }
   };
   return (
@@ -5749,7 +5750,7 @@ export function ClientDetail() {
                   hitSlop={8}
                   onPress={() => Alert.alert('Delete this week?', `Remove the goals for ${g.range}?`, [
                     { text: 'Cancel', style: 'cancel' },
-                    { text: 'Delete', style: 'destructive', onPress: () => deleteGoalM.mutateAsync({ id: g.id, clientId: clientId! }).catch((e: any) => Alert.alert("Couldn't delete", e?.message ?? 'Try again.')) },
+                    { text: 'Delete', style: 'destructive', onPress: () => deleteGoalM.mutateAsync({ id: g.id, clientId: clientId! }).catch((e: any) => Alert.alert("Couldn't delete", friendlyError(e, 'Try again.'))) },
                   ])}
                   style={{ width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: hexA(C.red, 0.1), borderWidth: 1, borderColor: hexA(C.red, 0.3) }}
                 >
@@ -7011,7 +7012,7 @@ export function Workout() {
           if (data?.length) {
             await removeOutboxItem(editingOutboxId);
             set({ editingOutboxId: null });
-            Alert.alert('Already synced', 'This workout synced to the server while it was queued — saved logs can no longer be edited.', [{ text: 'OK', onPress: () => (canGoBack ? back() : go('dashboard')) }]);
+            Alert.alert('Already synced', 'This workout was already saved while it was waiting. A saved log cannot be edited any more.', [{ text: 'OK', onPress: () => (canGoBack ? back() : go('dashboard')) }]);
             return;
           }
         } catch { /* offline blip — proceed with the edit */ }
@@ -7421,7 +7422,7 @@ export function Workout() {
           // The item synced or was discarded while editing — nothing left to update.
           setSaving(false);
           set({ editingOutboxId: null });
-          Alert.alert('Already synced', 'This workout already reached the server — saved logs can no longer be edited.', [{ text: 'OK', onPress: () => (canGoBack ? back() : go('dashboard')) }]);
+          Alert.alert('Already synced', 'This workout is already saved. A saved log cannot be edited any more.', [{ text: 'OK', onPress: () => (canGoBack ? back() : go('dashboard')) }]);
           return;
         }
         itemId = reuseId;
@@ -7486,7 +7487,7 @@ export function Workout() {
         finishAfterSave(true);
       } else {
         // Server rejection: stays safely queued on this device, shown on Home.
-        setSyncError(isOtpGateError(res.error) ? workoutOtpErrorText(failedVerifyReasonFor(outboxAllW, workoutScheduleId)) : isPlanLimitError(res.error) ? planLimitText(res.error) : (res.error ?? 'The server rejected this log.'));
+        setSyncError(isOtpGateError(res.error) ? workoutOtpErrorText(failedVerifyReasonFor(outboxAllW, workoutScheduleId)) : isPlanLimitError(res.error) ? planLimitText(res.error) : friendlyError(res.error, 'This log was not accepted. Check it and try again.'));
         if (editingOutboxId) set({ editingOutboxId: null });
       }
     } finally {
@@ -7745,7 +7746,7 @@ export function Workout() {
               await z2LogM.mutateAsync({ goalId: z.goalId, clientId: selectedClientId as string, date: z2Date, durationMin: dur != null && !isNaN(dur) ? dur : null });
               setZ2Open(false); setZ2Date(null); setZ2Dur('');
               Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-            } catch (e: any) { Alert.alert("Couldn't log Zone 2", e?.message ?? 'Try again.'); }
+            } catch (e: any) { Alert.alert("Couldn't log Zone 2", friendlyError(e, 'Try again.')); }
           };
           return (
             <Card colors={['rgba(56,34,21,0.45)', 'rgba(18,14,14,0.5)']} border={hexA(met ? C.green : C.orange, 0.22)} radius={18} style={{ padding: 14, gap: 11 }}>
@@ -9248,7 +9249,7 @@ function QhpAssessor() {
       qhpQc.invalidateQueries({ queryKey: ['qhp-assessments'] }); // hide the pin on this card
       Alert.alert('Location saved', `${clientName}'s home location has been captured.`);
     } catch (e: any) {
-      Alert.alert('Could not capture', e?.message ?? 'Turn on GPS and try again.');
+      Alert.alert('Could not capture', friendlyError(e, 'Turn on GPS and try again.'));
     } finally {
       setCapturingHomeFor(null);
     }
@@ -9725,7 +9726,7 @@ function QhpAssessor() {
                         await heartMathM.mutateAsync({ assessmentId: hmFor.id, ...hmVals });
                         setHmFor(null);
                         Alert.alert('HeartMath added', 'The report was attached to the assessment.');
-                      } catch (e: any) { Alert.alert('Failed to add HeartMath', e?.message ?? 'Unknown error'); }
+                      } catch (e: any) { Alert.alert('Failed to add HeartMath', friendlyError(e, 'Something went wrong. Please try again.')); }
                     }}
                     style={{ flex: 1, alignItems: 'center', paddingVertical: 11, borderRadius: 12, backgroundColor: hexA(C.red, Object.values(hmVals).every((v) => v.trim()) ? 0.16 : 0.06), borderWidth: 1, borderColor: hexA(C.red, 0.4) }}
                   >
@@ -12374,7 +12375,7 @@ export function Profile() {
     try {
       await uploadAvatarM.mutateAsync({ uri: a.uri, mime: a.mimeType ?? 'image/jpeg', fileName: a.fileName ?? null });
       Alert.alert('Profile photo updated');
-    } catch (e: any) { Alert.alert('Upload failed', e?.message ?? 'Unknown error'); }
+    } catch (e: any) { Alert.alert('Upload failed', friendlyError(e, 'Something went wrong. Please try again.')); }
   };
   const fullName = p ? `${p.first_name ?? ''} ${p.last_name ?? ''}`.replace(/\s+/g, ' ').trim() : firstName;
   const roleLabel = p?.role ? p.role.charAt(0).toUpperCase() + p.role.slice(1) : 'Trainer';

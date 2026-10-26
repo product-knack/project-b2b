@@ -9,6 +9,7 @@ import { Serif, Body, Mono, Card } from '../components/primitives';
 import { Page, TitleBlock, Badge, BackLink } from './common';
 import { useStore } from '../store';
 import { supabase } from '../lib/supabase';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ ADMIN — Tools hub + Trainer Fee Management (web /admin/tools/trainer-fees) ============ */
 
@@ -154,7 +155,7 @@ function FeeFormSheet({ existing, onClose }: { existing: Fee | null; onClose: ()
             <Pressable disabled={save.isPending} onPress={() => {
               setErr(null);
               save.mutate({ id: existing?.id, trainerId: trainerId ?? '', clientId: clientId ?? '', amount: parseFloat(amount), method },
-                { onSuccess: onClose, onError: (e: any) => setErr(e?.message ?? 'Failed') });
+                { onSuccess: onClose, onError: (e: any) => setErr(friendlyError(e, 'Something went wrong. Please try again.')) });
             }} style={{ overflow: 'hidden', borderRadius: 12 }}>
               <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ alignItems: 'center', paddingVertical: 13 }}>
                 <Text style={{ fontFamily: F.bodyBold, fontSize: 13, color: '#fff' }}>{save.isPending ? 'Saving…' : existing ? 'Save Changes' : 'Add Fee'}</Text>
@@ -181,7 +182,7 @@ export function AdminTrainerFees() {
       `${r.trainer_name} → ${r.client_name} · ₹${Number(r.fee_amount).toFixed(2)} per session.\n\nPayout calculations update everywhere immediately. This cannot be undone.`,
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: () => del.mutate(r.id, { onError: (e: any) => setErr(e?.message ?? 'Failed to delete fee') }) },
+        { text: 'Delete', style: 'destructive', onPress: () => del.mutate(r.id, { onError: (e: any) => setErr(friendlyError(e, 'Could not delete the fee. Please try again.')) }) },
       ]
     );
   };
@@ -392,7 +393,7 @@ export function AdminManageTeams() {
     }
     createTeams.mutate(entries.map((e) => ({ manager_id: e.managerId!, team_name: e.teamName.trim(), team_json: e.members, team_start: start, team_end: end || null })), {
       onSuccess: () => { setEntries([{ managerId: null, teamName: '', members: [] }]); setCount(1); setStart(''); setEnd(''); },
-      onError: (e: any) => setErr(e?.message ?? 'Failed'),
+      onError: (e: any) => setErr(friendlyError(e, 'Something went wrong. Please try again.')),
     });
   };
 
@@ -519,7 +520,7 @@ export function AdminManageTeams() {
                 <Pressable disabled={updateTeam.isPending} onPress={() => {
                   setErr(null);
                   updateTeam.mutate({ id: editing.id, teamName: editName, managerId: editManager ?? '', members: editMembers },
-                    { onSuccess: () => setEditing(null), onError: (e: any) => setErr(e?.message ?? 'Failed') });
+                    { onSuccess: () => setEditing(null), onError: (e: any) => setErr(friendlyError(e, 'Something went wrong. Please try again.')) });
                 }} style={{ overflow: 'hidden', borderRadius: 12 }}>
                   <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ alignItems: 'center', paddingVertical: 13 }}>
                     <Text style={{ fontFamily: F.bodyBold, fontSize: 13, color: '#fff' }}>{updateTeam.isPending ? 'Saving…' : 'Save Changes'}</Text>

@@ -6,6 +6,7 @@ import { Serif, Body, Mono, Card } from '../components/primitives';
 import { Page, TitleBlock, Badge, HScroll } from './common';
 import { useMyOpsProfile } from '../lib/opsLeadQueries';
 import {
+import { friendlyError } from '../lib/friendlyError';
   ESC_CATEGORIES, escCountFor, useEscCategory, useSaveQhpEscRemark, useUpdateEscalation, useOpsRenewalsPending,
   useMechScoreFailedEscalations, mechShortReason,
   type EscCategory, type EscalationRow,
@@ -52,7 +53,7 @@ function EscCard({ row, cat, profile }: { row: EscalationRow; cat: EscCategory; 
 
   const saveRemark = () => {
     setErr(null);
-    const done = { onSuccess: () => { setRemark(''); setRemarkOpen(false); }, onError: (e: any) => setErr(e?.message ?? 'Failed') };
+    const done = { onSuccess: () => { setRemark(''); setRemarkOpen(false); }, onError: (e: any) => setErr(friendlyError(e, 'Something went wrong. Please try again.')) };
     if (isQhp) {
       const tier = row.my_tier ?? 2; // ops acts as tier-2 by default (web parity)
       qhpRemark.mutate({ id: row.id, tier: tier as 1 | 2, text: remark, profile }, done);
@@ -102,7 +103,7 @@ function EscCard({ row, cat, profile }: { row: EscalationRow; cat: EscCategory; 
             <Pressable onPress={() => setRemarkOpen(true)} style={{ flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }}>
               <Text style={{ fontFamily: F.bodySemi, fontSize: 11, color: C.muted }}>Add remark</Text>
             </Pressable>
-            <Pressable disabled={busy} onPress={() => { setErr(null); update.mutate({ id: row.id, status: 'completed', profileId: profile?.id ?? null }, { onError: (e: any) => setErr(e?.message ?? 'Failed') }); }}
+            <Pressable disabled={busy} onPress={() => { setErr(null); update.mutate({ id: row.id, status: 'completed', profileId: profile?.id ?? null }, { onError: (e: any) => setErr(friendlyError(e, 'Something went wrong. Please try again.')) }); }}
               style={{ flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: 10, backgroundColor: hexA(C.green, 0.12), borderWidth: 1, borderColor: hexA(C.green, 0.4) }}>
               <Text style={{ fontFamily: F.bodyBold, fontSize: 11, color: C.green }}>{update.isPending ? '…' : 'Mark resolved'}</Text>
             </Pressable>

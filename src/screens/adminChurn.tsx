@@ -8,6 +8,7 @@ import { Serif, Body, Mono, Card } from '../components/primitives';
 import { Page, TitleBlock, Badge, BackLink } from './common';
 import { useAuth } from '../auth';
 import { supabase } from '../lib/supabase';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ ADMIN — Churn Requests (web /admin/tools ChurnRequests port) ============ */
 
@@ -229,10 +230,10 @@ export function AdminChurn() {
       {dialog?.kind === 'approve' || dialog?.kind === 'reject' ? (
         <NotesSheet title={dialog.kind === 'approve' ? 'Approve discontinuation' : 'Reject request'} sub={nameOf(dialog.req.clients)}
           cta={dialog.kind === 'approve' ? 'Approve & discontinue client' : 'Reject request'} color={dialog.kind === 'approve' ? C.green : C.red} busy={review.isPending} onClose={() => setDialog(null)}
-          onConfirm={(notes) => { setErr(null); review.mutate({ req: dialog.req, approved: dialog.kind === 'approve', reviewNotes: notes, profileId }, { onSuccess: () => setDialog(null), onError: (e: any) => { setDialog(null); setErr(e?.message ?? 'Failed'); } }); }} />
+          onConfirm={(notes) => { setErr(null); review.mutate({ req: dialog.req, approved: dialog.kind === 'approve', reviewNotes: notes, profileId }, { onSuccess: () => setDialog(null), onError: (e: any) => { setDialog(null); setErr(friendlyError(e, 'Something went wrong. Please try again.')); } }); }} />
       ) : dialog?.kind === 'reactivate' ? (
         <NotesSheet title="Reactivate client" sub={dialog.name} cta="Reactivate" color={C.green} busy={reactivate.isPending} onClose={() => setDialog(null)}
-          onConfirm={(notes) => { setErr(null); reactivate.mutate({ clientId: dialog.clientId, notes, profileId }, { onSuccess: () => setDialog(null), onError: (e: any) => { setDialog(null); setErr(e?.message ?? 'Failed'); } }); }} />
+          onConfirm={(notes) => { setErr(null); reactivate.mutate({ clientId: dialog.clientId, notes, profileId }, { onSuccess: () => setDialog(null), onError: (e: any) => { setDialog(null); setErr(friendlyError(e, 'Something went wrong. Please try again.')); } }); }} />
       ) : null}
     </Page>
   );

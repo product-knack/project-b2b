@@ -10,6 +10,7 @@ import { useStore } from '../store';
 import { AcademyCalendarTab } from './academyCalendar';
 import { AttendanceApprovalPanel, PendingAttendanceBanner } from './academyApproval';
 import {
+import { friendlyError } from '../lib/friendlyError';
   useAcademyOverview, useAcademyUsers, useSaveAcademyUser, useSoftDeleteAcademyUser, useEnrollmentCounts,
   useAcademyBatches, useDeleteBatch, useSaveBatch, useSetBatchTeachers, useBatchStudents, useAttendanceByBatchDate, useUpsertAttendance,
   useAttendanceReport, useAssessments, useUpsertAssessmentMarks, useUpdateAssessmentMeta,
@@ -186,7 +187,7 @@ function PeopleTab({ role }: { role: 'student' | 'teacher' }) {
   const confirmDelete = (u: AcademyUser) =>
     Alert.alert(`Deactivate ${u.name}?`, 'They stay in the records but are marked inactive and hidden from active lists.', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Deactivate', style: 'destructive', onPress: () => delM.mutate(u.id, { onError: (e: any) => Alert.alert('Failed', e?.message ?? 'Try again') }) },
+      { text: 'Deactivate', style: 'destructive', onPress: () => delM.mutate(u.id, { onError: (e: any) => Alert.alert('Failed', friendlyError(e, 'Try again')) }) },
     ]);
 
   return (
@@ -242,7 +243,7 @@ function PeopleTab({ role }: { role: 'student' | 'teacher' }) {
         onClose={() => setEditing(null)}
         onSave={(v) => saveM.mutate({ ...v, role } as any, {
           onSuccess: () => setEditing(null),
-          onError: (e: any) => Alert.alert('Could not save', e?.message ?? 'Try again'),
+          onError: (e: any) => Alert.alert('Could not save', friendlyError(e, 'Try again')),
         })}
       />
     </View>
@@ -326,7 +327,7 @@ function BatchesTab({ onAttendance }: { onAttendance: (batchId: string) => void 
     Alert.alert(
       'Delete batch?',
       `"${b.course_name} · ${b.batch_name}" and ALL its enrollments, attendance and marks will be permanently deleted. This cannot be undone.`,
-      [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: () => delM.mutate(b.id, { onError: (e: any) => Alert.alert('Failed', e?.message ?? 'Try again') }) }]
+      [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: () => delM.mutate(b.id, { onError: (e: any) => Alert.alert('Failed', friendlyError(e, 'Try again')) }) }]
     );
 
   return (
@@ -492,7 +493,7 @@ function BatchFormSheet({ value, onClose }: { value: 'new' | AcademyBatch | null
       },
       {
         onSuccess: () => { Alert.alert(isEdit ? 'Batch updated' : 'Batch created', `"${course.trim()} · ${name.trim()}" saved.`); onClose(); },
-        onError: (e: any) => Alert.alert('Could not save batch', e?.message ?? 'Try again'),
+        onError: (e: any) => Alert.alert('Could not save batch', friendlyError(e, 'Try again')),
       }
     );
   };
@@ -704,7 +705,7 @@ function MarkAttendance({ presetBatchId }: { presetBatchId: string | null }) {
     if (!rows.length) { Alert.alert('Nothing to save', 'Mark at least one student first.'); return; }
     saveM.mutate({ batchId, date, markedBy: meId, rows }, {
       onSuccess: () => { setDirty(false); Alert.alert('Attendance saved', `${rows.length} student${rows.length === 1 ? '' : 's'} recorded for ${prettyDate(date)}.`); },
-      onError: (e: any) => Alert.alert('Could not save', e?.message ?? 'Try again'),
+      onError: (e: any) => Alert.alert('Could not save', friendlyError(e, 'Try again')),
     });
   };
   const shiftDate = (n: number) => {
@@ -1042,7 +1043,7 @@ function EnterMarksSheet({ visible, batchId, onClose }: { visible: boolean; batc
     if (bad) { Alert.alert('Check the marks', `Every mark must be a number between 0 and ${maxN}.`); return; }
     saveM.mutate({ batchId, date, title, maxMarks: maxN, passMarks: passN, createdBy: meId, rows }, {
       onSuccess: () => { Alert.alert('Marks saved', `${rows.length} student${rows.length === 1 ? '' : 's'} recorded for "${title.trim()}".`); onClose(); },
-      onError: (e: any) => Alert.alert('Could not save', e?.message ?? 'Try again'),
+      onError: (e: any) => Alert.alert('Could not save', friendlyError(e, 'Try again')),
     });
   };
 

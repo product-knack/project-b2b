@@ -17,6 +17,7 @@ import { useVideoPlayer, VideoView } from 'expo-video';
 import { WebView } from 'react-native-webview';
 
 import {
+import { friendlyError } from '../lib/friendlyError';
   ACK_VERDICT_LABEL, ALL_PLATFORMS, ALL_TYPES, PRIORITY_COLOR, PRIORITY_LABEL, PLATFORM_LABEL, PLATFORM_ON_TICKET,
   STATUS_COLOR, STATUS_LABEL, STAGE_LABEL, STAGE_ORDER,
   TYPE_ICON, TYPE_LABEL, TYPE_LABEL_LONG, TYPE_PROMPT, RESOLUTION_LABEL, TechAck, TechAckVerdict, TechMessage, TechPlatform, TechPriority, TechTicket, TechType,
@@ -137,8 +138,8 @@ export async function pickTechPdf(): Promise<PickedTechFile[]> {
 }
 export function attachMenu(onPicked: (files: PickedTechFile[]) => void) {
   Alert.alert('Attach', 'Screenshots help Tech reproduce the issue.', [
-    { text: 'Photo or video', onPress: () => pickTechMedia().then(onPicked).catch((e) => Alert.alert("Couldn't open gallery", String(e?.message ?? e))) },
-    { text: 'PDF', onPress: () => pickTechPdf().then(onPicked).catch((e) => Alert.alert("Couldn't open files", String(e?.message ?? e))) },
+    { text: 'Photo or video', onPress: () => pickTechMedia().then(onPicked).catch((e) => Alert.alert("Couldn't open gallery", friendlyError(e))) },
+    { text: 'PDF', onPress: () => pickTechPdf().then(onPicked).catch((e) => Alert.alert("Couldn't open files", friendlyError(e))) },
     { text: 'Cancel', style: 'cancel' },
   ]);
 }
@@ -353,7 +354,7 @@ export function Composer({ ticketId, closed, dark }: { ticketId: string; closed:
       onError: (e: any) => {
         setText((t) => (t.trim() ? t : payloadText));
         setFile(payloadFile);
-        Alert.alert('Not sent', e?.message ?? 'Check your connection and try again.');
+        Alert.alert('Not sent', friendlyError(e, 'Check your connection and try again.'));
       },
       onSettled: () => { sendingRef.current = false; },
     });
@@ -478,7 +479,7 @@ export function AcknowledgeCard({ ticket }: { ticket: TechTicket }) {
       onSuccess: () => { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}); },
       onError: (e: any) => {
         sentRef.current = false;                 // a failure has to stay retryable
-        Alert.alert("Couldn't send that", e?.message ?? 'Check your connection and try again.');
+        Alert.alert("Couldn't send that", friendlyError(e, 'Check your connection and try again.'));
       },
     });
   };
@@ -542,7 +543,7 @@ export function CloseReasonSheet({ ticket, visible, onClose }: { ticket: TechTic
     sentRef.current = true;
     closeM.mutate({ id: ticket.id, reason }, {
       onSuccess: () => { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}); onClose(); },
-      onError: (e: any) => { sentRef.current = false; Alert.alert("Couldn't close", e?.message ?? 'Check your connection and try again.'); },
+      onError: (e: any) => { sentRef.current = false; Alert.alert("Couldn't close", friendlyError(e, 'Check your connection and try again.')); },
     });
   };
 
@@ -1020,7 +1021,7 @@ export function RaiseTicketSheet({ onClose, onDone }: { onClose: () => void; onD
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
         onDone(t.id);
       },
-      onError: (e: any) => Alert.alert("Couldn't raise the ticket", e?.message ?? 'Check your connection and try again.'),
+      onError: (e: any) => Alert.alert("Couldn't raise the ticket", friendlyError(e, 'Check your connection and try again.')),
     });
   };
 

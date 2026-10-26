@@ -8,6 +8,7 @@ import { Page, TitleBlock, Badge, MiniAvatar } from './common';
 import { useAuth } from '../auth';
 import { useStore } from '../store';
 import {
+import { friendlyError } from '../lib/friendlyError';
   useRevenueForecastClients, usePriorityRows, derivePrioritySets, useConsumedSinceMark,
   useAddForecastRemark, useCrmForecastBanner, remarkDue, monthKey, monthLabel,
   PriorityRow, ForecastClient,
@@ -90,7 +91,7 @@ export function CrmRevenueForecast() {
         entry: { type: 'remark', reason: reason.trim(), plan: plan.trim() },
       });
       setReason(''); setPlan(''); Keyboard.dismiss();
-    } catch (e: any) { Alert.alert("Couldn't add remark", e?.message ?? 'Try again.'); }
+    } catch (e: any) { Alert.alert("Couldn't add remark", friendlyError(e, 'Try again.')); }
   };
 
   const threeDaysAgo = new Date(Date.now() - 3 * 864e5).toISOString();

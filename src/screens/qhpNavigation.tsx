@@ -1,3 +1,4 @@
+import { friendlyError } from '../lib/friendlyError';
 /* QHP navigation (14 Oct 2026, owner: "a Start navigation button on the upcoming QHP
    cards, Uber-style live tracking to the client's pin, only when clients.brb_location
    exists"; same afternoon: "beautify it like Google Maps, same style map, same animation,
@@ -422,7 +423,7 @@ export function QhpNavigation() {
       await endedP;
       finishing.current = false;
       setPhase(endedBy === 'arrived' ? 'arrived' : 'navigating');
-      Alert.alert('Could not save the ride', e?.message ?? 'Please try again.', [{ text: 'OK' }]);
+      Alert.alert('Could not save the ride', friendlyError(e, 'Please try again.'), [{ text: 'OK' }]);
     }
   };
 

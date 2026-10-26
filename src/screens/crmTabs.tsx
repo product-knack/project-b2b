@@ -13,6 +13,7 @@ import { RosterSession } from '../lib/rosterQueries';
 import { useAuth } from '../auth';
 import { useCrmRenewals, useCrmBirthdays, useCrmMetrics, useCrmRetentionBreakdown } from '../lib/crmQueries';
 import {
+import { friendlyError } from '../lib/friendlyError';
   useCrmInactiveOverview, useCrmMissingLogRows, useCrmLeaves, useCrmTasks,
   useCrmTickets, useCrmOpenTicketsCount, useCrmStaleComms, useCrmPendingComms,
   useCrmQhpCompletions, useCrmIncidentTrainers, useCrmTrainerIncidentHistory, useCrmIncentives, useLeaveAffectedSessions, useCloseTicket,
@@ -413,7 +414,7 @@ export function CrmSectionPage() {
     setMarkingDone(row.id);
     markDoneM.mutate({ id: row.id, clientId: row.clientId }, {
       onSettled: () => setMarkingDone(null),
-      onError: (e: any) => Alert.alert('Could not mark done', e?.message ?? 'Please try again.'),
+      onError: (e: any) => Alert.alert('Could not mark done', friendlyError(e, 'Please try again.')),
     });
   };
   const openClient = (row: CommRow) => { set({ selectedClientId: row.clientId, selectedClientName: row.clientName, clientInitialTab: 'comms' }); go('crm-client'); };
@@ -673,7 +674,7 @@ export function CrmSectionPage() {
                                 if (!crmId) return;
                                 closeTicketM.mutate({ ticketId: t.id, closeRemark, closedBy: crmId }, {
                                   onSuccess: () => { setClosingTicket(null); setCloseRemark(''); },
-                                  onError: (e: any) => Alert.alert("Couldn't close", e?.message ?? 'Try again.'),
+                                  onError: (e: any) => Alert.alert("Couldn't close", friendlyError(e, 'Try again.')),
                                 });
                               }}
                               disabled={closeTicketM.isPending}
@@ -855,7 +856,7 @@ export function CrmSectionPage() {
                               if (!crmId || !incidentText.trim()) return;
                               submitIncidentM.mutate({ crmId, trainerId: t.id, message: incidentText }, {
                                 onSuccess: () => setIncidentText(''),
-                                onError: (e: any) => Alert.alert("Couldn't report", e?.message ?? 'Try again.'),
+                                onError: (e: any) => Alert.alert("Couldn't report", friendlyError(e, 'Try again.')),
                               });
                             }}
                             disabled={!incidentText.trim() || submitIncidentM.isPending}

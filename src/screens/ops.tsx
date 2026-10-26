@@ -12,6 +12,7 @@ import { useStore } from '../store';
 import { useSidebarProfile } from '../lib/navQueries';
 import { useLeadStats, useColdLeads, useOpsFollowUpReminders, useMyOpsProfile } from '../lib/opsLeadQueries';
 import {
+import { friendlyError } from '../lib/friendlyError';
   useSalesTargetsOverview, useAppendSalesTargetNote, NOTE_CATEGORIES,
   useQhpHolds, useAddHoldReply, useQhpHoldHistory, useCrmPendingAssignments, useOpsPaidClients,
   useBaselineExplanation, baselineMonths,
@@ -653,7 +654,7 @@ function TargetNoteSheet({ target, canWrite, onClose }: { target: SalesTargetRow
                 <TextInput value={note} onChangeText={(v) => setNote(v.slice(0, 1000))} placeholder="Coaching note for the CRM (min 5 chars)…" placeholderTextColor={C.muted3} multiline style={{ minHeight: 70, borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', padding: 11, color: '#fff', fontFamily: F.body, fontSize: 13, textAlignVertical: 'top' }} />
                 {err ? <Body style={{ fontSize: 11, color: C.red }}>{err}</Body> : null}
                 <Pressable
-                  onPress={() => { setErr(null); m.mutate({ targetId: target.id, category: cat, note }, { onSuccess: () => setNote(''), onError: (e: any) => setErr(e?.message ?? 'Failed') }); }}
+                  onPress={() => { setErr(null); m.mutate({ targetId: target.id, category: cat, note }, { onSuccess: () => setNote(''), onError: (e: any) => setErr(friendlyError(e, 'Something went wrong. Please try again.')) }); }}
                   disabled={m.isPending || note.trim().length < 5}
                   style={{ alignItems: 'center', paddingVertical: 12, borderRadius: 12, backgroundColor: hexA(C.orange, note.trim().length < 5 ? 0.06 : 0.15), borderWidth: 1, borderColor: hexA(C.orange, note.trim().length < 5 ? 0.2 : 0.5) }}
                 >
@@ -769,7 +770,7 @@ function HoldCard({ hold }: { hold: QhpHoldRow }) {
           <View style={{ flexDirection: 'row', gap: 8, alignItems: 'flex-end' }}>
             <TextInput value={msg} onChangeText={(v) => setMsg(v.slice(0, 1000))} placeholder="Reply…" placeholderTextColor={C.muted3} multiline style={{ flex: 1, minHeight: 42, maxHeight: 90, borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', paddingHorizontal: 11, paddingVertical: 9, color: '#fff', fontFamily: F.body, fontSize: 12.5 }} />
             <Pressable
-              onPress={() => { setErr(null); reply.mutate({ leadId: hold.lead_id, message: msg }, { onSuccess: () => setMsg(''), onError: (e: any) => setErr(e?.message ?? 'Failed') }); }}
+              onPress={() => { setErr(null); reply.mutate({ leadId: hold.lead_id, message: msg }, { onSuccess: () => setMsg(''), onError: (e: any) => setErr(friendlyError(e, 'Something went wrong. Please try again.')) }); }}
               disabled={reply.isPending || !msg.trim()}
               style={{ paddingVertical: 11, paddingHorizontal: 14, borderRadius: 11, backgroundColor: hexA(C.orange, !msg.trim() ? 0.06 : 0.16), borderWidth: 1, borderColor: hexA(C.orange, !msg.trim() ? 0.2 : 0.5) }}
             >

@@ -12,6 +12,7 @@ import { useStore } from '../store';
 import { useAuth } from '../auth';
 import { trackClientTab } from '../lib/amplitude';
 import {
+import { friendlyError } from '../lib/friendlyError';
   HEAD_DOCTOR_ID, formatDoctorSessionType,
   useDoctorIdentity, useDoctorClientHeader, useDoctorClientSessionCounts,
   usePhysioProtocols, useProtocolExercises, useCreateProtocol, useRehabExerciseList,
@@ -338,7 +339,7 @@ function CreateProtocolSheet({ visible, onClose, clientId, clientName, physioId 
       reset(); onClose();
       Alert.alert('Protocol submitted for approval', 'It has been sent to the Head Doctor for review.');
     } catch (e: any) {
-      Alert.alert('Failed to create protocol', e?.message ?? 'Unknown error');
+      Alert.alert('Failed to create protocol', friendlyError(e, 'Something went wrong. Please try again.'));
     }
   };
 
@@ -592,7 +593,7 @@ function CounsellingBlock({ clientId, uid }: { clientId: string; uid: string }) 
       const result = await aiM.mutateAsync({ id: row.id, counsellingDetails: row.counselling_details });
       setView({ title: 'AI Analysis', body: <AiAnalysisBody text={result} /> });
     } catch (e: any) {
-      Alert.alert('AI analysis failed', e?.message ?? 'Unknown error');
+      Alert.alert('AI analysis failed', friendlyError(e, 'Something went wrong. Please try again.'));
     } finally { setAiBusyId(null); }
   };
 
@@ -608,7 +609,7 @@ function CounsellingBlock({ clientId, uid }: { clientId: string; uid: string }) 
             await addM.mutateAsync({ clientId, doctorId: uid, counsellingDetails: details.trim() });
             setDetails('');
             Alert.alert('Rehab counselling added successfully');
-          } catch (e: any) { Alert.alert('Failed to add counselling', e?.message ?? 'Unknown error'); }
+          } catch (e: any) { Alert.alert('Failed to add counselling', friendlyError(e, 'Something went wrong. Please try again.')); }
         }} />
       </View>
       {q.isLoading ? <ActivityIndicator color={C.orange} /> : !rows.length ? (
@@ -688,7 +689,7 @@ export function MedicalEntrySheet({ visible, onClose, clientId, doctorId }: { vi
       });
       if (res.canceled) return;
       onPicked((res.assets ?? []).map((a) => ({ uri: a.uri, name: a.name ?? 'file', mime: a.mimeType ?? 'application/octet-stream', size: a.size ?? null })));
-    } catch (e: any) { Alert.alert('Could not open file picker', e?.message ?? 'Unknown error'); }
+    } catch (e: any) { Alert.alert('Could not open file picker', friendlyError(e, 'Something went wrong. Please try again.')); }
   };
 
   const addTag = () => {
@@ -701,7 +702,7 @@ export function MedicalEntrySheet({ visible, onClose, clientId, doctorId }: { vi
       await addM.mutateAsync({ clientId, doctorId, ...f, tags, files });
       resetAll(); onClose();
       Alert.alert('Medical history entry added');
-    } catch (e: any) { Alert.alert('Failed to save entry', e?.message ?? 'Unknown error'); }
+    } catch (e: any) { Alert.alert('Failed to save entry', friendlyError(e, 'Something went wrong. Please try again.')); }
   };
 
   const submitAi = async () => {
@@ -714,7 +715,7 @@ export function MedicalEntrySheet({ visible, onClose, clientId, doctorId }: { vi
           ? 'The processing acknowledgement was not received — the report may still appear shortly. Refresh in a minute.'
           : 'AI is extracting in the background — results will appear in 1–2 minutes.'
       );
-    } catch (e: any) { Alert.alert('Upload failed', e?.message ?? 'Unknown error'); }
+    } catch (e: any) { Alert.alert('Upload failed', friendlyError(e, 'Something went wrong. Please try again.')); }
   };
 
   const fileRow = (file: PickedDoc, onRemove: () => void, disabled: boolean) => (
@@ -912,7 +913,7 @@ function AssignDoctorsSheet({ visible, onClose, clientId, viewerId }: { visible:
           await assignM.mutateAsync({ clientId, selectedDoctors: [...sel] });
           onClose();
           Alert.alert('Assignments updated');
-        } catch (e: any) { Alert.alert('Failed to update assignments', e?.message ?? 'Unknown error'); }
+        } catch (e: any) { Alert.alert('Failed to update assignments', friendlyError(e, 'Something went wrong. Please try again.')); }
       }} />
     }>
       <Body style={{ fontSize: 11.5, color: C.muted2 }}>Deselecting a member keeps the record but marks it inactive.</Body>
@@ -1050,7 +1051,7 @@ export function DoctorClientDetail() {
       qcLoc.invalidateQueries({ queryKey: ['client-brb', clientId] });
       Alert.alert('Location saved', `${name}'s home location has been captured.`);
     } catch (e: any) {
-      Alert.alert('Could not capture', e?.message ?? 'Turn on GPS and try again.');
+      Alert.alert('Could not capture', friendlyError(e, 'Turn on GPS and try again.'));
     } finally {
       setCapturingLoc(false);
     }
@@ -1301,7 +1302,7 @@ export function DoctorClientDetail() {
                 {e.doctor_id === uid ? (
                   <Pressable hitSlop={8} onPress={() => Alert.alert('Delete entry?', `"${e.title}" will be permanently removed.`, [
                     { text: 'Cancel', style: 'cancel' },
-                    { text: 'Delete', style: 'destructive', onPress: () => delMedM.mutate({ id: e.id, clientId }, { onError: (e: any) => Alert.alert("Couldn't delete", e?.message ?? "Try again.") }) },
+                    { text: 'Delete', style: 'destructive', onPress: () => delMedM.mutate({ id: e.id, clientId }, { onError: (e: any) => Alert.alert("Couldn't delete", friendlyError(e, "Try again.")) }) },
                   ])}>
                     <Icon name="close" size={15} color={C.red} />
                   </Pressable>
@@ -1355,7 +1356,7 @@ export function DoctorClientDetail() {
                   ) : <View />}
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
                     <Mono style={{ fontSize: 9.5, color: C.muted3 }}>Shared with client</Mono>
-                    <Switch value={!!fi.shared_with_client} disabled={shareM.isPending} onValueChange={(v) => shareM.mutate({ id: fi.id, clientId, shared: v }, { onError: (e: any) => Alert.alert("Couldn't update sharing", e?.message ?? "Try again.") })}
+                    <Switch value={!!fi.shared_with_client} disabled={shareM.isPending} onValueChange={(v) => shareM.mutate({ id: fi.id, clientId, shared: v }, { onError: (e: any) => Alert.alert("Couldn't update sharing", friendlyError(e, "Try again.")) })}
                       trackColor={{ false: 'rgba(255,255,255,0.15)', true: hexA(C.green, 0.5) }} thumbColor={fi.shared_with_client ? C.green : '#888'} />
                   </View>
                 </View>
@@ -1378,7 +1379,7 @@ export function DoctorClientDetail() {
               try {
                 await addRemarkM.mutateAsync({ clientId, authorId: uid, content: remarkText });
                 setRemarkText(''); setRemarkPage(0);
-              } catch (e: any) { Alert.alert('Failed to add remark', e?.message ?? 'Unknown error'); }
+              } catch (e: any) { Alert.alert('Failed to add remark', friendlyError(e, 'Something went wrong. Please try again.')); }
             }} style={{ opacity: !remarkText.trim() ? 0.4 : 1, width: 44, height: 44, borderRadius: 13, backgroundColor: hexA(C.orange, 0.16), borderWidth: 1, borderColor: hexA(C.orange, 0.45), alignItems: 'center', justifyContent: 'center' }}>
               {addRemarkM.isPending ? <ActivityIndicator size="small" color={C.orange} /> : <Icon name="send" size={16} color={C.orange} />}
             </Pressable>
@@ -1404,7 +1405,7 @@ export function DoctorClientDetail() {
                       </Pressable>
                       <Pressable hitSlop={10} style={{ paddingVertical: 6, paddingHorizontal: 8 }} onPress={() => Alert.alert('Delete remark?', 'This cannot be undone.', [
                         { text: 'Cancel', style: 'cancel' },
-                        { text: 'Delete', style: 'destructive', onPress: () => delRemarkM.mutate({ id: r.id, clientId }, { onError: (e: any) => Alert.alert("Couldn't delete", e?.message ?? "Try again.") }) },
+                        { text: 'Delete', style: 'destructive', onPress: () => delRemarkM.mutate({ id: r.id, clientId }, { onError: (e: any) => Alert.alert("Couldn't delete", friendlyError(e, "Try again.")) }) },
                       ])}>
                         <Text style={{ fontFamily: F.bodySemi, fontSize: 11, color: C.red }}>Delete</Text>
                       </Pressable>
@@ -1485,7 +1486,7 @@ export function DoctorClientDetail() {
           try {
             await updRemarkM.mutateAsync({ id: editRemark.id, clientId, content: editRemark.content });
             setEditRemark(null);
-          } catch (e: any) { Alert.alert('Failed to update remark', e?.message ?? 'Unknown error'); }
+          } catch (e: any) { Alert.alert('Failed to update remark', friendlyError(e, 'Something went wrong. Please try again.')); }
         }} />
       }>
         <Inp value={editRemark?.content ?? ''} onChangeText={(v: string) => setEditRemark((p) => (p ? { ...p, content: v } : p))} multiline style={{ minHeight: 90, textAlignVertical: 'top' }} />

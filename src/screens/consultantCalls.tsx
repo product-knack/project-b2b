@@ -7,6 +7,7 @@ import { useAuth } from '../auth';
 import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import { useDoctorIdentity } from '../lib/doctorQueries';
 import {
+import { friendlyError } from '../lib/friendlyError';
   CallRow, RxData, RxEditEntry, RxMedicineLine, useDoctorCalls, useAmendPrescription, useMedicinesCatalog, useClientDob,
   isSlotElapsed, slotPersonName, rxState, isRxApproved, hasMeetingNotes, hasAiNotes, parseNextFollowUp, followUpLabel,
   timeLabel, fmtLongDate, fmtDayMonth, dateFromYmd, ymdLocal, startOfWeekMon, addDays, MONTHS_LONG, MONTHS_SHORT, DAYS_LONG, describeConsultError,
@@ -268,7 +269,7 @@ function CallRecordSheet({ call, tab, onTab, onClose, onRxSaved, doctorName }: {
     if (!call?.prescription) return;
     setSaving(true);
     try { await sharePrescriptionPdf({ rx: call.prescription, clientName: slotPersonName(call.client), doctorName: slotPersonName(call.doctor) }); }
-    catch (e: any) { Alert.alert("Couldn't build the prescription PDF", e?.message ?? 'Try again.'); }
+    catch (e: any) { Alert.alert("Couldn't build the prescription PDF", friendlyError(e, 'Try again.')); }
     finally { setSaving(false); }
   };
   const close = () => { if (editing) { Alert.alert('Discard the edits?', 'The prescription has not been saved.', [{ text: 'Keep editing', style: 'cancel' }, { text: 'Discard', style: 'destructive', onPress: onClose }]); return; } onClose(); };

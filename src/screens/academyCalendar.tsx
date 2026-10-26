@@ -6,6 +6,7 @@ import { Icon } from '../icons';
 import { Serif, Body, Mono } from '../components/primitives';
 import { HScroll, Badge } from './common';
 import {
+import { friendlyError } from '../lib/friendlyError';
   useAcademyBatches, useAcademyUsers, useSetBatchTeachers, prettyDate, AcademyBatch,
 } from '../lib/academyQueries';
 
@@ -155,7 +156,7 @@ export function AcademyCalendarTab() {
     if (!openClass || !selTeachers.length || !selPrimary) return;
     setTeachersM.mutate({ batchId: openClass.batch.id, teacherIds: selTeachers, primaryId: selPrimary }, {
       onSuccess: () => { Alert.alert('Teachers updated', 'The change applies to the entire batch going forward.'); setOpenClass(null); },
-      onError: (e: any) => Alert.alert('Could not update', e?.message ?? 'Try again'),
+      onError: (e: any) => Alert.alert('Could not update', friendlyError(e, 'Try again')),
     });
   };
 

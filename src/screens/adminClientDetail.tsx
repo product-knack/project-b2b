@@ -9,6 +9,7 @@ import { useStore } from '../store';
 import { trackClientTab } from '../lib/amplitude';
 import { useAuth } from '../auth';
 import {
+import { friendlyError } from '../lib/friendlyError';
   useClientDetail, useActivePause, useClientRemarks, useAddClientRemark,
   useToggleTrainerActive, useRemoveTrainer, useAssignableTrainers, useAssignTrainer, useSetClientStatus,
   useSessionsByCycle, useWorkoutSessions, useSaveSession, useDeleteSession, useToggleComplimentary,
@@ -114,7 +115,7 @@ function SessionSheet({ clientId, existing, profileId, onClose }: { clientId: st
       <Pressable disabled={save.isPending || !valid} onPress={() => {
         setErr(null);
         save.mutate({ id: existing?.id, clientId, scheduledAtIso: new Date(`${date}T${time}:00`).toISOString(), trainerId: trainerId!, sessionType: type, status, location, notes, complimentary: comp },
-          { onSuccess: onClose, onError: (e: any) => setErr(e?.message ?? 'Failed') });
+          { onSuccess: onClose, onError: (e: any) => setErr(friendlyError(e, 'Something went wrong. Please try again.')) });
       }} style={{ alignItems: 'center', paddingVertical: 12, borderRadius: 12, backgroundColor: hexA(C.green, save.isPending || !valid ? 0.06 : 0.16), borderWidth: 1, borderColor: hexA(C.green, save.isPending || !valid ? 0.2 : 0.5) }}>
         <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: save.isPending || !valid ? C.muted3 : C.green }}>{save.isPending ? 'Saving…' : existing ? 'Save changes' : 'Add session'}</Text>
       </Pressable>
@@ -165,7 +166,7 @@ function AssignSheet({ clientId, assigned, onClose }: { clientId: string; assign
                 return (
                   <Pressable key={t.id} disabled={busy} onPress={() => {
                     setErr(null);
-                    const fail = (e: any) => setErr(e?.message ?? 'Failed');
+                    const fail = (e: any) => setErr(friendlyError(e, 'Something went wrong. Please try again.'));
                     if (checked) remove.mutate({ rowId: cur!.rowId, clientId }, { onError: fail });
                     else assign.mutate({ clientId, trainerId: t.id }, { onError: fail });
                   }} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 11, borderTopWidth: i === 0 ? 0 : 1, borderTopColor: 'rgba(255,255,255,0.05)' }}>
@@ -251,7 +252,7 @@ function AdditionalPackageSheet({ clientId, profileId, onClose }: { clientId: st
       <Pressable disabled={create.isPending || !valid} onPress={() => {
         setErr(null);
         create.mutate({ clientId, serviceName: service, sessions: isNutrition ? null : Number(sessions), durationText: duration, nutritionMonths: isNutrition ? Number(nutMonths) : null, amount: amount.trim() ? Number(amount) : null, startYmd: start, notes, method, profileId },
-          { onSuccess: (res) => { if (res.paymentUrl) setUrl(res.paymentUrl); else onClose(); }, onError: (e: any) => setErr(e?.message ?? 'Failed') });
+          { onSuccess: (res) => { if (res.paymentUrl) setUrl(res.paymentUrl); else onClose(); }, onError: (e: any) => setErr(friendlyError(e, 'Something went wrong. Please try again.')) });
       }} style={{ alignItems: 'center', paddingVertical: 12, borderRadius: 12, backgroundColor: hexA(C.purple, create.isPending || !valid ? 0.06 : 0.16), borderWidth: 1, borderColor: hexA(C.purple, create.isPending || !valid ? 0.2 : 0.5) }}>
         <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: create.isPending || !valid ? C.muted3 : C.purple }}>{create.isPending ? 'Creating…' : 'Create package'}</Text>
       </Pressable>
@@ -271,7 +272,7 @@ function PauseSheet({ clientId, profileId, onClose }: { clientId: string; profil
       <TextInput value={end} onChangeText={setEnd} placeholder="End YYYY-MM-DD" placeholderTextColor={C.muted3} style={inpSt} />
       <TextInput value={reason} onChangeText={setReason} multiline placeholder="Reason" placeholderTextColor={C.muted3} style={[inpSt, { minHeight: 52, textAlignVertical: 'top' }]} />
       {err ? <Body style={{ fontSize: 10.5, color: C.red }}>{err}</Body> : null}
-      <Pressable disabled={pause.isPending} onPress={() => { setErr(null); pause.mutate({ clientId, startYmd: start, endYmd: end, reason, profileId }, { onSuccess: onClose, onError: (e: any) => setErr(e?.message ?? 'Failed') }); }}
+      <Pressable disabled={pause.isPending} onPress={() => { setErr(null); pause.mutate({ clientId, startYmd: start, endYmd: end, reason, profileId }, { onSuccess: onClose, onError: (e: any) => setErr(friendlyError(e, 'Something went wrong. Please try again.')) }); }}
         style={{ alignItems: 'center', paddingVertical: 12, borderRadius: 12, backgroundColor: hexA(C.blue, 0.16), borderWidth: 1, borderColor: hexA(C.blue, 0.5) }}>
         <Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: C.blue }}>{pause.isPending ? 'Pausing…' : 'Pause journey'}</Text>
       </Pressable>
@@ -319,7 +320,7 @@ export function AdminClientDetail() {
   const [assignOpen, setAssignOpen] = React.useState(false);
   const [removeArm, setRemoveArm] = React.useState<string | null>(null);
   const trainersQ = useAssignableTrainers(assignOpen);
-  const fail = (e: any) => setErr(e?.message ?? 'Failed');
+  const fail = (e: any) => setErr(friendlyError(e, 'Something went wrong. Please try again.'));
   const asUnified = c ? ({ ...c } as unknown as UnifiedClient) : null;
 
   const remarksQ = useClientRemarks(tab === 'remarks' ? selectedClientId : null);

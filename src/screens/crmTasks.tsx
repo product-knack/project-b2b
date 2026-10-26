@@ -9,6 +9,7 @@ import { useAuth } from '../auth';
 import { useCrmClientList } from '../lib/crmClientQueries';
 import { useCrmTasks, useCreateTask, useUpdateTask, useDeleteTask, TASK_PRIORITY_META, TASK_CATEGORY_META, CrmTask, TaskStatus } from '../lib/taskQueries';
 import { SheetShell } from './reportDetail';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ CRM: Tasks — mirrors the web CRMTasks: personal + admin-assigned
    to-dos with priorities, categories, due dates and subtask checklists. ============ */
@@ -44,19 +45,19 @@ export function CrmTasks() {
 
   const setStatus = (t: CrmTask, status: TaskStatus) => {
     const patch: any = { status, is_completed: status === 'done', completed_at: status === 'done' ? new Date().toISOString() : null };
-    updateM.mutate({ id: t.id, patch }, { onError: (e: any) => Alert.alert("Couldn't update", e?.message) });
+    updateM.mutate({ id: t.id, patch }, { onError: (e: any) => Alert.alert("Couldn't update", friendlyError(e)) });
     // Follow the task to its new column so the change is visible instead of the
     // card silently leaving the current tab.
     if (status !== tab) setTab(status);
   };
   const toggleSubtask = (t: CrmTask, subId: string) => {
     const subtasks = (t.subtasks ?? []).map((s) => (s.id === subId ? { ...s, completed: !s.completed } : s));
-    updateM.mutate({ id: t.id, patch: { subtasks } }, { onError: (e: any) => Alert.alert("Couldn't update", e?.message) });
+    updateM.mutate({ id: t.id, patch: { subtasks } }, { onError: (e: any) => Alert.alert("Couldn't update", friendlyError(e)) });
   };
   const remove = (t: CrmTask) => {
     Alert.alert('Delete this task?', t.title, [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: () => deleteM.mutate(t.id, { onError: (e: any) => Alert.alert("Couldn't delete", e?.message) }) },
+      { text: 'Delete', style: 'destructive', onPress: () => deleteM.mutate(t.id, { onError: (e: any) => Alert.alert("Couldn't delete", friendlyError(e)) }) },
     ]);
   };
 
@@ -247,7 +248,7 @@ function NewTaskSheet({ visible, onClose, crmId }: { visible: boolean; onClose: 
       await createM.mutateAsync({ crmId, title, description: desc, priority, category, dueDate, taggedId: tagged?.id ?? null });
       setTitle(''); setDesc(''); setPriority('medium'); setCategory('client_follow_up'); setDueDays(1); setTagged(null); setTagOpen(false);
       onClose();
-    } catch (e: any) { Alert.alert("Couldn't create task", e?.message ?? 'Try again.'); }
+    } catch (e: any) { Alert.alert("Couldn't create task", friendlyError(e, 'Try again.')); }
   };
 
   return (

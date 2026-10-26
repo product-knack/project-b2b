@@ -8,6 +8,7 @@ import { Page, BackLink, Badge, MiniAvatar, AnimChip } from './common';
 import { useStore } from '../store';
 import { useAuth } from '../auth';
 import {
+import { friendlyError } from '../lib/friendlyError';
   useJourneyClients, useToggleJourneyStep, JOURNEY_CATEGORIES, ALL_STEP_KEYS,
   journeyProgress, journeyDone, journeyComplete, JourneyClient,
 } from '../lib/journeyQueries';
@@ -136,7 +137,7 @@ export function CrmJourneyDetail() {
   const toggle = (stepKey: string, next: boolean) => {
     if (!crmId || !clientId) return;
     toggleM.mutate({ crmId, clientId, stepKey, value: next }, {
-      onError: (e: any) => Alert.alert("Couldn't update", e?.message ?? 'Try again.'),
+      onError: (e: any) => Alert.alert("Couldn't update", friendlyError(e, 'Try again.')),
     });
   };
 

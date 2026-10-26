@@ -7,6 +7,7 @@ import { Serif, Body, Mono } from '../components/primitives';
 import { Page, Badge, MiniAvatar, AnimChip, HScroll, TimeDial } from './common';
 import { useAuth } from '../auth';
 import {
+import { friendlyError } from '../lib/friendlyError';
   useMonthRoster, useRosterPeople, useBulkCreateRoster, useRescheduleRosterSession,
   useCancelRosterSession, useDeleteFutureSessions, countFutureSessions, useInferRoster, MODALITIES, modalityColor, RosterSession, RosterConflict,
 } from '../lib/rosterQueries';
@@ -97,13 +98,13 @@ function DeleteRosterSheet({ visible, clients, onClose }: {
                 const deleted = await wipeM.mutateAsync({ clientId: c.id });
                 onClose();
                 Alert.alert('Roster deleted', `${deleted} upcoming session${deleted === 1 ? '' : 's'} removed for ${c.name}.`);
-              } catch (e: any) { Alert.alert("Couldn't delete", e?.message ?? 'Try again.'); }
+              } catch (e: any) { Alert.alert("Couldn't delete", friendlyError(e, 'Try again.')); }
             },
           },
         ]
       );
     } catch (e: any) {
-      Alert.alert("Couldn't check roster", e?.message ?? 'Try again.');
+      Alert.alert("Couldn't check roster", friendlyError(e, 'Try again.'));
     } finally { setBusyId(null); }
   };
 
@@ -459,7 +460,7 @@ export function SessionActionSheet({ session, crmId, onClose }: { session: Roste
           { text: 'Pick another slot', style: 'cancel' },
           { text: 'Force anyway', style: 'destructive', onPress: () => doReschedule(true) },
         ]);
-      } else Alert.alert("Couldn't reschedule", e?.message ?? 'Try again.');
+      } else Alert.alert("Couldn't reschedule", friendlyError(e, 'Try again.'));
     }
   };
   // Change trainer only — the session keeps its original datetime; clash checks
@@ -474,12 +475,12 @@ export function SessionActionSheet({ session, crmId, onClose }: { session: Roste
           { text: 'Pick someone else', style: 'cancel' },
           { text: 'Force anyway', style: 'destructive', onPress: () => doChangeTrainer(p, true) },
         ]);
-      } else Alert.alert("Couldn't change trainer", e?.message ?? 'Try again.');
+      } else Alert.alert("Couldn't change trainer", friendlyError(e, 'Try again.'));
     }
   };
   const doCancel = async () => {
     try { await cancelM.mutateAsync({ id: session.id, canceledBy, remark }); onClose(); }
-    catch (e: any) { Alert.alert("Couldn't cancel", e?.message ?? 'Try again.'); }
+    catch (e: any) { Alert.alert("Couldn't cancel", friendlyError(e, 'Try again.')); }
   };
   const doWipe = () => {
     Alert.alert('Delete ALL future sessions?', `Every upcoming session for ${session.clientName} will be permanently deleted. This cannot be undone.`, [
@@ -487,7 +488,7 @@ export function SessionActionSheet({ session, crmId, onClose }: { session: Roste
       {
         text: 'Delete all', style: 'destructive', onPress: async () => {
           try { const n = await wipeM.mutateAsync({ clientId: session.clientId }); onClose(); Alert.alert('Roster cleared', `${n} upcoming sessions deleted for ${session.clientName}.`); }
-          catch (e: any) { Alert.alert("Couldn't delete", e?.message ?? 'Try again.'); }
+          catch (e: any) { Alert.alert("Couldn't delete", friendlyError(e, 'Try again.')); }
         },
       },
     ]);
@@ -748,7 +749,7 @@ export function CreateRosterSheet({ visible, onClose, crmId, people, presetClien
         forceProceed: force,
       });
       setResult(r);
-    } catch (e: any) { Alert.alert("Couldn't create roster", e?.message ?? 'Try again.'); }
+    } catch (e: any) { Alert.alert("Couldn't create roster", friendlyError(e, 'Try again.')); }
   };
   const runReplicate = async (force = false) => {
     if (!client || !inferred.length) return;
@@ -761,7 +762,7 @@ export function CreateRosterSheet({ visible, onClose, crmId, people, presetClien
         startDate: repStartIso, forceProceed: force,
       });
       setResult(r);
-    } catch (e: any) { Alert.alert("Couldn't replicate", e?.message ?? 'Try again.'); }
+    } catch (e: any) { Alert.alert("Couldn't replicate", friendlyError(e, 'Try again.')); }
   };
   const trainerConflicts = (result?.conflicts ?? []).filter((c) => c.kind === 'trainer');
 

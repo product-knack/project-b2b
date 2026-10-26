@@ -1,3 +1,4 @@
+import { friendlyError } from '../lib/friendlyError';
 /* Paid cancellation code step (22 Oct 2026). Owner: "CRM sees the paid cancellation code on Session Logs; a
    trainer, doctor or therapist marking a paid cancellation must enter it; show who to ask with the client's
    latest active CRM's name and number". Rendered inside the cancel flow's picker modal in place of the old
@@ -37,7 +38,7 @@ export function PaidCancelCodeStep({ clientId, scheduleId, clientName, onBack, o
       if (a.ok) onContinue();
       else { setErr(paidCancelReasonText(a.reason)); setCode(''); }
     } catch (e: any) {
-      setErr(e?.message || 'The code could not be verified. Check your connection and retry.');
+      setErr(friendlyError(e, 'The code could not be verified. Check your connection and retry.'));
     }
   };
 

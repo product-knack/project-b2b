@@ -1,3 +1,4 @@
+import { friendlyError } from '../lib/friendlyError';
 /* ============ QHP Standardized Assessment — native multistep form ============
    Faithful port of the web StandardizedAssessmentForm (Start Now flow):
    - Coach Presence Check first (supporting_trainer_id), then the wizard.
@@ -738,7 +739,7 @@ export function QhpAssessmentForm({
       // Alert only after the form Modal has finished dismissing (iOS presentation safety).
       setTimeout(() => Alert.alert('Assessment saved', 'The QHP assessment was completed successfully.'), 650);
     },
-    onError: (e: any) => Alert.alert('Save failed', e?.message ?? 'Try again.'),
+    onError: (e: any) => Alert.alert('Save failed', friendlyError(e, 'Try again.')),
   });
 
   const next = () => {

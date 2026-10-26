@@ -9,6 +9,7 @@ import { submitChatMessage } from './chatQueries';
 import { submitLocationLog, LocationLogPayload } from './locationLog';
 import { registerTeardown } from './sessionTeardown';
 import { withTimeout, isTimeoutError } from './withTimeout';
+import { friendlyError } from './friendlyError';
 
 const SYNC_MS = 45_000; // per-item deadline for an outbox submit (multi-row inserts + link RPC)
 
@@ -377,7 +378,7 @@ export async function submitItem(id: string): Promise<SubmitItemResult> {
   if (draining) return { status: 'queued' }; // still on disk; the next drain picks it up
   const item = items.find((i) => i.id === id);
   if (!item) return { status: 'synced' }; // gone from the queue ⇒ a drain already synced it
-  if (!mine(item)) return { status: 'failed', error: 'This entry was queued by a different account.' };
+  if (!mine(item)) return { status: 'failed', error: 'This entry was saved under a different account and cannot be sent from this one.' };
   if (!online) return { status: 'queued' };
   draining = true;
   try {

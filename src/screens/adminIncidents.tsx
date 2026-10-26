@@ -7,6 +7,7 @@ import { Serif, Body, Mono, Card, Avatar } from '../components/primitives';
 import { Page, TitleBlock, Badge } from './common';
 import { useAuth } from '../auth';
 import { useIncidentTrainers, useMyIncidentCounts, useTrainerIncidents, useAddIncident, type IncidentTrainer } from '../lib/adminIncidentQueries';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ ADMIN — Trainer Incidents (web TrainerIncidentsPanel port) ============ */
 
@@ -41,7 +42,7 @@ function IncidentSheet({ trainer, profileId, onClose }: { trainer: IncidentTrain
           <View style={{ flexDirection: 'row', gap: 8, alignItems: 'flex-end', marginBottom: 11 }}>
             <TextInput value={msg} onChangeText={(v) => setMsg(v.slice(0, 1000))} multiline placeholder="Log a new incident…" placeholderTextColor={C.muted3}
               style={{ flex: 1, borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', paddingHorizontal: 11, paddingVertical: 10, color: '#fff', fontFamily: F.body, fontSize: 13, minHeight: 44, maxHeight: 100 }} />
-            <Pressable disabled={add.isPending || msg.trim().length < 5} onPress={() => { setErr(null); add.mutate({ trainerId: trainer.id, message: msg, profileId }, { onSuccess: () => setMsg(''), onError: (e: any) => setErr(e?.message ?? 'Failed') }); }}
+            <Pressable disabled={add.isPending || msg.trim().length < 5} onPress={() => { setErr(null); add.mutate({ trainerId: trainer.id, message: msg, profileId }, { onSuccess: () => setMsg(''), onError: (e: any) => setErr(friendlyError(e, 'Something went wrong. Please try again.')) }); }}
               style={{ paddingVertical: 11, paddingHorizontal: 13, borderRadius: 11, backgroundColor: hexA(C.orange, msg.trim().length < 5 ? 0.06 : 0.16), borderWidth: 1, borderColor: hexA(C.orange, msg.trim().length < 5 ? 0.2 : 0.5) }}>
               <Icon name="send" size={14} color={msg.trim().length < 5 ? C.muted3 : C.orange} strokeWidth={2.2} />
             </Pressable>

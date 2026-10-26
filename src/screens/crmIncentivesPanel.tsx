@@ -8,6 +8,7 @@ import { Badge, MiniAvatar, AnimChip } from './common';
 import { useAuth } from '../auth';
 import { useCrmClientList } from '../lib/crmClientQueries';
 import {
+import { friendlyError } from '../lib/friendlyError';
   useMyIncentives, useMyIncentiveRequests, useIncentiveLeaderboard,
   useRaiseIncentiveRequest, EVENT_META,
   currentIncentiveMonthValue, todayDateValue, formatIncentiveMonth, formatIncentiveDate,
@@ -202,7 +203,7 @@ function RaiseRequestSheet({ visible, onClose, crmId }: { visible: boolean; onCl
       else await raiseM.mutateAsync({ kind, crmId, ...when, clientId: client!.id, previousSessions: client!.package, newSessions: f.newSessions, durationMonths: f.duration });
       onClose();
       Alert.alert('Request submitted', 'It goes to the admin for approval and will show under Requests.');
-    } catch (e: any) { Alert.alert("Couldn't raise request", e?.message ?? 'Try again.'); }
+    } catch (e: any) { Alert.alert("Couldn't raise request", friendlyError(e, 'Try again.')); }
   };
 
   return (

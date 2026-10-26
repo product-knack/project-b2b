@@ -11,6 +11,7 @@ import { useStore } from '../store';
 import { useMyCapabilities } from '../lib/capabilities';
 import { reviewPdfUrl } from '../lib/qhpReviewQueries';
 import {
+import { friendlyError } from '../lib/friendlyError';
   useRehabRecommendationQueue, usePhysioMarkSeen, useQhpDetailsRealtime,
   RehabQueueRow, PHYSIO_NOTE_MAX,
 } from '../lib/physioHodQueries';
@@ -75,7 +76,7 @@ export function DoctorRehabRecommendation() {
   const markSeen = (row: RehabQueueRow) => {
     seenM.mutate({ id: row.id, note: seenNote }, {
       onSuccess: () => { setSeenNote(''); Alert.alert('Marked as seen', `${row.clientName}'s report is acknowledged — the Academy HOD can see it.`); },
-      onError: (e: any) => Alert.alert('Could not mark seen', e?.message ?? 'Try again'),
+      onError: (e: any) => Alert.alert('Could not mark seen', friendlyError(e, 'Try again')),
     });
   };
 

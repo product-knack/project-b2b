@@ -8,6 +8,7 @@ import { Serif, Body, Mono, Card } from '../components/primitives';
 import { Page, TitleBlock, Badge } from './common';
 import { useAuth } from '../auth';
 import {
+import { friendlyError } from '../lib/friendlyError';
   useDoctorIdentity, useDoctorDaySessions, useNeuralChecksForDay, usePhysioSessionExercises,
   useDoctorOwnRoster, usePhysioDialogClients, useApprovedProtocols, useProtocolExercises,
   useRehabExerciseList, useSubmitPhysioSession, buildStructuredNotes, formatDoctorSessionType,
@@ -222,7 +223,7 @@ export function PhysioSessionSheet({ visible, onClose, clientId, clientName, sch
             { workoutSessionId: res.sessionId, clientId: activeClientId, userId: uid, uri: t.uri, durationMs: t.durationMs, source: 'workout_form', painDiscomfort: t.painDiscomfort === true },
             `${activeClientName || 'Client'} · voice note`,
           );
-          if (r.status === 'failed') failed = r.error ?? 'The server rejected a voice note.';
+          if (r.status === 'failed') failed = friendlyError(r.error, 'A voice note was not accepted. Try again.');
         }
         setVoiceTakes([]);
         if (failed) setErr(`Session logged. Voice note not saved: ${failed}`);
@@ -233,7 +234,7 @@ export function PhysioSessionSheet({ visible, onClose, clientId, clientName, sch
       setDone(true);
       setTimeout(onClose, 700);
     } catch (e: any) {
-      setErr(e?.message ?? 'Failed to log session');
+      setErr(friendlyError(e, 'Could not log the session. Please try again.'));
     }
   };
 
