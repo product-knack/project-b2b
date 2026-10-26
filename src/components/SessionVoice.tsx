@@ -1,4 +1,5 @@
 import { voiceDayWithin, hasPainNote } from '../lib/sessionVoiceTypes';
+import * as SN from '../lib/sharedCoachNote';
 import React from 'react';
 import { View, Text, Pressable, Modal, ScrollView, ActivityIndicator, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -34,8 +35,9 @@ const ACCENT = C.purple;
    while it is ticked carries painDiscomfort = true, the tag on its row toggles it
    again, and the box clears after every kept take so the next note is a fresh
    answer. The RPC stores it as `pain_discomfort` on the note element. */
-export const PAIN_TITLE = 'Please mention pain and discomfort if the client has any';
-export const PAIN_CHECKBOX = 'Does the client have pain or discomfort?';
+/* 26 Oct 2026 (owner): renamed "Shared coach note"; every word comes from src/lib/sharedCoachNote.ts. */
+export const PAIN_TITLE = SN.PAIN_TITLE;
+export const PAIN_CHECKBOX = SN.PAIN_LINE;
 /* 15 Oct 2026 (owner): the answer is a Yes / No choice that MUST be made before a note can be
    recorded; the record button stays off until one is picked. */
 
@@ -45,13 +47,13 @@ function PainTag({ on, onPress, disabled }: { on: boolean; onPress?: () => void;
       accessibilityLabel={on ? 'Pain or discomfort reported, tap to clear' : 'No pain reported, tap to mark pain or discomfort'}
       style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 3, paddingHorizontal: 8, borderRadius: 999, backgroundColor: hexA(on ? C.red : C.muted3, on ? 0.14 : 0.08), borderWidth: 1, borderColor: hexA(on ? C.red : C.muted3, on ? 0.5 : 0.3) }}>
       <Icon name="alert" size={9} color={on ? C.red : C.muted3} strokeWidth={2.3} />
-      <Mono style={{ fontSize: 7.5, letterSpacing: 0.5, color: on ? C.red : C.muted3 }}>{on ? 'PAIN / DISCOMFORT' : 'NO PAIN'}</Mono>
+      <Mono style={{ fontSize: 7.5, letterSpacing: 0.5, color: on ? C.red : C.muted3 }}>{on ? SN.PAIN_TAG_ON : SN.PAIN_TAG_OFF}</Mono>
     </Pressable>
   );
 }
 
 /* ---------- composer ---------- */
-export function VoiceNotesComposer({ takes, onAdd, onRemove, onToggleFlag, savedCount = 0, disabled, hint, onRecordingChange }: {
+export function VoiceNotesComposer({ takes, onAdd, onRemove, onToggleFlag, savedCount = 0, disabled, hint, onRecordingChange, clientName }: {
   takes: PendingVoiceTake[];
   onAdd: (t: PendingVoiceTake) => void;
   onRemove: (uri: string) => void;
@@ -63,6 +65,8 @@ export function VoiceNotesComposer({ takes, onAdd, onRemove, onToggleFlag, saved
   hint?: string;
   /** lets the host (the workout form) hold Submit while a recording runs */
   onRecordingChange?: (recording: boolean) => void;
+  /** the client's name for the record card line ("Every coach who trains Aarav hears this") */
+  clientName?: string | null;
 }) {
   const [busy, setBusy] = React.useState(false);
   // null = not answered yet; the record button waits for Yes or No (15 Oct 2026).
@@ -99,9 +103,13 @@ export function VoiceNotesComposer({ takes, onAdd, onRemove, onToggleFlag, saved
       ))}
       {left > 0 ? (
         <>
-          <View style={{ gap: 9, padding: 11, borderRadius: 12, backgroundColor: hexA(pain === true ? C.red : answered ? C.green : C.gold, 0.06), borderWidth: 1, borderColor: hexA(pain === true ? C.red : answered ? C.green : C.gold, answered ? 0.4 : 0.3) }}>
-            <Body style={{ fontSize: 12.5, fontFamily: F.bodySemi, color: '#fff', lineHeight: 17 }}>{PAIN_TITLE}</Body>
-            <Body style={{ fontSize: 12, color: C.ink3 }}>{PAIN_CHECKBOX} <Text style={{ color: C.gold }}>Required</Text></Body>
+          <View style={{ gap: 9, padding: 12, borderRadius: 14, backgroundColor: hexA(pain === true ? C.red : answered ? C.green : C.gold, 0.08), borderWidth: 1.5, borderColor: hexA(pain === true ? C.red : answered ? C.green : C.gold, answered ? 0.5 : 0.55) }}>
+            {/* The record card (26 Oct 2026): bold, amber, says what the note is for and who hears it. */}
+            <Text style={{ fontFamily: F.bodyBold, fontSize: 15, lineHeight: 20, color: '#fff' }}>{SN.RECORD_TITLE}</Text>
+            <Body style={{ fontSize: 12, color: C.ink3, lineHeight: 16 }}>{SN.recordLine((clientName ?? '').trim().split(/\s+/)[0])}</Body>
+            <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.08)' }} />
+            <Text style={{ fontFamily: F.bodyBold, fontSize: 13, color: '#fff', lineHeight: 17 }}>{PAIN_TITLE} <Text style={{ color: C.gold }}>Required</Text></Text>
+            <Body style={{ fontSize: 11.5, color: C.ink3 }}>{PAIN_CHECKBOX}</Body>
             <View style={{ flexDirection: 'row', gap: 8 }}>
               {([['Yes', true, C.red], ['No', false, C.green]] as const).map(([label, value, col]) => {
                 const on = pain === value;
@@ -116,10 +124,10 @@ export function VoiceNotesComposer({ takes, onAdd, onRemove, onToggleFlag, saved
             <Body style={{ fontSize: 10, color: C.muted3, lineHeight: 14 }}>{answered ? 'Saved with the note you record next.' : 'Choose Yes or No, then record the note.'}</Body>
           </View>
           <VoiceTapButton recording={rec.recording} recMs={rec.recMs} maxMs={SESSION_VOICE_MAX_MS} onStart={rec.start} onStop={() => rec.finish(true)} accent={ACCENT}
-            label={!answered && !rec.recording ? 'Answer Yes or No first' : takes.length || savedCount ? 'Record another note' : 'Record voice note'} disabled={disabled || busy || (!answered && !rec.recording)} />
+            label={!answered && !rec.recording ? SN.RECORD_WAIT : takes.length || savedCount ? SN.RECORD_MORE : SN.RECORD_FIRST} disabled={disabled || busy || (!answered && !rec.recording)} />
         </>
       ) : (
-        <Body style={{ fontSize: 11, color: C.muted3 }}>This session has the maximum of {SESSION_VOICE_MAX_NOTES} voice notes.</Body>
+        <Body style={{ fontSize: 11, color: C.muted3 }}>This session has the maximum of {SESSION_VOICE_MAX_NOTES} shared coach notes.</Body>
       )}
       {!rec.recording && hint ? <Body style={{ fontSize: 10.5, color: C.muted3, lineHeight: 15 }}>{hint}</Body> : null}
     </View>
@@ -195,11 +203,12 @@ export function SessionVoicePlaylistPlayer({ notes }: { notes: SessionVoiceNote[
       <View style={{ padding: 11, borderRadius: 13, backgroundColor: hexA(ACCENT, 0.07), borderWidth: 1, borderColor: hexA(ACCENT, 0.3), gap: 6 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           <Icon name="mic" size={12} color={ACCENT} strokeWidth={2.2} />
-          <Mono style={{ flex: 1, fontSize: 8.5, letterSpacing: 0.8, color: ACCENT }}>VOICE NOTES · {notes.length} · {clockOf(totalMs)}</Mono>
+          <Mono style={{ flex: 1, fontSize: 8.5, letterSpacing: 0.8, color: ACCENT }}>{SN.PLAYER_KICKER} · {notes.length} · {clockOf(totalMs)}</Mono>
           {hasPainNote(notes) ? <PainTag on /> : null}
         </View>
+        {hasPainNote(notes) ? <Text style={{ fontFamily: F.bodyBold, fontSize: 12, color: '#FF9B8F', lineHeight: 16 }}>{SN.PAIN_PLAYER_LINE}</Text> : null}
         {urlsQ.isError ? (
-          <Body style={{ fontSize: 11, color: C.red }}>Couldn't load the voice notes. Pull to refresh and try again.</Body>
+          <Body style={{ fontSize: 11, color: C.red }}>Couldn't load the shared notes. Pull to refresh and try again.</Body>
         ) : urls.length !== notes.length ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6 }}>
             <ActivityIndicator size="small" color={ACCENT} />
@@ -265,7 +274,7 @@ export function SessionVoiceSheet({ info, userId, onClose }: { info: SessionVoic
                 <Icon name="mic" size={18} color={ACCENT} strokeWidth={2.1} />
               </View>
               <View style={{ flex: 1 }}>
-                <Serif style={{ fontSize: 19 }}>Voice notes</Serif>
+                <Serif style={{ fontSize: 19 }}>{SN.SHEET_TITLE}</Serif>
                 <Body style={{ fontSize: 11.5, color: C.muted2, marginTop: 2 }} numberOfLines={1}>{info?.clientName ?? ''} · today's session</Body>
               </View>
               <Pressable onPress={close} hitSlop={10} accessibilityRole="button" accessibilityLabel="Close" style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center', justifyContent: 'center' }}>
@@ -276,13 +285,13 @@ export function SessionVoiceSheet({ info, userId, onClose }: { info: SessionVoic
               {info?.notes.length ? (
                 <SessionVoicePlaylistPlayer notes={info.notes} />
               ) : (
-                <Body style={{ fontSize: 12, color: C.muted3 }}>No voice notes saved on this session yet.</Body>
+                <Body style={{ fontSize: 12, color: C.muted3 }}>{SN.SHEET_EMPTY}</Body>
               )}
-              <Mono style={{ fontSize: 9, letterSpacing: 0.8, color: C.muted3 }}>ADD A NOTE</Mono>
+              <Mono style={{ fontSize: 9, letterSpacing: 0.8, color: C.gold }}>{SN.SHEET_ADD}</Mono>
               <VoiceNotesComposer takes={takes} onAdd={(t) => setTakes((x) => [...x, t])} onRemove={(uri) => { discardTake(uri); setTakes((x) => x.filter((t) => t.uri !== uri)); }}
                 onToggleFlag={(uri) => setTakes((x) => toggleTakeFlag(x, uri))}
-                savedCount={info?.notes.length ?? 0} disabled={saving}
-                hint="Speak the note about this session. It is added to the session's notes and plays together with them." />
+                savedCount={info?.notes.length ?? 0} disabled={saving} clientName={info?.clientName}
+                hint="Added to this session's shared notes; every coach of this client hears it with the others." />
               {err ? <Body style={{ fontSize: 12, color: C.red }}>{err}</Body> : null}
               <Pressable onPress={save} disabled={!takes.length || saving} accessibilityRole="button"
                 style={({ pressed }) => ({ opacity: !takes.length || saving ? 0.45 : pressed ? 0.85 : 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14, borderRadius: 14, backgroundColor: hexA(ACCENT, 0.18), borderWidth: 1, borderColor: hexA(ACCENT, 0.5) })}>
@@ -315,10 +324,10 @@ export function LatestVoiceChip({ latest, onPress }: { latest: ClientLatestVoice
   const pain = latestHasPain(latest);
   const col = pain ? C.red : ACCENT;
   return (
-    <Pressable hitSlop={10} onPress={onPress} accessibilityRole="button" accessibilityLabel={`Play ${n} voice notes from ${dayLabel(latest.day)}${pain ? ', pain or discomfort reported' : ''}`}
+    <Pressable hitSlop={10} onPress={onPress} accessibilityRole="button" accessibilityLabel={`Play ${n} shared coach notes from ${dayLabel(latest.day)}${pain ? ', pain or discomfort reported' : ''}`}
       style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 4, paddingHorizontal: 8, borderRadius: 999, backgroundColor: hexA(col, 0.12), borderWidth: 1, borderColor: hexA(col, 0.45) }}>
       <Icon name={pain ? 'alert' : 'mic'} size={9} color={col} strokeWidth={2.2} />
-      <Mono style={{ fontSize: 8, letterSpacing: 0.5, color: col }}>{pain ? 'PAIN' : 'NOTES'} · {shortDay(latest.day)}</Mono>
+      <Mono style={{ fontSize: 8, letterSpacing: 0.5, color: col }}>{pain ? 'PAIN' : SN.CREW_CHIP} · {shortDay(latest.day)}</Mono>
     </Pressable>
   );
 }
@@ -336,17 +345,18 @@ function PainLine({ when }: { when: string }) {
 /** Inline block for the workout health check-in popup (5 Oct 2026): the client's most recent
     session day with voice notes, only when it is within the last `days` days; one player per
     session with its time, name and the recorder; otherwise the plain "no audio" sentence. */
-export function LatestVoiceInline({ latest, loading, days = 5 }: { latest: ClientLatestVoice | null | undefined; loading?: boolean; days?: number }) {
+export function LatestVoiceInline({ latest, loading, days = 5, clientName }: { latest: ClientLatestVoice | null | undefined; loading?: boolean; days?: number; clientName?: string | null }) {
   const recent = !!latest && voiceDayWithin(latest.day, days);
   const total = recent ? latest!.sessions.reduce((a, s) => a + s.notes.length, 0) : 0;
   return (
-    <View style={{ padding: 15, borderRadius: 18, backgroundColor: hexA(ACCENT, 0.05), borderWidth: 1, borderColor: hexA(ACCENT, 0.2), gap: 12 }}>
+    <View style={{ padding: 15, borderRadius: 18, backgroundColor: hexA(recent ? C.gold : ACCENT, recent ? 0.08 : 0.05), borderWidth: recent ? 1.5 : 1, borderColor: hexA(recent ? C.gold : ACCENT, recent ? 0.55 : 0.2), gap: 12 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
-        <View style={{ width: 30, height: 30, borderRadius: 10, backgroundColor: hexA(ACCENT, 0.13), alignItems: 'center', justifyContent: 'center' }}>
-          <Icon name="mic" size={15} color={ACCENT} strokeWidth={2} />
+        <View style={{ width: 30, height: 30, borderRadius: 10, backgroundColor: hexA(recent ? C.gold : ACCENT, 0.15), alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name="mic" size={15} color={recent ? C.gold : ACCENT} strokeWidth={2} />
         </View>
         <View style={{ flex: 1 }}>
-          <Body style={{ fontSize: 14.5, fontFamily: F.bodySemi, color: '#fff' }}>Last session voice notes</Body>
+          <Text style={{ fontSize: 15, fontFamily: F.bodyBold, color: '#fff' }}>{SN.CHECKIN_TITLE}</Text>
+          {recent ? <Body style={{ fontSize: 11.5, color: C.ink3, marginTop: 1 }}>{SN.checkinLine((clientName ?? '').trim().split(/\s+/)[0])}</Body> : null}
           <Mono style={{ fontSize: 8.5, letterSpacing: 0.8, color: recent ? ACCENT : C.muted3, marginTop: 2 }}>
             {recent ? `${dayLabel(latest!.day).toUpperCase()} · ${total} NOTE${total === 1 ? '' : 'S'}` : `LAST ${days} DAYS`}
           </Mono>

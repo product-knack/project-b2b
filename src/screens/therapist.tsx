@@ -21,6 +21,7 @@ import {
 // listens on the client's session list, exactly like the trainer.
 import { useAuth } from '../auth';
 import { VoiceNotesComposer, SessionVoicePlaylistPlayer, toggleTakeFlag } from '../components/SessionVoice';
+import * as SN from '../lib/sharedCoachNote';
 import { discardTake, queueSessionVoiceNote, PendingVoiceTake, hasPainNote } from '../lib/sessionVoiceQueries';
 import { startTimer, finishTimer, clearTimer } from '../lib/sessionTiming';
 
@@ -224,7 +225,7 @@ function AddTherapySessionSheet({ open, clients, presetClient, onClose }: {
             {/* Voice notes (7 Oct 2026): same recorder as the trainer's Add Workout */}
             <View style={{ gap: 6 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <Mono style={{ flex: 1, fontSize: 8.5, letterSpacing: 0.8, color: C.muted3 }}>VOICE NOTES · OPTIONAL</Mono>
+                <Mono style={{ flex: 1, fontSize: 8.5, letterSpacing: 0.8, color: C.gold }}>{SN.RECORD_KICKER} · OPTIONAL</Mono>
                 {voiceTakes.length ? <Badge text={`${voiceTakes.length} recorded`} color={ACC} /> : null}
               </View>
               <VoiceNotesComposer
@@ -234,7 +235,7 @@ function AddTherapySessionSheet({ open, clients, presetClient, onClose }: {
                 onToggleFlag={(uri) => setVoiceTakes((x) => toggleTakeFlag(x, uri))}
                 onRecordingChange={setVoiceRecording}
                 disabled={addM.isPending}
-                hint="Up to 5 notes, 5 minutes each. Saved with the session and played on the client's session list."
+                hint={SN.recordHint('sessions')}
               />
             </View>
 
@@ -451,7 +452,7 @@ export function TherapistClientDetail() {
               style={{ alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 7, paddingHorizontal: 11, borderRadius: 999, borderWidth: 1, borderColor: hexA(hasPainNote(s.voiceNotes) ? C.red : ACC, hasPainNote(s.voiceNotes) ? 0.5 : 0.35), backgroundColor: hexA(ACC, voiceOpenId === s.id ? 0.16 : 0.07) }}
             >
               <Icon name="mic" size={12} color={ACC} strokeWidth={2.2} />
-              <Text style={{ fontFamily: F.bodySemi, fontSize: 11.5, color: ACC }}>Play{s.voiceNotes.length > 1 ? ` · ${s.voiceNotes.length}` : ''}</Text>
+              <Text style={{ fontFamily: F.bodySemi, fontSize: 11.5, color: ACC }}>{SN.listenButton(s.voiceNotes.length)}</Text>
               {hasPainNote(s.voiceNotes) ? <Text style={{ fontFamily: F.bodySemi, fontSize: 10.5, color: C.red }}>· Pain</Text> : null}
             </Pressable>
           ) : null}

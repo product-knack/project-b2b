@@ -31,6 +31,7 @@ import { dayMonth, dayBefore } from '../lib/latestDaily';
 import { useClientHealthSummary } from '../lib/clientHealthSummaryQueries';
 import { listenGate, gateDue, listenSheetUp } from '../lib/clientHealthSummary';
 import { VoiceNotesComposer, SessionVoicePlaylistPlayer, SessionVoiceSheet, SessionVoiceSheetInfo, LatestVoiceInline, toggleTakeFlag } from '../components/SessionVoice';
+import * as SN from '../lib/sharedCoachNote';
 import { hasPainNote } from '../lib/sessionVoiceTypes';
 import { useClientsLatestVoiceNotes } from '../lib/sessionVoiceQueries';
 import { PendingVoiceTake, discardTake } from '../lib/sessionVoiceQueries';
@@ -1234,10 +1235,10 @@ function RosterCard({ row, trainerName, highlight, onAddWorkout, plans, devPos, 
             {row.modality ? chip(row.modality, C.ink3) : null}
             {/* Voice notes on the logged session: listen, and record more (30 Sep 2026) */}
             {logged && onVoice ? (
-              <Pressable onPress={onVoice} hitSlop={8} accessibilityRole="button" accessibilityLabel={`Voice notes for this session${hasPainNote(row.voice_notes) ? ', pain or discomfort reported' : ''}`}
+              <Pressable onPress={onVoice} hitSlop={8} accessibilityRole="button" accessibilityLabel={`Shared coach notes for this session${hasPainNote(row.voice_notes) ? ', pain or discomfort reported' : ''}`}
                 style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 3, paddingHorizontal: 9, borderRadius: 999, backgroundColor: hexA(C.purple, row.voice_notes.length ? 0.16 : 0.1), borderWidth: 1, borderColor: hexA(hasPainNote(row.voice_notes) ? C.red : C.purple, hasPainNote(row.voice_notes) ? 0.6 : 0.45) }}>
                 <Icon name="mic" size={10} color={C.purple} strokeWidth={2.4} />
-                <Text style={{ fontFamily: F.bodySemi, fontSize: 10, color: C.purple }}>{row.voice_notes.length ? `${row.voice_notes.length} voice note${row.voice_notes.length === 1 ? '' : 's'}` : 'Voice note'}</Text>
+                <Text style={{ fontFamily: F.bodySemi, fontSize: 10, color: C.purple }}>{SN.sharedNoteChip(row.voice_notes.length)}</Text>
                 {hasPainNote(row.voice_notes) ? <Text style={{ fontFamily: F.bodySemi, fontSize: 10, color: C.red }}>· Pain</Text> : null}
               </Pressable>
             ) : null}
@@ -5839,11 +5840,11 @@ export function ClientDetail() {
                       {voiceNotes.length ? (
                         <Pressable
                           onPress={() => setOpenClientVoice(voiceOpen ? null : i)}
-                          accessibilityRole="button" accessibilityLabel={`Play ${voiceNotes.length} voice notes${hasPainNote(voiceNotes) ? ', pain or discomfort reported' : ''}`}
+                          accessibilityRole="button" accessibilityLabel={`Listen to ${voiceNotes.length} shared coach notes${hasPainNote(voiceNotes) ? ', pain or discomfort reported' : ''}`}
                           style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 11, borderRadius: 12, borderWidth: 1, borderColor: hexA(hasPainNote(voiceNotes) ? C.red : C.purple, hasPainNote(voiceNotes) ? 0.5 : 0.35), backgroundColor: voiceOpen ? hexA(C.purple, 0.14) : hexA(C.purple, 0.06) }}
                         >
                           <Icon name="mic" size={14} color={C.purple} strokeWidth={2.2} />
-                          <Text style={{ fontFamily: F.bodySemi, fontSize: 13, color: C.purple }}>Play{voiceNotes.length > 1 ? ` · ${voiceNotes.length}` : ''}</Text>
+                          <Text style={{ fontFamily: F.bodySemi, fontSize: 13, color: C.purple }}>{SN.listenButton(voiceNotes.length)}</Text>
                           {hasPainNote(voiceNotes) ? <Text style={{ fontFamily: F.bodySemi, fontSize: 11, color: C.red }}>· Pain</Text> : null}
                         </Pressable>
                       ) : null}
@@ -7972,8 +7973,8 @@ export function Workout() {
               log (queued behind it), playable as one audio on the client's Sessions list. */}
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <View style={{ flex: 1 }}>
-              <Mono style={{ fontSize: 10, letterSpacing: 1.2, color: C.mono2 }}>VOICE NOTES</Mono>
-              <Body style={{ fontSize: 11, color: C.muted3, marginTop: 2 }}>Speak your notes about this session{editingOutboxId ? '' : ' (required: one note before you submit)'}</Body>
+              <Mono style={{ fontSize: 10, letterSpacing: 1.2, color: C.gold }}>{SN.RECORD_KICKER}</Mono>
+              <Body style={{ fontSize: 11, color: C.muted3, marginTop: 2 }}>{editingOutboxId ? 'Heard by every coach of this client' : 'Required: one note before you submit. Heard by every coach of this client.'}</Body>
             </View>
             {voiceTakes.length ? <Badge text={`${voiceTakes.length} recorded`} color={C.purple} /> : null}
           </View>
@@ -7984,7 +7985,8 @@ export function Workout() {
             onToggleFlag={(uri) => setVoiceTakes((x) => toggleTakeFlag(x, uri))}
             onRecordingChange={setVoiceRecording}
             disabled={saving}
-            hint="Up to 5 notes, 5 minutes each. Saved with the session; you can add more from Today's Roster."
+            clientName={clientName}
+            hint={SN.recordHint('roster')}
           />
           <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginVertical: 2 }} />
           <Mono style={{ fontSize: 10, letterSpacing: 1.2, color: C.mono2 }}>SESSION REMARKS</Mono>
@@ -8411,7 +8413,7 @@ export function Workout() {
               ) : null}
 
               {/* Last session voice notes (5 Oct 2026): what the previous trainer said, with date, time and name. */}
-              <LatestVoiceInline latest={latestVoice} loading={latestVoiceQ.isFetching && !latestVoiceQ.data} />
+              <LatestVoiceInline latest={latestVoice} loading={latestVoiceQ.isFetching && !latestVoiceQ.data} clientName={clientName} />
 
               {saveHealthM.isError ? (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12, borderRadius: 12, backgroundColor: hexA(C.red, 0.08), borderWidth: 1, borderColor: hexA(C.red, 0.28) }}>

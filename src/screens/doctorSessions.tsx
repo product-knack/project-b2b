@@ -16,6 +16,7 @@ import {
 // Session voice notes (7 Oct 2026): the doctor records while logging and from
 // the day list, exactly like the trainer; same component, same RPC.
 import { VoiceNotesComposer, SessionVoiceSheet, SessionVoiceSheetInfo, toggleTakeFlag } from '../components/SessionVoice';
+import * as SN from '../lib/sharedCoachNote';
 import { discardTake, queueSessionVoiceNote, PendingVoiceTake, hasPainNote } from '../lib/sessionVoiceQueries';
 import { startTimer, finishTimer, clearTimer } from '../lib/sessionTiming';
 
@@ -616,8 +617,8 @@ export function PhysioSessionSheet({ visible, onClose, clientId, clientName, sch
               <View style={{ gap: 8 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                   <View style={{ flex: 1 }}>
-                    <Mono style={labelStyle}>VOICE NOTES (OPTIONAL)</Mono>
-                    <Body style={{ fontSize: 11, color: C.muted3, marginTop: -2 }}>Speak your notes about this session</Body>
+                    <Mono style={{ ...labelStyle, color: C.gold }}>{SN.RECORD_KICKER} (OPTIONAL)</Mono>
+                    <Body style={{ fontSize: 11, color: C.muted3, marginTop: -2 }}>Heard by every coach and physio of this client</Body>
                   </View>
                   {voiceTakes.length ? <Badge text={`${voiceTakes.length} recorded`} color={C.purple} /> : null}
                 </View>
@@ -628,7 +629,7 @@ export function PhysioSessionSheet({ visible, onClose, clientId, clientName, sch
                   onToggleFlag={(uri) => setVoiceTakes((x) => toggleTakeFlag(x, uri))}
                   onRecordingChange={setVoiceRecording}
                   disabled={submitM.isPending}
-                  hint="Up to 5 notes, 5 minutes each. Saved with the session; you can add more from the Sessions list."
+                  hint={SN.recordHint('sessions')}
                 />
               </View>
             ) : null}
@@ -834,7 +835,7 @@ export function DoctorSessionsPage() {
                     style={{ alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 7, paddingHorizontal: 11, borderRadius: 999, borderWidth: 1, borderColor: hexA(hasPainNote(s.voiceNotes) ? C.red : C.purple, hasPainNote(s.voiceNotes) ? 0.5 : 0.35), backgroundColor: hexA(C.purple, s.voiceNotes.length ? 0.14 : 0.06) }}
                   >
                     <Icon name="mic" size={12} color={C.purple} strokeWidth={2.2} />
-                    <Text style={{ fontFamily: F.bodySemi, fontSize: 11.5, color: C.purple }}>{s.voiceNotes.length ? `${s.voiceNotes.length} voice note${s.voiceNotes.length === 1 ? '' : 's'}` : 'Voice note'}</Text>
+                    <Text style={{ fontFamily: F.bodySemi, fontSize: 11.5, color: C.purple }}>{SN.sharedNoteChip(s.voiceNotes.length)}</Text>
                     {hasPainNote(s.voiceNotes) ? <Text style={{ fontFamily: F.bodySemi, fontSize: 10.5, color: C.red }}>· Pain</Text> : null}
                   </Pressable>
                 ) : null}
