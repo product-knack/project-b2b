@@ -77,6 +77,7 @@ eq('headline no winner', A.resultHeadline({ ...res, result: 'no_winner' }), "No 
 // 26 Oct 2026: a cancelled day (the server reports won = false to everyone, the ex-winner included)
 eq('headline cancelled', A.resultHeadline({ ...res, result: 'cancelled' }), "Aarav Mehra's Strength on Fri 2 Oct at 7:00 AM was cancelled");
 eq('detail cancelled is the bid only', A.resultDetail({ ...res, result: 'cancelled' }), 'Your bid: 4 of 5 correct');
+eq('cancellation line', A.cancellationLine({ client_name: 'Aarav Mehra', modality: 'Strength', training_date: '2026-10-02', slot_time: '07:00' }), 'Aarav Mehra cancelled Strength on Fri 2 Oct at 7:00 AM');
 eq('locked error', [A.isEssentialsLockedError('ESSENTIALS_LOCKED: this Essentials session was booked through the auction.'), A.isEssentialsLockedError('PAID_CANCEL_CODE_REQUIRED: x'), A.isEssentialsLockedError(null)], [true, false, false]);
 eq('detail won', A.resultDetail({ ...res, won: true, my_points: 5 }), '5 of 5 correct · 3 bids · the session is on your roster');
 eq('detail won, one bid', A.resultDetail({ ...res, won: true, my_points: 5, bids_count: 1 }), '5 of 5 correct · 1 bid · the session is on your roster');

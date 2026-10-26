@@ -12,6 +12,7 @@ import { ManagerTeamChatCard } from './managerChat';
 import { EssentialsAuctionHomeCard } from '../components/essentialsAuctionCard';
 import { AuctionResultsCards } from '../components/auctionResultsCards';
 import { EssentialsUnsoldAlert } from '../components/essentialsUnsoldAlert';
+import { EssentialsCancelledAlert } from '../components/essentialsCancelledAlert';
 import { NucleusHomeCard } from './nucleus';
 import { useStore } from '../store';
 import { TRAINER_MODALITIES, DOCTOR_MODALITIES, useMyManagerTeam } from '../lib/managerChatQueries';
@@ -615,6 +616,7 @@ function PhysioDoctorDashboard() {
       {/* Essentials Auction — physiotherapists only: rehab sessions of tomorrow's
          Essentials clients, while the window is open (1 Oct 2026). */}
       {identity.data.isPhysio ? <EssentialsUnsoldAlert /> : null}
+      {identity.data.isPhysio ? <EssentialsCancelledAlert /> : null}
       {identity.data.isPhysio ? <AuctionResultsCards /> : null}
       {identity.data.isPhysio ? <EssentialsAuctionHomeCard /> : null}
       {/* Odds Nucleus teaser (16 Oct 2026): the hero piece; nothing while the library is empty. */}

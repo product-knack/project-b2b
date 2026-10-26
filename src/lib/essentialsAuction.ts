@@ -24,11 +24,28 @@ export type LotStatus = 'open' | 'reserved' | 'grabbed';
 /** 'cancelled' since 26 Oct 2026: the client (or the care team for the client) cancelled the day; the session leaves the auction. */
 export type RoundResult = 'won' | 'booked_elsewhere' | 'no_bids' | 'no_winner' | 'cancelled' | null;
 
-/* A trainer, coach, doctor or therapist cannot cancel a won Essentials session (owner, 26 Oct 2026): the
-   server refuses with ESSENTIALS_LOCKED; the care team cancels it for the client. */
+/* Nobody on the staff side cancels a session booked through the auction (owner, 26 Oct 2026): the server
+   refuses with ESSENTIALS_LOCKED; only the client cancels it, as a rest day in the Essentials app. */
 export const ESSENTIALS_LOCKED_PREFIX = 'ESSENTIALS_LOCKED';
-export const ESSENTIALS_LOCKED_MESSAGE = 'This Essentials session was booked through the auction. Only the care team can cancel it, for the client.';
+export const ESSENTIALS_LOCKED_MESSAGE = 'This Essentials session was booked through the auction. Only the client can cancel it, in the Essentials app.';
 export const isEssentialsLockedError = (message: string | null | undefined): boolean => (message ?? '').includes(ESSENTIALS_LOCKED_PREFIX);
+
+/** One row of get_my_essentials_cancellations: a session of mine the client cancelled in the app (26 Oct 2026). */
+export type EssentialsCancellation = {
+  round_key: string;
+  client_id: string;
+  client_name: string;
+  training_date: string;
+  slot_time: string;
+  modality: string;
+  cancelled_at: string;
+  session_id: string | null;
+  was_winner: boolean;
+};
+
+/** The dashboard alert line: "Aarav Mehra cancelled Strength on Tue 27 Oct at 7:00 PM". */
+export const cancellationLine = (c: Pick<EssentialsCancellation, 'client_name' | 'modality' | 'training_date' | 'slot_time'>): string =>
+  `${c.client_name} cancelled ${c.modality || 'the training'} on ${formatLotDate(c.training_date)}${c.slot_time ? ` at ${formatTime12(c.slot_time)}` : ''}`;
 
 /** One row of get_essentials_auction (the bid fields since 10 Oct 2026, migration 20261010120000). */
 export type AuctionLot = {

@@ -10,6 +10,7 @@ import { AppState } from 'react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from './supabase';
 import { withTimeout, NET_MS } from './withTimeout';
+import type { EssentialsCancellation } from './essentialsAuction';
 import {
   AuctionConfig, AuctionLot, AuctionQuiz, AuctionResult, BidResult, DEFAULT_AUCTION_CONFIG, EtaSession, LotEta,
   computeLotEta, describeGrabError, geoFromBrb,
@@ -289,6 +290,38 @@ export function useAuctionEta(lots: AuctionLot[], me: string | null, date: strin
         out[`${lot.client_id}@${lot.slot_time}`] = computeLotEta(lot.scheduled_for, loc, locText, mine.filter((s) => s.start !== lot.scheduled_for));
       });
       return out;
+    },
+  });
+}
+
+/* ---------- the client cancelled a session of mine (26 Oct 2026) ---------- */
+/** get_my_essentials_cancellations: my sessions the client cancelled in the Essentials app in the last hours (the dashboard alert). */
+export function useMyEssentialsCancellations(hours = 48, enabled = true) {
+  return useQuery({
+    queryKey: ['essentials-cancellations', hours],
+    enabled,
+    staleTime: 60_000,
+    refetchInterval: enabled ? 5 * 60_000 : false,
+    refetchOnWindowFocus: true,
+    queryFn: async (): Promise<EssentialsCancellation[]> => {
+      const { data, error } = await withTimeout(
+        Promise.resolve(supabase.rpc('get_my_essentials_cancellations', { p_hours: hours })) as Promise<RpcResult>,
+        NET_MS, 'Essentials cancellations');
+      if (error) {
+        if (error.code === 'PGRST202' || /PGRST202|could not find the function/i.test(String(error.message ?? ''))) return [];
+        throw new Error(describeGrabError(error));
+      }
+      return ((data ?? []) as any[]).map((r) => ({
+        round_key: String(r.round_key ?? `${r.client_id}:${r.training_date}`),
+        client_id: String(r.client_id),
+        client_name: r.client_name ?? 'Client',
+        training_date: String(r.training_date),
+        slot_time: String(r.slot_time ?? '').slice(0, 5),
+        modality: r.modality ?? '',
+        cancelled_at: String(r.cancelled_at),
+        session_id: r.session_id ?? null,
+        was_winner: !!r.was_winner,
+      }));
     },
   });
 }

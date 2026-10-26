@@ -76,6 +76,8 @@ export function PushTokenManager() {
     // Essentials Auction unsold (22 Oct 2026): a crew member lands on that client's card; the manager on their page.
     if (t === 'essentials_unsold' || data.route === 'essentials-auction') { if (data.client_id) set({ auctionFocusClientId: String(data.client_id) }); go('essentials-auction'); return; }
     if (t === 'essentials_unsold_manager' || data.route === 'essentials-manager') { go('essentials-manager'); return; }
+    // The client cancelled a sold Essentials session (26 Oct 2026): home, where the alert card sits.
+    if (t === 'essentials_cancelled') { go(homeRouteFor(roleRef.current)); return; }
     // 7 PM team-flags push → straight into the manager chat.
     if (t === 'manager_team_flags' || data.route === 'manager-chat') { go('manager-chat'); return; }
     // Anything else that names a route/session (unknown web routes included) → home.

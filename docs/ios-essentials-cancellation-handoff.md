@@ -1,40 +1,57 @@
-# iOS handoff: a cancelled Essentials day leaves the auction (26 Oct 2026)
+# iOS handoff: the client cancels an Essentials day, the session leaves the auction (26 Oct 2026)
 
 For the iOS Expo repo. Server side done (hub-track migration `20261026100000_essentials_client_cancellations.sql`,
-run by the owner). Two small app changes, both pure text rules, no new screen. Feature doc:
-`b2b/docs/features/android/trainer/essentials-auction.md` section 6, "A cancelled day leaves the auction".
+run by the owner). Feature doc: `b2b/docs/features/android/trainer/essentials-auction.md` section 6,
+"A cancelled day leaves the auction". Copy rule: no dashes in user-facing text.
 
 ## The rule (owner decisions, 26 Oct 2026)
-- The client cancels a planned training in the Essentials app (the day is removed from `essentials_weeks`). The
-  server then cancels any roster row booked for it (Cancelled by: Client) and marks the auction round
-  `result = 'cancelled'`.
-- A trainer, coach, doctor or therapist **cannot cancel a session booked through the auction** (its roster notes
-  start "Essentials by Odds"). The server refuses the `session_schedule` update with a message starting
-  `ESSENTIALS_LOCKED`. The care team (CRM, admin, ops) cancels it for the client.
-- A cancelled round is hidden by `get_essentials_auction` (no card), refused by the booking and the bid RPCs
-  ("The client cancelled this session."), and reported by `get_my_auction_results` with `result = 'cancelled'`
-  and `won = false` for everyone, the earlier winner included.
+- Only the client cancels, as a rest day in the Essentials app (the date is dropped from `essentials_weeks.days`).
+  The server then cancels any roster row booked for it (Cancelled by: Client), marks the auction round
+  `result = 'cancelled'`, pushes the trainer and writes a care-team note.
+- Nobody on the staff side cancels a session booked through the auction (roster notes start "Essentials by Odds"):
+  the `session_schedule` update is refused with a message starting `ESSENTIALS_LOCKED`.
+- Before the auction the card is simply not built; during it the card disappears and bids answer
+  "The client cancelled this session."; after a sale the trainer gets the push and a dashboard alert.
 
-## Edits (mirror of the Android commit of 26 Oct 2026)
+## Server contracts
+- `get_my_essentials_cancellations(p_hours int default 48)` → rows `{round_key, client_id, client_name, training_date,
+  slot_time ("19:00"), modality, cancelled_at, session_id, was_winner}`: the caller's sessions the client cancelled
+  (winner of the round, or the cancelled roster row's trainer), newest first.
+- Push to the trainer: title "Essentials session cancelled", body "NAME cancelled Strength on 27 Oct at 7:00 pm. It is
+  off your roster.", `data = {type: 'essentials_cancelled', route: 'home', client_id, date, session_id}`.
+- `get_my_auction_results` now returns `result = 'cancelled'` with `won = false` for a cancelled round.
+
+## Edits (mirror of the Android commits of 26 Oct 2026)
 1. `src/lib/essentialsAuction.ts`
    - `RoundResult` gains `'cancelled'`.
-   - Add, next to the other exported constants:
+   - Add:
      ```ts
      export const ESSENTIALS_LOCKED_PREFIX = 'ESSENTIALS_LOCKED';
-     export const ESSENTIALS_LOCKED_MESSAGE = 'This Essentials session was booked through the auction. Only the care team can cancel it, for the client.';
+     export const ESSENTIALS_LOCKED_MESSAGE = 'This Essentials session was booked through the auction. Only the client can cancel it, in the Essentials app.';
      export const isEssentialsLockedError = (message: string | null | undefined): boolean => (message ?? '').includes(ESSENTIALS_LOCKED_PREFIX);
+     export type EssentialsCancellation = { round_key: string; client_id: string; client_name: string; training_date: string; slot_time: string; modality: string; cancelled_at: string; session_id: string | null; was_winner: boolean };
+     export const cancellationLine = (c: Pick<EssentialsCancellation, 'client_name' | 'modality' | 'training_date' | 'slot_time'>): string =>
+       `${c.client_name} cancelled ${c.modality || 'the training'} on ${formatLotDate(c.training_date)}${c.slot_time ? ` at ${formatTime12(c.slot_time)}` : ''}`;
      ```
    - `resultHeadline`: before the last `return`, add
      `if (r.result === 'cancelled') return `${r.client_name}'s ${r.modality} on ${when} was cancelled`;`
-     (`resultDetail` needs no change: `won` is false, so it prints "Your bid: N of M correct".)
-2. `src/lib/trainerQueries.ts`, `useCancelScheduledSession`: after the paid-code mapping,
+2. `src/lib/essentialsAuctionQueries.ts`: `useMyEssentialsCancellations(hours = 48, enabled = true)`, the same shape as
+   `useMyAuctionResults` (key `['essentials-cancellations', hours]`, 60 s stale, 5 min refetch, PGRST202 → `[]`),
+   mapping the RPC rows to `EssentialsCancellation`.
+3. `src/components/essentialsCancelledAlert.tsx` (copy from Android, 70 lines): a rose card "ESSENTIALS · CANCELLED BY
+   THE CLIENT", one row per cancellation with `cancellationLine` and "Cancelled in the Essentials app at 3:48 PM IST ·
+   the session is no longer on your roster", a Got it chip per row; dismissed keys in AsyncStorage
+   `essentials-cancelled-dismissed:<uid>`, pruned to the rounds still served.
+4. Mounts: trainer home right after `<EssentialsUnsoldAlert />`; Doctor Dashboard for physios next to the same.
+5. `src/components/PushTokenManager.tsx`: `if (t === 'essentials_cancelled') { go(homeRouteFor(roleRef.current)); return; }`
+   before the generic route fallback.
+6. `src/lib/trainerQueries.ts`, `useCancelScheduledSession`: after the paid-code mapping,
    `isEssentialsLockedError(error.message) ? ESSENTIALS_LOCKED_MESSAGE : error.message`.
-   The doctor and therapist cancel flows share this mutation; nothing else to touch.
-3. `tests/rules/auction_rules_test.js`: the three checks added on Android (headline cancelled, detail cancelled,
-   locked error true / false / null). Run `node tests/rules/auction_rules_test.js`.
+7. `tests/rules/auction_rules_test.js`: the four checks added on Android (headline cancelled, detail cancelled,
+   cancellation line, locked error true / false / null). Run `node tests/rules/auction_rules_test.js`.
 
 ## Verify on a device
-- Cancel a session whose roster notes start "Essentials by Odds" as a trainer: the sheet shows the locked message,
-  the row stays. A plain session still cancels.
-- After the care team cancels an Essentials session for the client: the auction page no longer shows that card;
-  the results banner (if you had bid) reads "… was cancelled".
+- Cancel a session whose roster notes start "Essentials by Odds": the sheet shows the locked message, the row stays.
+  A plain session still cancels.
+- After the client removes a sold day in the Essentials app: the push arrives, the home shows the rose card, Got it
+  hides it, the roster no longer lists the session, the auction page has no card for it.
