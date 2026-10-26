@@ -205,8 +205,29 @@ export type BodyBlock =
   | { type: 'quote'; text: string }
   | { type: 'bullets'; items: string[] };
 
+/* Inline bold (26 Oct 2026, the web editor's Bold button stores **text**): identical to the web parser so
+   all three readers agree. */
+export type InlineRun = { text: string; bold: boolean };
+
+/** **x** becomes a bold run; an unmatched ** prints as typed. */
+export const inlineRuns = (text: string): InlineRun[] => {
+  const out: InlineRun[] = [];
+  const re = /\*\*(?=\S)([\s\S]*?\S)\*\*/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) {
+    if (m.index > last) out.push({ text: text.slice(last, m.index), bold: false });
+    out.push({ text: m[1], bold: true });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push({ text: text.slice(last), bold: false });
+  return out.length ? out : [{ text, bold: false }];
+};
+export const stripInline = (text: string) => inlineRuns(text).map((r) => r.text).join('');
+
 /** Blocks split on blank lines; all "- " = bullets; first line "## " = heading (the rest parses on);
-    all "> " = pull quote; else a paragraph with its lines joined by a space. */
+    all "> " = pull quote; else a paragraph with its lines joined by a space. Headings lose the bold markers;
+    paragraphs, bullets and quotes keep them for inlineRuns at render time. */
 export const parseBody = (body: string | null | undefined): BodyBlock[] => {
   const text = (body ?? '').replace(/\r\n/g, '\n');
   const blocks: BodyBlock[] = [];
@@ -215,7 +236,7 @@ export const parseBody = (body: string | null | undefined): BodyBlock[] => {
     if (lines.length === 0) continue;
     if (lines.every((l) => /^- /.test(l))) { blocks.push({ type: 'bullets', items: lines.map((l) => l.replace(/^- /, '').trim()) }); continue; }
     if (/^## /.test(lines[0])) {
-      blocks.push({ type: 'h2', text: lines[0].replace(/^## /, '').trim() });
+      blocks.push({ type: 'h2', text: stripInline(lines[0].replace(/^## /, '').trim()) });
       const rest = lines.slice(1);
       if (rest.length) blocks.push(...parseBody(rest.join('\n')));
       continue;

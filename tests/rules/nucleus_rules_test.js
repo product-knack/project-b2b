@@ -40,6 +40,12 @@ eq('body blocks', N.parseBody('## Why sleep\r\nFirst line\nsecond line\n\n- one\
   { type: 'h2', text: 'Why sleep' }, { type: 'p', text: 'First line second line' }, { type: 'bullets', items: ['one', 'two'] }, { type: 'quote', text: 'a quote continues' }, { type: 'p', text: 'Plain para.' },
 ]);
 eq('empty body', N.parseBody(null), []);
+// 26 Oct 2026: **bold** runs from the web editor's Bold button
+eq('inline bold run', N.inlineRuns('Most adults need **seven to nine** hours.'), [{ text: 'Most adults need ', bold: false }, { text: 'seven to nine', bold: true }, { text: ' hours.', bold: false }]);
+eq('unmatched ** prints as typed', N.inlineRuns('2 ** 3 is eight'), [{ text: '2 ** 3 is eight', bold: false }]);
+eq('two bold runs, plain text in between', N.inlineRuns('**a** and **b**').map((r) => (r.bold ? 'B:' : 'P:') + r.text), ['B:a', 'P: and ', 'B:b']);
+eq('stripInline', N.stripInline('Keep **this** plain'), 'Keep this plain');
+eq('heading loses the markers, paragraph keeps them', N.parseBody('## Why **it** matters\nMost need **nine** hours.'), [{ type: 'h2', text: 'Why it matters' }, { type: 'p', text: 'Most need **nine** hours.' }]);
 eq('mixed dash block is a paragraph', N.parseBody('- one\nnot a bullet'), [{ type: 'p', text: '- one not a bullet' }]);
 
 /* rows, order, hero, courses */

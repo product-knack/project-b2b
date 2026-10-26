@@ -27,7 +27,7 @@ import { useNucleusPieces, useNucleusLocal, readPosition, type NucleusLocal } fr
 import {
   type NucleusPiece, type NucleusTopic, type NucleusPosition, type KindFilter, type BodyBlock,
   TOPICS, topicMeta, heroPiece, courses, coursePlace, relatedPieces, filterPieces,
-  videoHost, videoEmbedUrl, youtubeThumb, isHttp, isHttps, parseBody, fmtClock, minutesOf, metaLine, kindLabel,
+  videoHost, videoEmbedUrl, youtubeThumb, isHttp, isHttps, parseBody, inlineRuns, fmtClock, minutesOf, metaLine, kindLabel,
   authorInitial, creditLine, evidenceDetail, resumeLabel, resumeFrom, nextSpeed,
 } from '../lib/nucleus';
 
@@ -537,6 +537,13 @@ function ListenBar({ piece, startAt, onPosition, onEnd }: { piece: NucleusPiece;
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 const safeTime = (p: AudioPlayer): number => { try { const t = p.currentTime; return Number.isFinite(t) ? t : 0; } catch { return 0; } };
 
+/* **bold** runs (26 Oct 2026): nested Text keeps the line wrapping of the parent paragraph. */
+const Runs = ({ text }: { text: string }) => (
+  <>{inlineRuns(text).map((r, i) => r.bold
+    ? <Text key={i} style={{ fontFamily: F.bodyBold }}>{r.text}</Text>
+    : <React.Fragment key={i}>{r.text}</React.Fragment>)}</>
+);
+
 function BodyBlocks({ blocks }: { blocks: BodyBlock[] }) {
   return (
     <View style={{ gap: 14 }}>
@@ -545,7 +552,7 @@ function BodyBlocks({ blocks }: { blocks: BodyBlock[] }) {
         if (b.type === 'quote') return (
           <View key={i} style={{ flexDirection: 'row', gap: 12 }}>
             <View style={{ width: 3, borderRadius: 2, backgroundColor: EMBER }} />
-            <Text style={{ flex: 1, fontFamily: F.italic, fontSize: READ_SIZE + 1, lineHeight: READ_LINE, color: C.ink }}>{b.text}</Text>
+            <Text style={{ flex: 1, fontFamily: F.italic, fontSize: READ_SIZE + 1, lineHeight: READ_LINE, color: C.ink }}><Runs text={b.text} /></Text>
           </View>
         );
         if (b.type === 'bullets') return (
@@ -553,12 +560,12 @@ function BodyBlocks({ blocks }: { blocks: BodyBlock[] }) {
             {b.items.map((it, j) => (
               <View key={j} style={{ flexDirection: 'row', gap: 10 }}>
                 <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: EMBER, marginTop: 10 }} />
-                <Text style={{ flex: 1, fontFamily: F.bodyReg, fontSize: READ_SIZE, lineHeight: READ_LINE, color: C.ink }}>{it}</Text>
+                <Text style={{ flex: 1, fontFamily: F.bodyReg, fontSize: READ_SIZE, lineHeight: READ_LINE, color: C.ink }}><Runs text={it} /></Text>
               </View>
             ))}
           </View>
         );
-        return <Text key={i} style={{ fontFamily: F.bodyReg, fontSize: READ_SIZE, lineHeight: READ_LINE, color: C.ink }}>{b.text}</Text>;
+        return <Text key={i} style={{ fontFamily: F.bodyReg, fontSize: READ_SIZE, lineHeight: READ_LINE, color: C.ink }}><Runs text={b.text} /></Text>;
       })}
     </View>
   );
