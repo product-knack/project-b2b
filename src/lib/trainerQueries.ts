@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { isPaidCancelGateError, PAID_CANCEL_GATE_MESSAGE } from './sessionOtp';
+import { ESSENTIALS_LOCKED_MESSAGE, isEssentialsLockedError } from './essentialsAuction';
 import { useAuth } from '../auth';
 import { supabase } from './supabase';
 import { computeEssentials, EssentialsStatus } from './essentials';
@@ -435,7 +436,8 @@ export function useCancelScheduledSession() {
         .select()
         .maybeSingle();
       // Paid cancellation code gate (22 Oct 2026): the server refuses a paid cancel without the verified code.
-      if (error) throw new Error(isPaidCancelGateError(error.message) ? PAID_CANCEL_GATE_MESSAGE : error.message);
+      // A won Essentials session is locked for staff (26 Oct 2026): the care team cancels it for the client.
+      if (error) throw new Error(isPaidCancelGateError(error.message) ? PAID_CANCEL_GATE_MESSAGE : isEssentialsLockedError(error.message) ? ESSENTIALS_LOCKED_MESSAGE : error.message);
       if (!data) throw new Error('Session not found or could not be cancelled');
       return data;
     },

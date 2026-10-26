@@ -21,7 +21,14 @@ export const DEFAULT_AUCTION_CONFIG: AuctionConfig = { open: '13:00', close: '17
 
 export type LotStatus = 'open' | 'reserved' | 'grabbed';
 
-export type RoundResult = 'won' | 'booked_elsewhere' | 'no_bids' | 'no_winner' | null;
+/** 'cancelled' since 26 Oct 2026: the client (or the care team for the client) cancelled the day; the session leaves the auction. */
+export type RoundResult = 'won' | 'booked_elsewhere' | 'no_bids' | 'no_winner' | 'cancelled' | null;
+
+/* A trainer, coach, doctor or therapist cannot cancel a won Essentials session (owner, 26 Oct 2026): the
+   server refuses with ESSENTIALS_LOCKED; the care team cancels it for the client. */
+export const ESSENTIALS_LOCKED_PREFIX = 'ESSENTIALS_LOCKED';
+export const ESSENTIALS_LOCKED_MESSAGE = 'This Essentials session was booked through the auction. Only the care team can cancel it, for the client.';
+export const isEssentialsLockedError = (message: string | null | undefined): boolean => (message ?? '').includes(ESSENTIALS_LOCKED_PREFIX);
 
 /** One row of get_essentials_auction (the bid fields since 10 Oct 2026, migration 20261010120000). */
 export type AuctionLot = {
@@ -143,6 +150,7 @@ export const resultHeadline = (r: AuctionResult): string => {
   if (r.won) return `You won ${r.client_name}, ${r.modality} on ${when}`;
   if (r.result === 'booked_elsewhere') return `${r.client_name}'s ${r.modality} on ${when} was booked outside the auction`;
   if (r.result === 'no_winner') return `No one could be booked for ${r.client_name}'s ${r.modality} on ${when}`;
+  if (r.result === 'cancelled') return `${r.client_name}'s ${r.modality} on ${when} was cancelled`;
   return `${r.winner_name ?? 'Another trainer'} won ${r.client_name}'s ${r.modality} on ${when}`;
 };
 
