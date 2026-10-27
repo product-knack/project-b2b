@@ -141,13 +141,13 @@ function BidButton({ live, busy, onPress, reduceMotion, label }: { live: boolean
   );
 }
 
-/* The client's QHP front-view photo as a tappable thumbnail; initials when there is none. */
+/* The client's profile photo (profiles.avatar_url, since 27 Oct 2026) as a tappable thumbnail; initials when there is none. */
 function ClientFace({ name, photo, index, size, onPress }: { name: string; photo?: string | null; index: number; size: number; onPress?: () => void }) {
   const [failed, setFailed] = React.useState(false);
   React.useEffect(() => setFailed(false), [photo]);
   if (!photo || failed) return <MiniAvatar initial={initials(name)} colors={AVS[index % AVS.length]} size={size} />;
   return (
-    <Pressable onPress={onPress} disabled={!onPress} hitSlop={6} accessibilityRole="imagebutton" accessibilityLabel={`${name}, QHP front view photo`}
+    <Pressable onPress={onPress} disabled={!onPress} hitSlop={6} accessibilityRole="imagebutton" accessibilityLabel={`${name}, profile photo`}
       style={{ width: size, height: size, borderRadius: size * 0.32, overflow: 'hidden', borderWidth: 1.5, borderColor: hexA(C.gold, 0.7), backgroundColor: 'rgba(255,255,255,0.06)' }}>
       <Image source={{ uri: photo }} onError={() => setFailed(true)} style={{ width: size, height: size }} resizeMode="cover" />
       <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, paddingVertical: 1, alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.55)' }}>
@@ -158,7 +158,7 @@ function ClientFace({ name, photo, index, size, onPress }: { name: string; photo
 }
 const GOLD_SOFT = '#FFE3A3';
 
-/* Full-screen look at the QHP front view (its own Modal; nothing else is open when it shows). */
+/* Full-screen look at the profile photo (its own Modal; nothing else is open when it shows). */
 function PhotoLightbox({ item, onClose }: { item: { url: string; name: string } | null; onClose: () => void }) {
   const { width, height } = Dimensions.get('window');
   return (
@@ -168,7 +168,7 @@ function PhotoLightbox({ item, onClose }: { item: { url: string; name: string } 
         {item ? (
           <View pointerEvents="box-none" style={{ alignItems: 'center', gap: 12 }}>
             <Image source={{ uri: item.url }} style={{ width: width - 32, height: height * 0.72, borderRadius: 18 }} resizeMode="contain" />
-            <Mono style={{ fontSize: 9, letterSpacing: 1.2, color: C.gold }}>{item.name.toUpperCase()} · QHP FRONT VIEW</Mono>
+            <Mono style={{ fontSize: 9, letterSpacing: 1.2, color: C.gold }}>{item.name.toUpperCase()} · PROFILE PHOTO</Mono>
             <Pressable onPress={onClose} hitSlop={10} accessibilityRole="button" style={{ paddingVertical: 9, paddingHorizontal: 18, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.1)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' }}>
               <Text style={{ fontFamily: F.bodySemi, fontSize: 13, color: '#fff' }}>Close</Text>
             </Pressable>
@@ -277,7 +277,7 @@ function LotCard({ lot, index, me, win, now, reduceMotion, photo, eta, onPhoto, 
           <View style={{ flex: 1 }}>
             <Body numberOfLines={1} style={{ fontSize: 15, fontFamily: F.bodySemi, color: '#fff' }}>{lot.client_name}</Body>
             <Body style={{ fontSize: 11, color: C.muted2, marginTop: 1 }}>Essentials by Odds · {formatLotDate(lot.auction_date)}</Body>
-            {photo ? <Mono style={{ fontSize: 7.5, letterSpacing: 0.8, color: C.muted3, marginTop: 2 }}>TAP THE PHOTO FOR THE QHP FRONT VIEW</Mono> : null}
+            {photo ? <Mono style={{ fontSize: 7.5, letterSpacing: 0.8, color: C.muted3, marginTop: 2 }}>TAP THE PHOTO TO SEE IT LARGE</Mono> : null}
           </View>
         </View>
 

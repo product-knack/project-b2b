@@ -204,14 +204,14 @@ export function useMyAuctionResults(hours = 4, enabled = true) {
   return q;
 }
 
-/** The client's latest QHP front-view photo (1 Oct 2026, user request): recent reports store a public
-    `qhp-images` URL in qhp_details.qhp_json.postural_assessment.front_view.photo_reference (older ones hold
-    a placeholder word, skipped). Read directly: trainers and physios can read qhp_details. A nicety: on any
-    error the map is empty and the card falls back to initials. */
+/** The client's profile photo (27 Oct 2026, owner: "remove the QHP photo connection; show the photo whose URL is in
+    profiles.avatar_url"): clients.profile_id -> profiles.avatar_url, a public `avatars` bucket URL. Read directly:
+    trainers and physios can read the embed (probed as Sagar). Until 27 Oct this read the QHP front-view photo from
+    qhp_details. A nicety: on any error the map is empty and the card falls back to initials. */
 export function useAuctionClientPhotos(clientIds: string[]) {
   const key = [...new Set(clientIds)].sort().join(',');
   return useQuery({
-    queryKey: ['essentials-auction-photos', key],
+    queryKey: ['essentials-auction-photos', 'v2', key],
     enabled: clientIds.length > 0,
     staleTime: 300_000,
     queryFn: async (): Promise<Record<string, string>> => {
@@ -219,19 +219,17 @@ export function useAuctionClientPhotos(clientIds: string[]) {
       const { data, error } = await withTimeout(
         Promise.resolve(
           supabase
-            .from('qhp_details')
-            .select('client_id, created_at, ref:qhp_json->postural_assessment->front_view->>photo_reference, url:qhp_json->postural_assessment->front_view->>photo_url')
-            .in('client_id', ids)
-            .order('created_at', { ascending: false })
-            .limit(ids.length * 6),
+            .from('clients')
+            .select('id, profiles:profile_id(avatar_url)')
+            .in('id', ids),
         ) as Promise<{ data: any[] | null; error: any }>,
-        NET_MS, 'QHP photos');
+        NET_MS, 'Profile photos');
       if (error) return {};
       const out: Record<string, string> = {};
       (data ?? []).forEach((r) => {
-        if (out[r.client_id]) return;
-        const u = [r.ref, r.url].find((v) => typeof v === 'string' && /^https?:\/\//i.test(v));
-        if (u) out[r.client_id] = u;
+        const p = Array.isArray(r.profiles) ? r.profiles[0] : r.profiles; // embed shape can vary by relationship
+        const u = p?.avatar_url;
+        if (typeof u === 'string' && /^https?:\/\//i.test(u)) out[r.id] = u;
       });
       return out;
     },
