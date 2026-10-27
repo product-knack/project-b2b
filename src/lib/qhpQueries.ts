@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { cancelViewOf, cancelSortKey, type CancelView } from './qhpCancellation';
 import { supabase } from './supabase';
 import { useAuth } from '../auth';
 import { uploadWithTimeout } from './withTimeout';
@@ -18,6 +19,10 @@ const todayIST = () =>
 
 export type QhpRow = {
   id: string;
+  /** coach_assessment.cancelled / cancellation_request as stored, and the one display status (26 Oct 2026). */
+  cancelled: any | null;
+  cancellation_request: any | null;
+  cancel_view: CancelView;
   coach_id: string | null;
   client_id: string | null;
   client_name: string | null;
@@ -73,6 +78,8 @@ function isHeartMathMissing(a: any): boolean {
 }
 
 export type QhpLists = {
+  /** Rows with any cancellation state (pending, approved, declined, cancelled by Ops), latest event first (26 Oct 2026). */
+  cancellations: QhpRow[];
   upcoming: QhpRow[];
   completedList: QhpRow[];
   withoutReport: QhpRow[];
@@ -137,6 +144,9 @@ export function useQhpAssessments(trainerId: string) {
 
       const mapped: QhpRow[] = rows.map((r) => ({
         id: r.id,
+        cancelled: r.cancelled ?? null,
+        cancellation_request: r.cancellation_request ?? null,
+        cancel_view: cancelViewOf(r),
         coach_id: r.coach_id ?? null,
         client_id: r.client_id ?? null,
         client_name: r.client_name ?? null,
@@ -185,7 +195,8 @@ export function useQhpAssessments(trainerId: string) {
       // today/future ascending first, then overdue (past-dated) below, most recent first.
       const todayYmd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
       const sortKey = (r: any) => `${r.assessment_date ?? '9999-12-31'} ${r.assessment_time ?? '23:59'}`;
-      const scheduled = mapped.filter((r) => r.assessment_scheduled === true && !r.is_completed);
+      // A cancelled QHP (approved request or a direct Ops cancel) leaves Upcoming (26 Oct 2026).
+      const scheduled = mapped.filter((r) => r.assessment_scheduled === true && !r.is_completed && !r.cancelled);
       const future = scheduled.filter((r) => (r.assessment_date ?? '9999-12-31') >= todayYmd).sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
       const past = scheduled.filter((r) => (r.assessment_date ?? '9999-12-31') < todayYmd).sort((a, b) => sortKey(b).localeCompare(sortKey(a)));
       const upcoming = [...future, ...past];
@@ -211,7 +222,8 @@ export function useQhpAssessments(trainerId: string) {
         (r) => !r.is_completed && !!r.assessment_date && r.assessment_date < today && !withReport.has(r.id)
       );
 
-      return { upcoming, completedList, withoutReport, dataMissing };
+      const cancellations = mapped.filter((r) => r.cancel_view.kind !== 'none').sort((a, b) => cancelSortKey(b.cancel_view).localeCompare(cancelSortKey(a.cancel_view)));
+      return { cancellations, upcoming, completedList, withoutReport, dataMissing };
     },
   });
 }

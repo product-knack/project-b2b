@@ -14,7 +14,6 @@ import { Icon, TrophyIcon, IconName } from '../icons';
 import { useStore, useStoreActions, homeRouteFor, Role } from '../store';
 import { navTargetRef } from '../lib/qhpNavigationQueries';
 import {
-import { friendlyError } from '../lib/friendlyError';
   Serif, Body, Mono, Card, StatCard, QuickAction, IconChip, GradientButton, ProgressBar, Pill, Avatar, AvatarPhoto, CountUp,
 } from '../components/primitives';
 import { useSidebarProfile, useUploadAvatar } from '../lib/navQueries';
@@ -61,6 +60,9 @@ import { buildCheckinItems, initialTicked, isDuplicateName, nameKey, sourceLabel
 import { startTimer, finishTimer, clearTimer, readTimer, SessionTiming, type TimerStart } from '../lib/sessionTiming';
 import { SessionClock } from '../components/SessionClock';
 import { PaidCancelCodeStep } from '../components/PaidCancelCodeStep';
+import { cancelChip, cancelDetail, matchesFilter, canRequestCancellation, type CancelFilter, REQUEST_TITLE, REQUEST_AGAIN } from '../lib/qhpCancellation';
+import { CancelChipView, QhpCancelRow, RequestCancellationSheet, WithdrawButton, DecideCancellationSheet, qhpSlotLine, type RequestTarget, type DecideTarget } from '../components/qhpCancellation';
+import { useQhpCancellationRequests } from '../lib/qhpCancellationQueries';
 import { useQhpAssessments, useQhpPermissions, useQhpConnectAlerts, useMarkQhpConnected, useQhpAssessors, useQhpClients, useScheduleQhp, useRequestQhpReschedule, useClientMedicalHistory, useClientHealthReports, HealthReportItem, useParqLinks, useGenerateParqLink, qhpFormatDuration, qhpUrgency, QHP_TARGET_MINS } from '../lib/qhpQueries';
 import { PdfPreview } from '../components/PdfPreview';
 import { QhpVoiceMemoButton, QhpVoiceMemoPlayer, QhpVoiceMemoDialog } from '../components/QhpVoiceMemo';
@@ -89,6 +91,7 @@ import {
 } from '../data';
 import { tones } from '../theme';
 import { MedicalEntrySheet } from './doctorClientDetail';
+import { friendlyError } from '../lib/friendlyError';
 
 const AV_GRADS: [string, string][] = [['#FB8B3A', '#EE5E16'], ['#57C98A', '#2E9A63'], ['#7C8FE8', '#4A5AC8'], ['#9A7BEA', '#6E5BD0'], ['#E0A53C', '#C07C1E'], ['#4FD1C5', '#2C8A86'], ['#F687B3', '#C2568A'], ['#F0883E', '#C05621']];
 const avColors = (s: string): [string, string] => AV_GRADS[[...(s || '?')].reduce((a, c) => a + c.charCodeAt(0), 0) % AV_GRADS.length];
@@ -9199,7 +9202,14 @@ export function Qhp() {
 
 function QhpAssessor() {
   const { height: winH } = useWindowDimensions(); // report preview must fit short screens
-  const [qhpView, setQhpView] = React.useState<'upcoming' | 'completed' | 'noreport' | 'missing'>('upcoming');
+  const [qhpView, setQhpView] = React.useState<'upcoming' | 'completed' | 'noreport' | 'missing' | 'cancellations'>('upcoming');
+  // Cancellation requests (26 Oct 2026): the tab, its filter, the request sheet, and the push-tap focus.
+  const [cancelFilter, setCancelFilter] = React.useState<CancelFilter>('all');
+  const [cancelFor, setCancelFor] = React.useState<RequestTarget>(null);
+  const storeQhp = useStore();
+  const qhpFocusTab = storeQhp.qhpFocusTab;
+  const setStoreQhp = storeQhp.set;
+  React.useEffect(() => { if (qhpFocusTab === 'cancellations') { setQhpView('cancellations'); setStoreQhp({ qhpFocusTab: null }); } }, [qhpFocusTab]);
   const [formOpen, setFormOpen] = React.useState(false);
 
   // Assessments are keyed by the signed-in assessor (coach_id = auth uid); the
@@ -9227,6 +9237,8 @@ function QhpAssessor() {
 
   const upcoming = listsQ.data?.upcoming ?? [];
   const completedList = listsQ.data?.completedList ?? [];
+  const cancellations = listsQ.data?.cancellations ?? [];
+  const pendingCancels = cancellations.filter((r) => r.cancel_view.kind === 'pending').length;
   const withoutReport = listsQ.data?.withoutReport ?? [];
   const dataMissing = listsQ.data?.dataMissing ?? [];
   const todayIso = istDate();
@@ -9433,6 +9445,7 @@ function QhpAssessor() {
           ['completed', 'My QHPs', completedList.length, C.green],
           ['noreport', 'No Report', withoutReport.length, C.gold],
           ['missing', 'Missing', dataMissing.length, C.red],
+          ['cancellations', 'Cancelled', pendingCancels, C.gold],
         ] as const).map(([id, label, count, col]) => {
           const active = qhpView === id;
           return (
@@ -9530,6 +9543,21 @@ function QhpAssessor() {
 
                 {q.reschedule_status === 'pending' ? <Badge text="Reschedule pending review" color={C.gold} /> : null}
                 {q.reschedule_status === 'rejected' ? <Badge text="Reschedule rejected" color={C.red} /> : null}
+                {/* Cancellation request (26 Oct 2026): the assessor asks, the QHP Manager decides */}
+                {cancelChip(q.cancel_view) ? (
+                  <View style={{ gap: 6 }}>
+                    <CancelChipView view={q.cancel_view} />
+                    <Body style={{ fontSize: 11, color: C.ink3, lineHeight: 15 }}>{cancelDetail(q.cancel_view, true)}</Body>
+                    {q.cancel_view.kind === 'pending' ? <WithdrawButton assessmentId={q.id} /> : null}
+                  </View>
+                ) : null}
+                {canRequestCancellation(q, q.cancel_view) ? (
+                  <Pressable onPress={() => setCancelFor({ id: q.id, clientName: q.client_name, slot: qhpSlotLine(q.assessment_date, q.assessment_time) })} hitSlop={8} accessibilityRole="button" accessibilityLabel={`${REQUEST_TITLE} for ${q.client_name ?? 'the client'}`}
+                    style={{ alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 7, paddingHorizontal: 12, borderRadius: 999, backgroundColor: hexA(C.red, 0.08), borderWidth: 1, borderColor: hexA(C.red, 0.3) }}>
+                    <Icon name="alert" size={11} color={C.red} strokeWidth={2.3} />
+                    <Text style={{ fontFamily: F.bodySemi, fontSize: 12, color: C.red }}>{q.cancel_view.kind === 'declined' ? REQUEST_AGAIN : REQUEST_TITLE}</Text>
+                  </Pressable>
+                ) : null}
 
                 {/* Timing block — 36h target (web parity) */}
                 <View style={{ gap: 7, paddingTop: 9, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)' }}>
@@ -9738,6 +9766,34 @@ function QhpAssessor() {
             </KbCenter>
           </Modal>
         </>
+      ) : qhpView === 'cancellations' ? (
+        /* ===== CANCELLATIONS (26 Oct 2026): every QHP of mine with a cancellation state ===== */
+        <>
+          <View style={{ flexDirection: 'row', gap: 7 }}>
+            {(([['all', 'All'], ['pending', 'Pending'], ['approved', 'Approved']] as const)).map(([id, label]) => {
+              const on = cancelFilter === id;
+              const n = cancellations.filter((r) => matchesFilter(r.cancel_view, id)).length;
+              return (
+                <Pressable key={id} onPress={() => setCancelFilter(id)} hitSlop={6} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 13, borderRadius: 999, backgroundColor: on ? hexA(C.gold, 0.16) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: on ? hexA(C.gold, 0.5) : 'rgba(255,255,255,0.09)' }}>
+                  <Text style={{ fontFamily: on ? F.bodyBold : F.bodySemi, fontSize: 12, color: on ? C.gold : C.muted }}>{label}</Text>
+                  <Text style={{ fontFamily: F.mono, fontSize: 10, color: on ? C.gold : C.muted3 }}>{n}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Body style={{ fontSize: 11, color: C.muted3, lineHeight: 15 }}>Only a cancellation the QHP Manager approved as paid counts as a paid cancellation. A pending request is your claim until they decide.</Body>
+          {listState('No cancellation requests yet. Ask from an upcoming QHP card.', cancellations.filter((r) => matchesFilter(r.cancel_view, cancelFilter)).length)}
+          {cancellations.filter((r) => matchesFilter(r.cancel_view, cancelFilter)).map((q) => (
+            <QhpCancelRow key={q.id} title={q.client_name ?? 'Client'} subtitle={[q.label, qhpSlotLine(q.assessment_date, q.assessment_time), q.location].filter(Boolean).join(' · ')} view={q.cancel_view} forAssessor>
+              {q.cancel_view.kind === 'pending' ? <WithdrawButton assessmentId={q.id} /> : null}
+              {q.cancel_view.kind === 'declined' && !q.is_completed ? (
+                <Pressable onPress={() => setCancelFor({ id: q.id, clientName: q.client_name, slot: qhpSlotLine(q.assessment_date, q.assessment_time) })} hitSlop={10} accessibilityRole="button" style={{ alignSelf: 'flex-start', paddingVertical: 7, paddingHorizontal: 12, borderRadius: 999, backgroundColor: hexA(C.red, 0.1), borderWidth: 1, borderColor: hexA(C.red, 0.35) }}>
+                  <Text style={{ fontFamily: F.bodySemi, fontSize: 12, color: C.red }}>{REQUEST_AGAIN}</Text>
+                </Pressable>
+              ) : null}
+            </QhpCancelRow>
+          ))}
+        </>
       ) : qhpView === 'noreport' ? (
         <Card colors={['rgba(46,28,18,0.4)', 'rgba(18,14,14,0.5)']} border="rgba(255,150,90,0.09)" radius={20} style={{ paddingHorizontal: 16, paddingVertical: 6 }}>
           {listState('Every completed QHP has a report. Nice.', withoutReport.length)}
@@ -9783,6 +9839,9 @@ function QhpAssessor() {
       )}
 
       <ScheduleQhpSheet visible={formOpen} onClose={() => setFormOpen(false)} scheduledBy={trainerId} />
+
+      {/* Request cancellation (26 Oct 2026): reason + paid / unpaid claim, the QHP Manager decides */}
+      <RequestCancellationSheet target={cancelFor} onClose={() => setCancelFor(null)} />
 
       {/* Request reschedule (assessor → manager review) */}
       <Modal visible={!!reschedFor} transparent animationType="fade" onRequestClose={() => setReschedFor(null)}>
@@ -10543,7 +10602,16 @@ export function QhpManager() {
   const deleteQhpM = useDeleteQhp();
   const { session } = useAuth();
   const { set, go } = useStore();
-  const [tab, setTab] = React.useState<'task' | 'manager' | 'tracker' | 'requests' | 'linked' | 'review'>('task');
+  const [tab, setTab] = React.useState<'task' | 'manager' | 'tracker' | 'requests' | 'linked' | 'review' | 'cancellations'>('task');
+  // Cancellation requests (26 Oct 2026): Pending and Decided lists, the decide sheet, the push-tap focus.
+  const [cancelSeg, setCancelSeg] = React.useState<'pending' | 'decided'>('pending');
+  const [decideFor, setDecideFor] = React.useState<DecideTarget>(null);
+  const cancelPendingQ = useQhpCancellationRequests('pending', isMgr);
+  const cancelDecidedQ = useQhpCancellationRequests('decided', isMgr && tab === 'cancellations');
+  const storeMgr = useStore();
+  const qhpManagerFocusTab = storeMgr.qhpManagerFocusTab;
+  const setStoreMgr = storeMgr.set;
+  React.useEffect(() => { if (qhpManagerFocusTab === 'cancellations') { setTab('cancellations'); setStoreMgr({ qhpManagerFocusTab: null }); } }, [qhpManagerFocusTab]);
   const [mgrAddOpen, setMgrAddOpen] = React.useState(false); // calendar "Add QHP"
   const [sub, setSub] = React.useState<'notsched' | 'sched' | 'hold' | 'resched'>('notsched');
   // Overdue card on the landing tab — same all-time subscribed-clients logic as the home card.
@@ -10697,7 +10765,7 @@ export function QhpManager() {
         <>
           {/* Main tabs */}
           <HScroll gap={7}>
-            {(([['task', 'Task Pending', d.counts.taskPending, C.orange], ['manager', 'Manager', d.counts.total, C.blue], ['tracker', 'Tracker', 0, C.purple], ['requests', 'Requests', d.counts.requests, C.gold], ['linked', 'Client Linked', 0, C.blue], ['review', 'QHP Review', d.counts.reviewPending, C.green]]) as [string, string, number, string][]).map(([id, label, n, col]) => {
+            {(([['task', 'Task Pending', d.counts.taskPending, C.orange], ['manager', 'Manager', d.counts.total, C.blue], ['tracker', 'Tracker', 0, C.purple], ['requests', 'Requests', d.counts.requests, C.gold], ['linked', 'Client Linked', 0, C.blue], ['review', 'QHP Review', d.counts.reviewPending, C.green], ['cancellations', 'Cancellations', cancelPendingQ.data?.length ?? 0, C.red]]) as [string, string, number, string][]).map(([id, label, n, col]) => {
               const active = tab === id;
               return (
                 <Pressable key={id} onPress={() => setTab(id as any)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 9, paddingHorizontal: 13, borderRadius: 12, backgroundColor: active ? hexA(col, 0.16) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: active ? hexA(col, 0.5) : 'rgba(255,255,255,0.09)' }}>
@@ -11243,6 +11311,44 @@ export function QhpManager() {
                 </View>
               </View>
             ))
+          ) : tab === 'cancellations' ? (
+            /* ===== CANCELLATION REQUESTS (26 Oct 2026): approve with the final paid / unpaid, or decline with a note ===== */
+            <>
+              <View style={{ flexDirection: 'row', gap: 7 }}>
+                {(([['pending', 'Pending', cancelPendingQ.data?.length ?? 0], ['decided', 'Decided', cancelDecidedQ.data?.length ?? 0]] as const)).map(([id, label, n]) => {
+                  const on = cancelSeg === id;
+                  return (
+                    <Pressable key={id} onPress={() => setCancelSeg(id)} hitSlop={6} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 13, borderRadius: 999, backgroundColor: on ? hexA(C.red, 0.16) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: on ? hexA(C.red, 0.5) : 'rgba(255,255,255,0.09)' }}>
+                      <Text style={{ fontFamily: on ? F.bodyBold : F.bodySemi, fontSize: 12, color: on ? C.red : C.muted }}>{label}</Text>
+                      <Text style={{ fontFamily: F.mono, fontSize: 10, color: on ? C.red : C.muted3 }}>{n}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              {(() => {
+                const q = cancelSeg === 'pending' ? cancelPendingQ : cancelDecidedQ;
+                const list = q.data ?? [];
+                if (q.isLoading) return <View style={{ paddingVertical: 26, alignItems: 'center' }}><ActivityIndicator color={C.orange} /></View>;
+                if (q.isError) return <Body style={{ fontSize: 12, color: C.red, textAlign: 'center', paddingVertical: 14 }}>{(q.error as Error).message}</Body>;
+                if (!list.length) return <Body style={{ fontSize: 12.5, color: C.muted3, textAlign: 'center', paddingVertical: 20 }}>{cancelSeg === 'pending' ? 'No cancellation request is waiting.' : 'No decided requests yet.'}</Body>;
+                return list.map((r) => (
+                  <QhpCancelRow key={r.id} title={r.client_name ?? 'Client'} subtitle={[qhpSlotLine(r.assessment_date, r.assessment_time), r.assessor_name ? `Assessor ${r.assessor_name}` : null].filter(Boolean).join(' · ')} view={r.view} forAssessor={false}>
+                    {r.view.kind === 'pending' ? (
+                      <View style={{ flexDirection: 'row', gap: 8, marginTop: 2 }}>
+                        <Pressable onPress={() => setDecideFor({ id: r.id, clientName: r.client_name, slot: qhpSlotLine(r.assessment_date, r.assessment_time), claim: r.view.kind === 'pending' ? r.view.claim : 'unpaid', mode: 'approve' })} hitSlop={8} style={{ flex: 1.4, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 9, borderRadius: 11, backgroundColor: hexA(C.red, 0.14), borderWidth: 1, borderColor: hexA(C.red, 0.45) }}>
+                          <Icon name="checks" size={13} color={C.red} strokeWidth={2.4} />
+                          <Text style={{ fontFamily: F.bodyBold, fontSize: 12, color: C.red }}>Approve</Text>
+                        </Pressable>
+                        <Pressable onPress={() => setDecideFor({ id: r.id, clientName: r.client_name, slot: qhpSlotLine(r.assessment_date, r.assessment_time), claim: r.view.kind === 'pending' ? r.view.claim : 'unpaid', mode: 'decline' })} hitSlop={8} style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 9, borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)' }}>
+                          <Text style={{ fontFamily: F.bodyBold, fontSize: 12, color: C.ink3 }}>Decline</Text>
+                        </Pressable>
+                      </View>
+                    ) : null}
+                  </QhpCancelRow>
+                ));
+              })()}
+              <DecideCancellationSheet target={decideFor} onClose={() => setDecideFor(null)} />
+            </>
           ) : tab === 'linked' ? (
             /* ===== CLIENT LINKED — B2C clients → assigned staff (web ClientLinkedTab) ===== */
             <>
