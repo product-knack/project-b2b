@@ -29,6 +29,8 @@ import { useClientsLatestVoiceNotes } from '../lib/sessionVoiceQueries';
 import { ListenStatusChip, ListenNowSheet, type ListenNowInfo } from '../components/clientHealthSummaryCard';
 import { useMyListenStatuses } from '../lib/clientHealthSummaryQueries';
 import { friendlyError } from '../lib/friendlyError';
+import { usePlanCover } from '../lib/managerChatQueries';
+import { coverFor, coverBlockedLine, coverReviewLine, coverKicker, coverAction, coverSendBlockedText, coverServerRefusedText, isPlanExpiredResult, planModalityFor, COVER_CTA, COVER_CTA_REVISION, COVER_CARD_TAG, type PlanCoverRow } from '../lib/planCover';
 
 /* "My Crew" identity: PINK (user pick). Semantic colors stay: green =
    done/approved, red = missed/rejected, gold = plans/times. */
@@ -784,9 +786,9 @@ function MergedPlanCard({ date, bySender, team, meId, timeEdits, onEditTime, onR
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginLeft: 28 }}>
                         <View style={{ flex: 1, gap: 1.5 }}>
                           {e.modality ? <Mono style={{ fontSize: 8, letterSpacing: 0.6, color: C.muted2 }}>{e.modality.toUpperCase()}{e.added ? (e.auction ? ' · AUCTION' : ' · ADDED') : ''}</Mono> : e.added ? <Mono style={{ fontSize: 8, letterSpacing: 0.6, color: e.auction ? C.gold : PINK_SOFT }}>{e.auction ? 'WON IN THE ESSENTIALS AUCTION' : 'ADDED BY MANAGER'}</Mono> : null}
-                          {e.roster === 'conflict' ? (
+                          {e.roster === 'conflict' || e.roster === 'plan_expired' ? (
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                              <Mono style={{ fontSize: 8, letterSpacing: 0.6, color: C.red }}>ROSTER CONFLICT · NOT BOOKED</Mono>
+                              <Mono style={{ fontSize: 8, letterSpacing: 0.6, color: C.red }}>{e.roster === 'plan_expired' ? COVER_CARD_TAG : 'ROSTER CONFLICT · NOT BOOKED'}</Mono>
                               {onRetryBooking && e.client_id && (s.id === meId || team.isManager || meIsHod) ? (
                                 <Pressable
                                   hitSlop={10}
@@ -910,6 +912,32 @@ type AddClash = {
   conflict: { schedule_id?: string | null; trainer_id?: string | null; trainer_name?: string | null; modality?: string | null; status?: string | null; logged?: boolean; source?: 'crew' | 'roster' } | null;
 };
 
+/* ---------- Expired-plan gate box (27 Oct 2026) ----------
+   Under a row (Tomorrow's Plan) or the form (Add Session) whose client's plan for the picked modality is
+   expired, or expires on or before that day: the reason, and Create plan (nothing in review) or Open Plan
+   tab (sent back). While a new plan waits for approval there is no button. Rules in src/lib/planCover.ts. */
+function PlanCoverBox({ row, clientFirst, onCreate, onRevise }: { row: PlanCoverRow; clientFirst: string; onCreate: () => void; onRevise: () => void }) {
+  const review = coverReviewLine(row.modalityLabel, row.reviewState);
+  const action = coverAction(row.reviewState);
+  const col = row.reviewState === 'in_review' ? C.gold : C.red;
+  return (
+    <View style={{ marginTop: 2, padding: 10, borderRadius: 12, backgroundColor: hexA(col, 0.08), borderWidth: 1, borderColor: hexA(col, 0.35), gap: 5 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+        <Icon name={row.reviewState === 'in_review' ? 'clock' : 'alert'} size={12} color={col} strokeWidth={2.3} />
+        <Mono style={{ fontSize: 8.5, letterSpacing: 0.8, color: col }}>{coverKicker(row.reviewState)}</Mono>
+      </View>
+      <Body style={{ fontSize: 11.5, color: C.ink, lineHeight: 16 }}>{review ?? coverBlockedLine({ clientFirst, modalityLabel: row.modalityLabel, expiresAt: row.expiresAt })}</Body>
+      {action ? (
+        <Pressable onPress={action === 'create' ? onCreate : onRevise} hitSlop={10} accessibilityRole="button" accessibilityLabel={action === 'create' ? COVER_CTA : COVER_CTA_REVISION}
+          style={({ pressed }) => ({ alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2, paddingVertical: 7, paddingHorizontal: 12, borderRadius: 999, backgroundColor: hexA(col, pressed ? 0.3 : 0.18), borderWidth: 1, borderColor: hexA(col, 0.6) })}>
+          <Icon name={action === 'create' ? 'file' : 'arrowRight'} size={12} color={col} strokeWidth={2.3} />
+          <Text style={{ fontFamily: F.bodyBold, fontSize: 11.5, color: col }}>{action === 'create' ? COVER_CTA : COVER_CTA_REVISION}</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
 function AddSessionModal({ visible, trainerId, trainerName, targetRole, date, busy, scheduledIds, clash, onClose, onSave, onForce, onDismissClash }: {
   visible: boolean; trainerId: string | null; trainerName: string; targetRole?: string | null; date: string; busy: boolean;
   scheduledIds: string[]; // clients already in this trainer's day — locked (reschedule instead)
@@ -931,7 +959,16 @@ function AddSessionModal({ visible, trainerId, trainerName, targetRole, date, bu
   React.useEffect(() => { if (visible) { setCid(null); setMod(modOptions.length === 1 ? modOptions[0] : null); setT(null); } }, [visible, trainerId, targetRole]);
   const clients = clientsQ.data ?? [];
   const selName = clients.find((c) => c.clientId === cid)?.name ?? '';
-  const canSave = !!cid && !!mod && !!t && !busy;
+  // Expired-plan gate (27 Oct 2026): the picked client + modality must have a plan valid on that day.
+  const coverQ = usePlanCover(clients.map((c) => c.clientId), date, visible);
+  const verdict = cid && mod ? coverFor(coverQ.data, cid, mod) : { blocked: false, row: null };
+  const { go: goScreen, set: setStore, openClient } = useStore();
+  const createPlanFor = (clientId: string, name: string, row: PlanCoverRow) => {
+    setStore({ selectedClientId: clientId, selectedClientName: name, editingPlan: null, planPrefillModality: planModalityFor(row.modalityLabel) });
+    onClose();
+    goScreen('create-plan');
+  };
+  const canSave = !!cid && !!mod && !!t && !busy && !verdict.blocked;
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={{ flex: 1, justifyContent: 'center', padding: 20 }}>
@@ -995,6 +1032,11 @@ function AddSessionModal({ visible, trainerId, trainerName, targetRole, date, bu
               })}
             </View>
           </ScrollView>
+          {verdict.blocked && verdict.row && cid ? (
+            <PlanCoverBox row={verdict.row} clientFirst={selName.split(' ')[0] || 'This client'}
+              onCreate={() => createPlanFor(cid, selName, verdict.row!)}
+              onRevise={() => { onClose(); openClient(cid, selName, 'plan'); }} />
+          ) : null}
           <View style={{ flexDirection: 'row', gap: 9 }}>
             <Pressable onPress={onClose} style={{ flex: 1, paddingVertical: 12, borderRadius: 13, alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }}>
               <Text style={{ fontFamily: F.bodySemi, fontSize: 13, color: C.ink }}>Cancel</Text>
@@ -1409,6 +1451,16 @@ function TomorrowPlanSheet({ visible, onClose, onSend, sending, existing, addOnl
   const [listenFor, setListenFor] = React.useState<ListenNowInfo>(null);
   const latestVoice = latestVoiceQ.data ?? {};
   const [voiceFor, setVoiceFor] = React.useState<LatestVoiceInfo>(null);
+  // Expired-plan gate (27 Oct 2026): one batched read; a selected row whose plan for the picked modality is
+  // expired on that day shows the box and cannot be sent. Rules in src/lib/planCover.ts.
+  const coverQ = usePlanCover(rows.map((r) => r.clientId), composeQ.data?.date, visible);
+  const cover = coverQ.data;
+  const { go: goScreen, set: setStore, openClient } = useStore();
+  const createPlanFor = (clientId: string, name: string, row: PlanCoverRow) => {
+    setStore({ selectedClientId: clientId, selectedClientName: name, editingPlan: null, planPrefillModality: planModalityFor(row.modalityLabel) });
+    onClose();
+    goScreen('create-plan');
+  };
   // Add-only mode: already-shared clients are locked (visible for context, not
   // editable); only NEW clients count toward the button.
   const lockedIds = React.useMemo(
@@ -1453,6 +1505,12 @@ function TomorrowPlanSheet({ visible, onClose, onSend, sending, existing, addOnl
       Alert.alert('Modality required', `Set the modality for: ${missingMod.map((e) => e.name.split(' ')[0]).join(', ')}`);
       return;
     }
+    // Expired-plan gate: a new session needs a plan that is valid on that day (locked legacy entries exempt).
+    const planBlocked = entries.filter((e) => e.client_id && !(addOnly && lockedIds.has(e.client_id)) && coverFor(cover, e.client_id, e.modality).blocked);
+    if (planBlocked.length) {
+      Alert.alert('Plan expired', coverSendBlockedText(planBlocked.map((e) => e.name.split(' ')[0])));
+      return;
+    }
     // Gap rule: sessions must be at least 30 minutes apart. Exactly the SAME
     // time is allowed with confirmation (couple sessions are legitimate);
     // a gap of 1-29 minutes is blocked outright, with the reason spelled out.
@@ -1493,6 +1551,7 @@ function TomorrowPlanSheet({ visible, onClose, onSend, sending, existing, addOnl
     const on = sel.has(r.clientId);
     const cur = sel.get(r.clientId);
     const locked = addOnly && lockedIds.has(r.clientId);
+    const verdict = on && !locked ? coverFor(cover, r.clientId, cur?.modality) : { blocked: false, row: null };
     // Options always include the row's current value even if it's off-list.
     const rowMods = cur?.modality && !modalityOptions.includes(cur.modality) ? [cur.modality, ...modalityOptions] : modalityOptions;
     return (
@@ -1541,6 +1600,13 @@ function TomorrowPlanSheet({ visible, onClose, onSend, sending, existing, addOnl
                 );
               })}
             </HScroll>
+          </View>
+        ) : null}
+        {verdict.blocked && verdict.row ? (
+          <View style={{ paddingHorizontal: 11, paddingBottom: 10 }}>
+            <PlanCoverBox row={verdict.row} clientFirst={r.name.split(' ')[0]}
+              onCreate={() => createPlanFor(r.clientId, r.name, verdict.row!)}
+              onRevise={() => { onClose(); openClient(r.clientId, r.name, 'plan'); }} />
           </View>
         ) : null}
         {on && modFor === r.clientId ? (
@@ -1997,6 +2063,10 @@ export function ManagerChat() {
           setAddClash({ clientId, clientName, time, modality, conflict: res.conflict ?? null });
           return;
         }
+        if (res?.result === 'plan_expired') {
+          Alert.alert('Plan expired', coverServerRefusedText({ clientFirst: clientName.split(' ')[0], modality: res.modality ?? modality, expiresAt: res.expires_at ?? null }));
+          return;
+        }
         if (res?.result === 'exists') { Alert.alert('Already scheduled', `${clientName} already has a session with this member that day. Use RESCHEDULE on the plan card to change it.`); return; }
         scheduleId = res?.schedule_id ?? null;
         replaced = res?.forced ? (res.cancelled ?? null) : null;
@@ -2118,6 +2188,10 @@ export function ManagerChat() {
         NET_MS, 'Retry booking');
       if (error) throw new Error(error.message);
       const row = Array.isArray(data) ? (data as any[]).find((x) => x.client_id === r.clientId) : null;
+      if (row && isPlanExpiredResult(row)) {
+        Alert.alert('Plan expired', coverServerRefusedText({ clientFirst: r.name.split(' ')[0], modality: row.modality ?? r.modality, expiresAt: row.expires_at ?? null }));
+        return;
+      }
       if (!row || row.result === 'conflict') {
         Alert.alert('Still double-booked', `${r.name.split(' ')[0]} already has another session at ${fmt12h(r.time)}. Move that one first, then retry.`);
         return;
@@ -2151,6 +2225,7 @@ export function ManagerChat() {
     // Non-fatal: if the RPC is missing/unavailable the plan still posts unlinked.
     let enriched = entries;
     let syncError: string | null = null;
+    const refusedLines: string[] = []; // the server's plan_expired answers (an older device, or a plan that lapsed since the sheet loaded)
     try {
       const { data, error } = await supabase.rpc('plan_sync_roster', {
         p_score: team.scoreId,
@@ -2162,10 +2237,12 @@ export function ManagerChat() {
         const byClient = new Map<string, any>((data as any[]).map((r: any) => [r.client_id, r]));
         enriched = entries.map((e) => {
           const r = e.client_id ? byClient.get(e.client_id) : null;
+          if (r && isPlanExpiredResult(r)) refusedLines.push(coverServerRefusedText({ clientFirst: e.name.split(' ')[0], modality: r.modality ?? e.modality ?? null, expiresAt: r.expires_at ?? null }));
           return r ? { ...e, schedule_id: r.schedule_id ?? null, roster: r.result ?? null } : e;
         });
       }
     } catch (err: any) { syncError = String(err?.message ?? err); }
+    if (refusedLines.length) Alert.alert('Plan expired', refusedLines.join('\n\n'));
     // My own roster surfaces refresh instantly (other devices via realtime).
     if (!syncError) {
       qc.invalidateQueries({ queryKey: ['trainer-roster'] });

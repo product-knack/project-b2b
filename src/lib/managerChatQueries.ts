@@ -6,6 +6,8 @@ import { useAuth } from '../auth';
 import { getIsOnline } from './offline';
 import { invalidateDebounced } from './invalidateDebounced';
 import { computeEssentials, EssentialsStatus } from './essentials';
+import { withTimeout, NET_MS } from './withTimeout';
+import { parsePlanCover, isPlanCoverMissing, type PlanCoverMap } from './planCover';
 
 /* ============================================================================
    Managers Messenger — one chat thread per competition team (manager_score row).
@@ -809,4 +811,28 @@ export function useHodFeedMessages(teamIds: string[], enabled: boolean) {
     return () => { supabase.removeChannel(ch); };
   }, [enabled, qc]);
   return q;
+}
+
+/* ---------- Expired-plan gate on roster making (27 Oct 2026) ----------
+   One batched read of get_plan_cover (hub-track migration 20261028100000): per client and gated modality,
+   is the plan valid on that IST day. Rules and copy in src/lib/planCover.ts. Before the migration runs
+   (PGRST202) the map is empty and the device blocks nothing; the server guard decides once it exists. */
+export function usePlanCover(clientIds: (string | null)[], date: string | null | undefined, enabled: boolean) {
+  const ids = [...new Set(clientIds.filter(Boolean) as string[])].sort();
+  return useQuery({
+    queryKey: ['plan-cover', date ?? '', ids.join(',')],
+    enabled: enabled && !!date && ids.length > 0,
+    staleTime: 60_000,
+    refetchOnWindowFocus: true,
+    queryFn: async (): Promise<PlanCoverMap> => {
+      const { data, error } = await withTimeout(
+        Promise.resolve((supabase.rpc as any)('get_plan_cover', { p_client_ids: ids, p_date: date })) as Promise<{ data: any; error: any }>,
+        NET_MS, 'Plan check');
+      if (error) {
+        if (isPlanCoverMissing(error.message) || error.code === 'PGRST202') return {};
+        throw new Error(error.message);
+      }
+      return parsePlanCover(data);
+    },
+  });
 }

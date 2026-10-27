@@ -680,7 +680,7 @@ export function useProcessCoachPlan() {
       const { error } = await supabase.from(table).update(patch).eq(col, input.id);
       if (error) throw new Error(error.message);
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['coach-programs'] }); qc.invalidateQueries({ queryKey: ['coach-approved-plans'] }); qc.invalidateQueries({ queryKey: ['coach-pending-plans-count'] }); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['coach-programs'] }); qc.invalidateQueries({ queryKey: ['coach-approved-plans'] }); qc.invalidateQueries({ queryKey: ['coach-pending-plans-count'] }); qc.invalidateQueries({ queryKey: ['plan-cover'] }); qc.invalidateQueries({ queryKey: ['plan-expiry-map'] }); },
   });
 }
 

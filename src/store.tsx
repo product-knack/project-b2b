@@ -86,6 +86,8 @@ type Store = {
   /** One-shot (26 Oct 2026): a push tap lands the QHP page or the QHP Manager on its Cancellations tab. */
   qhpFocusTab: string | null;
   qhpManagerFocusTab: string | null;
+  /** One-shot (27 Oct 2026): Create Plan opens with this modality picked (the Create plan button of the expired-plan gate in My Crew). */
+  planPrefillModality: string | null;
   /** Odds Nucleus (16 Oct 2026): which piece the reader / player shows. */
   nucleusPieceId: string | null;
 
@@ -162,6 +164,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     auctionFocusClientId: null as string | null,
     qhpFocusTab: null as string | null,
     qhpManagerFocusTab: null as string | null,
+    planPrefillModality: null as string | null,
     nucleusPieceId: null as string | null,
   });
 
@@ -230,7 +233,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       resetSession: () => setS((prev) => ({
         ...prev, history: [], drawerOpen: false, aiOpen: false, sheet: null, crmDialog: null,
         selectedClientId: null, selectedClientName: null, clientInitialTab: null, workoutScheduleId: null,
-        editingOutboxId: null, editingPlan: null, openChatId: null, crmSection: null, threadViewOpen: false, workoutTemplatesOpen: false, selectedTicketId: null, auctionFocusClientId: null, qhpFocusTab: null, qhpManagerFocusTab: null, nucleusPieceId: null,
+        editingOutboxId: null, editingPlan: null, openChatId: null, crmSection: null, threadViewOpen: false, workoutTemplatesOpen: false, selectedTicketId: null, auctionFocusClientId: null, qhpFocusTab: null, qhpManagerFocusTab: null, planPrefillModality: null, nucleusPieceId: null,
       })),
       approve: (id: string) => setS((prev) => ({ ...prev, crmApproved: { ...prev.crmApproved, [id]: 'forwarded' }, crmDialog: null })),
       reject: (id: string) => setS((prev) => ({ ...prev, crmApproved: { ...prev.crmApproved, [id]: 'parked' }, crmDialog: null })),

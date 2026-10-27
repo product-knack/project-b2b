@@ -108,10 +108,14 @@ function prefillBoxing(rows: any[]) {
 }
 
 export function CreatePlan() {
-  const { selectedClientId, selectedClientName, back, canGoBack, go, editingPlan, set: setStore } = useStore();
+  const { selectedClientId, selectedClientName, back, canGoBack, go, editingPlan, planPrefillModality, set: setStore } = useStore();
   // The edit param is one-shot: clear it on unmount so the next plain
   // "Create Plan" visit can never resurrect a stale edit session.
   React.useEffect(() => () => setStore({ editingPlan: null }), []); // eslint-disable-line react-hooks/exhaustive-deps
+  // The My Crew expired-plan gate's Create plan button (27 Oct 2026) arrives with the roster's modality
+  // picked; read it once and clear it so a later plain visit starts empty.
+  const [prefill] = React.useState<PlanModality | null>(() => (planPrefillModality && (MODALITIES as readonly string[]).includes(planPrefillModality) ? (planPrefillModality as PlanModality) : null));
+  React.useEffect(() => { if (planPrefillModality) setStore({ planPrefillModality: null }); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // RLS on workout_plan_exercises requires trainer_id = auth.uid(), so the plan
   // must be created as the signed-in user — never the dev fallback trainer id.
   const { session } = useAuth();
@@ -133,7 +137,7 @@ export function CreatePlan() {
   /* ---- plan meta ---- */
   const [planName, setPlanName] = React.useState(editing?.planName ?? '');
   const [desc, setDesc] = React.useState(editing?.planDescription ?? '');
-  const [modality, setModality] = React.useState<PlanModality | null>(editing ? (editing.modality as PlanModality) : null);
+  const [modality, setModality] = React.useState<PlanModality | null>(editing ? (editing.modality as PlanModality) : prefill);
 
   /* ---- strength-style builder (Yoga included: picker + duration/notes sets,
           web parity — the old free-text activity list is legacy-read-only) ---- */

@@ -33,6 +33,8 @@ const stub = (id) => {
     return new Proxy({}, { get: (_, k) => (k === '__esModule' ? true : k === 'default' ? {} : (() => null)) });
   }
   if (id === '../lib/sessionVoiceTypes') return T;
+  if (id === '../lib/sharedCoachNote') return load(ROOT + '/src/lib/sharedCoachNote.ts', () => ({})); // pure copy module (26 Oct 2026)
+  if (id === '../lib/friendlyError') return load(ROOT + '/src/lib/friendlyError.ts', () => ({}));     // pure error mapper (26 Oct 2026)
   return require(id);
 };
 const V = load(ROOT + '/src/components/SessionVoice.tsx', stub);
@@ -44,7 +46,7 @@ eq('toggle: unknown uri no change', V.toggleTakeFlag(takes, 'file:///z.m4a').map
 eq('latestHasPain', V.latestHasPain({ day: '2026-10-14', sessions: [{ id: 's', scheduled_at: 'x', session_name: null, session_type: null, notes: T.parseVoiceNotes([{ ...base, pain_discomfort: true }]) }] }), true);
 eq('latestHasPain none', V.latestHasPain({ day: '2026-10-14', sessions: [{ id: 's', scheduled_at: 'x', session_name: null, session_type: null, notes: T.parseVoiceNotes([base]) }] }), false);
 eq('copy: title has no dashes', /[—–-]/.test(V.PAIN_TITLE) || /[—–]/.test(V.PAIN_CHECKBOX), false);
-eq('copy: the question is a question', /\?$/.test(V.PAIN_CHECKBOX), true);
+eq('copy: the pain line is the shared coach note line (26 Oct 2026 rename)', V.PAIN_CHECKBOX, 'Choose, then say it in the note so every coach knows.');
 
 console.log(fails ? `${fails} FAILED` : 'ALL PASSED');
 process.exit(fails ? 1 : 0);

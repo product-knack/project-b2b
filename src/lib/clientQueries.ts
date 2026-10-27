@@ -2024,6 +2024,8 @@ export function useCreateWorkoutPlan() {
       qc.invalidateQueries({ queryKey: ['plan-exercise-db'] });
       // The Essentials "make a workout plan" home alert turns to "waiting for approval" (16 Oct 2026).
       qc.invalidateQueries({ queryKey: ['trainer-essentials-plan-gaps'] });
+      // The My Crew roster gate shows "waiting for approval" instead of the Create plan button (27 Oct 2026).
+      qc.invalidateQueries({ queryKey: ['plan-cover'] });
     },
   });
 }
