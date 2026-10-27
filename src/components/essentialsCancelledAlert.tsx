@@ -19,8 +19,8 @@ const HOURS = 48;
 const keyFor = (uid: string) => `essentials-cancelled-dismissed:${uid}`;
 
 export function EssentialsCancelledAlert() {
-  const { user } = useAuth();
-  const uid = user?.id ?? null;
+  const { session } = useAuth();
+  const uid = session?.user?.id ?? null;
   const q = useMyEssentialsCancellations(HOURS, !!uid);
   const [dismissed, setDismissed] = React.useState<string[] | null>(null);
   React.useEffect(() => {

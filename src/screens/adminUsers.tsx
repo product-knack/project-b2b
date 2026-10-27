@@ -6,11 +6,11 @@ import { Icon } from '../icons';
 import { Serif, Body, Mono, Card, Avatar } from '../components/primitives';
 import { Page, TitleBlock, Badge } from './common';
 import {
-import { friendlyError } from '../lib/friendlyError';
   useUsersByRole, useCreateUser, useUpdateUser, useUpdateSpecialization, useDeleteUser,
   useAssignments, useAssignmentOptions, useAssignTrainerToCoach, useRemoveAssignment,
   USER_ROLES, DOCTOR_SPECIALIZATIONS, userName, type ManagedRole, type ManagedUser,
 } from '../lib/adminUserQueries';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ ADMIN — User Management (web /admin/users; 9 tabs merged into a role dropdown) ============ */
 

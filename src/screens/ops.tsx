@@ -12,12 +12,12 @@ import { useStore } from '../store';
 import { useSidebarProfile } from '../lib/navQueries';
 import { useLeadStats, useColdLeads, useOpsFollowUpReminders, useMyOpsProfile } from '../lib/opsLeadQueries';
 import {
-import { friendlyError } from '../lib/friendlyError';
   useSalesTargetsOverview, useAppendSalesTargetNote, NOTE_CATEGORIES,
   useQhpHolds, useAddHoldReply, useQhpHoldHistory, useCrmPendingAssignments, useOpsPaidClients,
   useBaselineExplanation, baselineMonths,
   type SalesTargetRow, type QhpHoldRow, type QhpHoldHistoryRow,
 } from '../lib/opsQueries';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ OPS workspace (web /ops/*) — obsidian/ember UI ============ */
 

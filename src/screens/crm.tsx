@@ -32,11 +32,11 @@ import { CommAgendaBlock } from '../components/commAgenda';
 import { ensureAiCacheFresh } from '../lib/aiCache';
 import { CrmWorkspace, RetentionBreakdownSheet } from './crmTabs';
 import {
-import { friendlyError } from '../lib/friendlyError';
   crmStats, crmBanners, crmRenewals, roadmapDef, stageDefs, onboardCards, journeyCards,
   salesRows, salesCtas, apprTabDefs, apprItems, bloodTabDefs, bloodRows, consumeList,
   serviceRows, rosterList, qhpCrmList, qhpSteps, escTabDefs, escRows, tasksCols, chipDays,
 } from '../data';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ---------- Birthday card — the app's own celebration moment: warm obsidian
    card, ember→gold candle glow, Serif headline, drifting ember sparks. ---------- */

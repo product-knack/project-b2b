@@ -7,10 +7,10 @@ import { Page, TitleBlock, Badge, HScroll } from './common';
 import { useAuth } from '../auth';
 import { useStore } from '../store';
 import {
-import { friendlyError } from '../lib/friendlyError';
   useAdminClients, useClientTabCounts, useDeleteClient, useToggleOddsConversion, useUpdateClientSubscription, useReactivateClient,
   SUBSCRIPTION_OPTIONS, CLIENTS_PER_PAGE, type UnifiedClient, type ClientFilter, type StatusTab,
 } from '../lib/adminClientQueries';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ ADMIN — Clients (web /admin/clients port) ============ */
 

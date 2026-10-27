@@ -12,10 +12,10 @@ import { useVoiceRecorder, VoiceTapButton, VoicePlayer, RecordedVoice } from './
 import { clockOf } from '../lib/techDesk';
 import { claimAudioFocus, releaseAudioFocus, type AudioHolder } from '../lib/audioFocus';
 import {
-import { friendlyError } from '../lib/friendlyError';
   SessionVoiceNote, PendingVoiceTake, SESSION_VOICE_MAX_MS, SESSION_VOICE_MAX_NOTES, ClientLatestVoice,
   persistTake, discardTake, queueSessionVoiceNote, useSignedSessionVoiceUrls, useInvalidateSessionVoice,
 } from '../lib/sessionVoiceQueries';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ Session voice notes UI (30 Sep 2026) ============
    - VoiceNotesComposer: record takes (tap to record, 5 min cap), list them with a

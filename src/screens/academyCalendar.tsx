@@ -6,9 +6,9 @@ import { Icon } from '../icons';
 import { Serif, Body, Mono } from '../components/primitives';
 import { HScroll, Badge } from './common';
 import {
-import { friendlyError } from '../lib/friendlyError';
   useAcademyBatches, useAcademyUsers, useSetBatchTeachers, prettyDate, AcademyBatch,
 } from '../lib/academyQueries';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============================================================================
    Academy Calendar — weekly class schedule derived from each batch's schedule

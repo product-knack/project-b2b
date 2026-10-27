@@ -9,7 +9,6 @@ import { useStore } from '../store';
 import { trackClientTab } from '../lib/amplitude';
 import { useAuth } from '../auth';
 import {
-import { friendlyError } from '../lib/friendlyError';
   useClientDetail, useActivePause, useClientRemarks, useAddClientRemark,
   useToggleTrainerActive, useRemoveTrainer, useAssignableTrainers, useAssignTrainer, useSetClientStatus,
   useSessionsByCycle, useWorkoutSessions, useSaveSession, useDeleteSession, useToggleComplimentary,
@@ -18,6 +17,7 @@ import { friendlyError } from '../lib/friendlyError';
 } from '../lib/adminClientDetailQueries';
 import { useUpdateClientSubscription, useToggleOddsConversion, SUBSCRIPTION_OPTIONS, type UnifiedClient } from '../lib/adminClientQueries';
 import { ServicesButton } from '../components/servicesButton';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ ADMIN — Client detail (web /admin/clients/:id port) ============ */
 

@@ -7,7 +7,6 @@ import { useAuth } from '../auth';
 import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import { useDoctorIdentity } from '../lib/doctorQueries';
 import {
-import { friendlyError } from '../lib/friendlyError';
   CallRow, RxData, RxEditEntry, RxMedicineLine, useDoctorCalls, useAmendPrescription, useMedicinesCatalog, useClientDob,
   isSlotElapsed, slotPersonName, rxState, isRxApproved, hasMeetingNotes, hasAiNotes, parseNextFollowUp, followUpLabel,
   timeLabel, fmtLongDate, fmtDayMonth, dateFromYmd, ymdLocal, startOfWeekMon, addDays, MONTHS_LONG, MONTHS_SHORT, DAYS_LONG, describeConsultError,
@@ -18,6 +17,7 @@ import {
   PrescriptionView, EditHistoryList, MeetingNotesView, AiNotesView, useSlotActions, useNow, initialsOf,
 } from '../components/consultantUi';
 import { HScroll } from './common';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ ALL CALLS (port of web ConsultantCalls.tsx, 22 Sep 2026) ============
    Every booking for the doctor, newest first: date filter, patient cards that

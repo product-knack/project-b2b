@@ -11,10 +11,10 @@ import { PdfPreview } from '../components/PdfPreview';
 import { PhysioHodStatusBadge, PhysioHodNotesThread, PHYSIO_ACC } from '../components/physioHodThread';
 import { usePushToPhysioHod, useQhpDetailsRealtime, pushStatus, PHYSIO_NOTE_MAX } from '../lib/physioHodQueries';
 import {
-import { friendlyError } from '../lib/friendlyError';
   useQhpReviewQueue, useSignAsSenior, useSignAsHod, useHoldReport, useQhpReportMissing,
   reviewPdfUrl, stageOf, type QhpReviewRow, type ReviewNote,
 } from '../lib/qhpReviewQueries';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ QHP Report Review — two-stage Senior Researcher → HOD queue
    (web /research/qhp-report-review). Gate: junior_researcher (first signer)

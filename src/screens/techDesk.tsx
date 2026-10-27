@@ -17,7 +17,6 @@ import { useVideoPlayer, VideoView } from 'expo-video';
 import { WebView } from 'react-native-webview';
 
 import {
-import { friendlyError } from '../lib/friendlyError';
   ACK_VERDICT_LABEL, ALL_PLATFORMS, ALL_TYPES, PRIORITY_COLOR, PRIORITY_LABEL, PLATFORM_LABEL, PLATFORM_ON_TICKET,
   STATUS_COLOR, STATUS_LABEL, STAGE_LABEL, STAGE_ORDER,
   TYPE_ICON, TYPE_LABEL, TYPE_LABEL_LONG, TYPE_PROMPT, RESOLUTION_LABEL, TechAck, TechAckVerdict, TechMessage, TechPlatform, TechPriority, TechTicket, TechType,
@@ -29,6 +28,7 @@ import {
   useAcknowledgeTicket, useCloseTicketWithReason, useMarkTicketSeen, useRaiseTicket, useSendTechMessage, useSignedTechUrl,
   useTechActivity, useTechDeskRealtime, useTechMessages, useTechStaff, useTechTicket, useTechTickets,
 } from '../lib/techDeskQueries';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ Tech Desk — member side (raise, track, converse) ============
    Every staff role except super_admin gets these screens. The tech/admin console

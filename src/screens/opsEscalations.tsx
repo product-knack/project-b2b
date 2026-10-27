@@ -6,11 +6,11 @@ import { Serif, Body, Mono, Card } from '../components/primitives';
 import { Page, TitleBlock, Badge, HScroll } from './common';
 import { useMyOpsProfile } from '../lib/opsLeadQueries';
 import {
-import { friendlyError } from '../lib/friendlyError';
   ESC_CATEGORIES, escCountFor, useEscCategory, useSaveQhpEscRemark, useUpdateEscalation, useOpsRenewalsPending,
   useMechScoreFailedEscalations, mechShortReason,
   type EscCategory, type EscalationRow,
 } from '../lib/opsEscalationQueries';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ OPS — Escalations desk (web /ops/escalations) ============ */
 

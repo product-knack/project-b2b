@@ -8,7 +8,6 @@ import { Serif, Body, Mono, Card } from '../components/primitives';
 import { Page, TitleBlock, Badge } from './common';
 import { useAuth } from '../auth';
 import {
-import { friendlyError } from '../lib/friendlyError';
   useDoctorIdentity, useDoctorDaySessions, useNeuralChecksForDay, usePhysioSessionExercises,
   useDoctorOwnRoster, usePhysioDialogClients, useApprovedProtocols, useProtocolExercises,
   useRehabExerciseList, useSubmitPhysioSession, buildStructuredNotes, formatDoctorSessionType,
@@ -20,6 +19,7 @@ import { VoiceNotesComposer, SessionVoiceSheet, SessionVoiceSheetInfo, toggleTak
 import * as SN from '../lib/sharedCoachNote';
 import { discardTake, queueSessionVoiceNote, PendingVoiceTake, hasPainNote } from '../lib/sessionVoiceQueries';
 import { startTimer, finishTimer, clearTimer } from '../lib/sessionTiming';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ /doctor/sessions — day view + Log Physio Session (web port) ============ */
 

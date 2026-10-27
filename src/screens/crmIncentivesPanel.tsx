@@ -8,12 +8,12 @@ import { Badge, MiniAvatar, AnimChip } from './common';
 import { useAuth } from '../auth';
 import { useCrmClientList } from '../lib/crmClientQueries';
 import {
-import { friendlyError } from '../lib/friendlyError';
   useMyIncentives, useMyIncentiveRequests, useIncentiveLeaderboard,
   useRaiseIncentiveRequest, EVENT_META,
   currentIncentiveMonthValue, todayDateValue, formatIncentiveMonth, formatIncentiveDate,
 } from '../lib/incentiveQueries';
 import { SheetShell } from './reportDetail';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ Incentives panel — mirrors the web CRMIncentivesTab:
    My Incentives / Pending Requests / Leaderboard + Raise Request. ============ */

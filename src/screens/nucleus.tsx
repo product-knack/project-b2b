@@ -1,4 +1,3 @@
-import { friendlyError } from '../lib/friendlyError';
 /* Odds Nucleus, "The core of longevity knowledge" (16 Oct 2026): the staff reading room
    over the member app's Odds Library. Every signed-in role gets the drawer entry
    Learn > Odds Nucleus. Two screens: the hub (search, hero, topics, courses, Continue,
@@ -31,6 +30,7 @@ import {
   videoHost, videoEmbedUrl, youtubeThumb, isHttp, isHttps, parseBody, inlineRuns, fmtClock, minutesOf, metaLine, kindLabel,
   authorInitial, creditLine, evidenceDetail, resumeLabel, resumeFrom, nextSpeed,
 } from '../lib/nucleus';
+import { friendlyError } from '../lib/friendlyError';
 
 const EMBER = C.orange;
 const READ_SIZE = 16;

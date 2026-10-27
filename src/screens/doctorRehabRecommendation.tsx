@@ -11,11 +11,11 @@ import { useStore } from '../store';
 import { useMyCapabilities } from '../lib/capabilities';
 import { reviewPdfUrl } from '../lib/qhpReviewQueries';
 import {
-import { friendlyError } from '../lib/friendlyError';
   useRehabRecommendationQueue, usePhysioMarkSeen, useQhpDetailsRealtime,
   RehabQueueRow, PHYSIO_NOTE_MAX,
 } from '../lib/physioHodQueries';
 import { PhysioHodNotesThread, PhysioHodStatusBadge, PHYSIO_ACC } from '../components/physioHodThread';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============================================================================
    Rehab Recommendation — the Physio HOD's queue of QHP reports pushed over by

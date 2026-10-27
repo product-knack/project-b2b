@@ -8,10 +8,10 @@ import { Badge, AnimChip } from './common';
 import { SheetShell } from './reportDetail';
 import { ATT_STATUSES, AttStatus, prettyDate } from '../lib/academyQueries';
 import {
-import { friendlyError } from '../lib/friendlyError';
   usePendingAttendanceCount, useAttendanceByApproval, useSetAttendanceApproval, useUpdateAttendanceRow,
   type ApprovalRow,
 } from '../lib/academyAttendanceQueries';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============================================================================
    Academy attendance approval — admin-side review of teacher-submitted

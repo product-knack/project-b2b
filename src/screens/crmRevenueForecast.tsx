@@ -8,12 +8,12 @@ import { Page, TitleBlock, Badge, MiniAvatar } from './common';
 import { useAuth } from '../auth';
 import { useStore } from '../store';
 import {
-import { friendlyError } from '../lib/friendlyError';
   useRevenueForecastClients, usePriorityRows, derivePrioritySets, useConsumedSinceMark,
   useAddForecastRemark, useCrmForecastBanner, remarkDue, monthKey, monthLabel,
   PriorityRow, ForecastClient,
 } from '../lib/revenueForecastQueries';
 import { useSidebarProfile } from '../lib/navQueries';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ CRM: Revenue Forecast ============
    Web parity: /crm/revenue-forecast — only MY priority clients (achieved and

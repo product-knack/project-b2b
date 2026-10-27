@@ -14,7 +14,6 @@ import { useAuth } from '../auth';
 import { backOverride } from '../gestureLock';
 import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import {
-import { friendlyError } from '../lib/friendlyError';
   ALL_PLATFORMS, ALL_TYPES, PRIORITY_COLOR, PRIORITY_LABEL, PLATFORM_LABEL, PLATFORM_ON_TICKET, RESOLUTION_LABEL,
   STAGE_LABEL, STAGE_ORDER, STATUS_COLOR, STATUS_LABEL, TECH, TIME_PRESETS, TYPE_ICON, TYPE_LABEL, TYPE_LABEL_LONG, TYPE_LABEL_MAX,
   statusColor, TechPlatform, TechPriority, TechResolution, TechStatus,
@@ -26,6 +25,7 @@ import {
   useTechActivity, useTechDeskRealtime, useTechMessages, useTechStaff, useTechTicket, useTechTickets, useUpdateTicket,
 } from '../lib/techDeskQueries';
 import { AckRecord, ClosureRecord, Composer, FadeIn, PersonAvatar, Pulse, Thread, TicketMeta, TicketShell } from './techDesk';
+import { friendlyError } from '../lib/friendlyError';
 
 /** A written type is sky, so it never reads as the console's own cyan accent. */
 const SKY = '#7CC6F5';

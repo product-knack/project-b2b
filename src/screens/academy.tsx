@@ -10,13 +10,13 @@ import { useStore } from '../store';
 import { AcademyCalendarTab } from './academyCalendar';
 import { AttendanceApprovalPanel, PendingAttendanceBanner } from './academyApproval';
 import {
-import { friendlyError } from '../lib/friendlyError';
   useAcademyOverview, useAcademyUsers, useSaveAcademyUser, useSoftDeleteAcademyUser, useEnrollmentCounts,
   useAcademyBatches, useDeleteBatch, useSaveBatch, useSetBatchTeachers, useBatchStudents, useAttendanceByBatchDate, useUpsertAttendance,
   useAttendanceReport, useAssessments, useUpsertAssessmentMarks, useUpdateAssessmentMeta,
   ATT_STATUSES, AttStatus, attPct, attWeight, LOW_ATTENDANCE_PCT, istToday, istDaysAgo, prettyDate,
   defaultPassMarks, AcademyUser, AcademyBatch,
 } from '../lib/academyQueries';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============================================================================
    Academy Management — the academy-admin workspace (profiles.role 'academy',

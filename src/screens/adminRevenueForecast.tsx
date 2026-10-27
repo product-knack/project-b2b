@@ -8,13 +8,13 @@ import { Page, TitleBlock, HScroll, Badge, MiniAvatar, AnimChip } from './common
 import { SheetShell } from './reportDetail';
 import { useAuth } from '../auth';
 import {
-import { friendlyError } from '../lib/friendlyError';
   useRevenueForecastClients, usePriorityRows, useForecastMonths, derivePrioritySets,
   useMarkPriority, useRemovePriority, useMarkFallShort, useConsumedSinceMark, useAddForecastRemark,
   remarkDue, hasUnansweredRemark, latestRemarkAt, monthKey, monthLabel, shiftMonth,
   SOURCE_LABEL, ForecastClient, PriorityRow, RemarkEntry,
 } from '../lib/revenueForecastQueries';
 import { useSidebarProfile } from '../lib/navQueries';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ ADMIN: Revenue Forecast ============
    Web parity: /admin/revenue-forecast. Full client list with multi-select

@@ -8,10 +8,10 @@ import { Page, BackLink, Badge, MiniAvatar, AnimChip } from './common';
 import { useStore } from '../store';
 import { useAuth } from '../auth';
 import {
-import { friendlyError } from '../lib/friendlyError';
   useJourneyClients, useToggleJourneyStep, JOURNEY_CATEGORIES, ALL_STEP_KEYS,
   journeyProgress, journeyDone, journeyComplete, JourneyClient,
 } from '../lib/journeyQueries';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ CRM: Client Journey — mirrors the web ClientJourney /
    ClientJourneyRoadmap: onboarding checklist per client, live toggles. ============ */

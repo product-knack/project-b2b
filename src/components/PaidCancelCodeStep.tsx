@@ -1,4 +1,3 @@
-import { friendlyError } from '../lib/friendlyError';
 /* Paid cancellation code step (22 Oct 2026). Owner: "CRM sees the paid cancellation code on Session Logs; a
    trainer, doctor or therapist marking a paid cancellation must enter it; show who to ask with the client's
    latest active CRM's name and number". Rendered inside the cancel flow's picker modal in place of the old
@@ -13,6 +12,7 @@ import { Icon } from '../icons';
 import { Serif, Body, Mono } from './primitives';
 import { useClientsOtpFlags, useClientCrmContact, useVerifyPaidCancellationCode } from '../lib/sessionOtpQueries';
 import { otpDigits, askCrmLine, paidCancelReasonText, PAID_CANCEL_INTRO, PAID_CANCEL_NOTICE } from '../lib/sessionOtp';
+import { friendlyError } from '../lib/friendlyError';
 
 export function PaidCancelCodeStep({ clientId, scheduleId, clientName, onBack, onContinue }: {
   clientId: string | null | undefined;

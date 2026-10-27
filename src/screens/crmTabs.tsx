@@ -13,7 +13,6 @@ import { RosterSession } from '../lib/rosterQueries';
 import { useAuth } from '../auth';
 import { useCrmRenewals, useCrmBirthdays, useCrmMetrics, useCrmRetentionBreakdown } from '../lib/crmQueries';
 import {
-import { friendlyError } from '../lib/friendlyError';
   useCrmInactiveOverview, useCrmMissingLogRows, useCrmLeaves, useCrmTasks,
   useCrmTickets, useCrmOpenTicketsCount, useCrmStaleComms, useCrmPendingComms,
   useCrmQhpCompletions, useCrmIncidentTrainers, useCrmTrainerIncidentHistory, useCrmIncentives, useLeaveAffectedSessions, useCloseTicket,
@@ -25,6 +24,7 @@ import { CommAgendaBlock } from '../components/commAgenda';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { invalidateDebounced } from '../lib/invalidateDebounced';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ CRM Workspace — command-center grid + full-screen sections ============
    The 12 web-parity sections are QUEUES, not tabs: the dashboard shows a

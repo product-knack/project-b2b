@@ -16,7 +16,6 @@ import { ScheduleQhpSheet } from './crmQhp';
 import { SessionActionSheet } from './crmRoster';
 import { RosterSession } from '../lib/rosterQueries';
 import {
-import { friendlyError } from '../lib/friendlyError';
   useCrmClientDetail, usePackageCycle, useCrmClientSessions, useTrainingFrequency, useClientWorkoutLog,
   useClientComms, useLogCommunication, useMarkCommDone, useSetClientStatus, useToggleIrregularClient, readIrregularMark,
   COMM_CATEGORIES, COMM_STATUSES, COMM_MEDIUMS, FREQ_PERIODS, FreqPeriod, SessionCategory,
@@ -44,6 +43,7 @@ import { CreateRosterSheet } from './crmRoster';
 import { ServicesButton } from '../components/servicesButton';
 import { useRosterPeople } from '../lib/rosterQueries';
 import * as Clipboard from 'expo-clipboard';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ CRM Client Detail — full web-parity page: 11 tabs + action rail.
    Mirrors CRMClientDetails.tsx (old app) restyled for obsidian/ember. ============ */

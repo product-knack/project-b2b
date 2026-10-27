@@ -6,11 +6,11 @@ import { Serif, Body, Mono, Card, Avatar } from '../components/primitives';
 import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import { Page, TitleBlock, Badge } from './common';
 import {
-import { friendlyError } from '../lib/friendlyError';
   useClientBasicInfo, useClientSessionMetrics, useGenerationMemberMap,
   useUpdateRenewalDate, useRenewPackage, useRenewalOpportunities,
   type ClientBasicInfo, type RenewalOpportunity,
 } from '../lib/adminRenewalQueries';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ ADMIN — Renewals (web admin "Sessions" tab + new Opportunities tab) ============ */
 

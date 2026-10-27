@@ -9,10 +9,10 @@ import { useAuth } from '../auth';
 import { useStore } from '../store';
 import { useCrmLeaderboard, useTrainerPerformance, type LeaderboardEntry } from '../lib/adminPerformanceQueries';
 import {
-import { friendlyError } from '../lib/friendlyError';
   useAdminIncentiveRequests, useReviewIncentiveRequest, usePendingIncentiveCount,
   formatIncentiveMonth, formatIncentiveDate, EVENT_META, AdminIncentiveRequest,
 } from '../lib/incentiveQueries';
+import { friendlyError } from '../lib/friendlyError';
 
 /* Amber pending-requests alert — mounted here AND on the admin dashboard. */
 export function AdminIncentiveAlert({ onPress }: { onPress?: () => void }) {

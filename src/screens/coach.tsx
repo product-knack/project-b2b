@@ -12,7 +12,6 @@ import { useAuth } from '../auth';
 import { ClientThreadsUnreadBanner } from '../components/clientThreadsCard';
 import { useSidebarProfile } from '../lib/navQueries';
 import {
-import { friendlyError } from '../lib/friendlyError';
   useCoachDashboard, useCoachClients, useCoachClientsOverview, useCoachTrainers, useTrainerDetail, useTrainerSessions,
   useCoachAssessments, useCoachProgramsV2, usePlanExercises, useCoachPendingPlanCount, useCoachProgression, useCoachApprovedPlans,
   useCoachPlansOverview, useCoachCalendar, qhpWindows,
@@ -23,6 +22,7 @@ import { friendlyError } from '../lib/friendlyError';
 import { QhpCompareBlock, VolumeBlock, ImprovementsBlock, AiPlanBlock, ProgressionCharts } from './coachClientSections';
 import { useClientBioAge } from '../lib/clientQueries';
 import { AccountSwitch } from '../components/AccountSwitch';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ COACH workspace screens (head-of-trainers). Data layer: coachQueries.ts,
    scoped coach_trainers → trainer_clients(active) → clients. Obsidian/ember UI. ============ */

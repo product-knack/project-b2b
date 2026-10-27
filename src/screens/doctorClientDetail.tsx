@@ -12,7 +12,6 @@ import { useStore } from '../store';
 import { useAuth } from '../auth';
 import { trackClientTab } from '../lib/amplitude';
 import {
-import { friendlyError } from '../lib/friendlyError';
   HEAD_DOCTOR_ID, formatDoctorSessionType,
   useDoctorIdentity, useDoctorClientHeader, useDoctorClientSessionCounts,
   usePhysioProtocols, useProtocolExercises, useCreateProtocol, useRehabExerciseList,
@@ -41,6 +40,7 @@ import { ServicesButton } from '../components/servicesButton';
 // The trainer client page's Progression / Trends / Plan / Weekly Summary sections (16 Oct 2026). trainer.tsx
 // imports MedicalEntrySheet from this file too: the cycle is render-time only, never at module load.
 import { ClientProgressionSection, ClientRecoverySection, ClientTrendsSection, ClientPlansSection, AiWeeklyReportTab } from './trainer';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ Doctor → Client Detail (web DoctorClientDetail.tsx port) ============
    Native tab set covers the doctor-specific surface: Sessions (protocols /

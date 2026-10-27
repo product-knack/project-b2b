@@ -1,4 +1,3 @@
-import { friendlyError } from '../lib/friendlyError';
 /* QHP navigation (14 Oct 2026, owner: "a Start navigation button on the upcoming QHP
    cards, Uber-style live tracking to the client's pin, only when clients.brb_location
    exists"; same afternoon: "beautify it like Google Maps, same style map, same animation,
@@ -35,6 +34,7 @@ import {
   projectOnRoute, isOffRoute, isArrived, estimateLeft, arrivalClock, agoText, shouldKeep, toPoint, headingFrom, isMoving,
   buildTrack, stalePin, haversineM, nextManeuver, fmtStepDistance, voiceCue, maneuverPhrase, instructionTitle, ARRIVE_CUE, ROUTE_REFRESH_MS, ROUTE_MIN_GAP_MS,
 } from '../lib/qhpNavigation';
+import { friendlyError } from '../lib/friendlyError';
 
 type Phase = 'locating' | 'ready' | 'navigating' | 'arrived' | 'saving';
 type RouteState = 'none' | 'ok' | 'recalculating' | 'local';

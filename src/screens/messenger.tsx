@@ -7,7 +7,6 @@ import * as Haptics from 'expo-haptics';
 import { createAudioPlayer, setAudioModeAsync, requestRecordingPermissionsAsync, useAudioRecorder, RecordingPresets, type AudioPlayer } from 'expo-audio';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { WebView } from 'react-native-webview';
-import { friendlyError } from '../lib/friendlyError';
 
 /* Short recording cues (WhatsApp-style blips) — tiny bundled WAVs. Resolves when
    the blip finishes so the START cue can complete BEFORE the recorder claims the
@@ -68,6 +67,7 @@ import {
   useEditChatMessage,
   ChatConversation, ChatMessage, MessengerClient, TeamMember, ConversationRead, ClientGroup, chatInitials, avatarColors, displayGroupName,
 } from '../lib/chatQueries';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ MESSENGER (Phase 2 — read path) ============
    List via get_conversation_overview (unread badges), thread via a keyset

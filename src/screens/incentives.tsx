@@ -11,10 +11,10 @@ import { useAuth } from '../auth';
 import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import { useMyReferralClients, ReferralClientOption } from '../lib/referralQueries';
 import {
-import { friendlyError } from '../lib/friendlyError';
   UGC_TYPES, UgcContentType, MyIncentiveEvent, EVENT_TYPE_LABEL,
   useMyIncentiveEvents, useSubmitUgc, ugcTypeOf, fmtInr, incentiveTodayYmd,
 } from '../lib/incentiveUgcQueries';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ Incentive (trainer sidebar page) ============
    Cards, one per incentive programme a trainer can claim from the app. Today

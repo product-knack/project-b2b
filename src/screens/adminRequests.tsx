@@ -9,7 +9,6 @@ import { Page, TitleBlock, Badge, HScroll } from './common';
 import { useAuth } from '../auth';
 import { useStore } from '../store';
 import {
-import { friendlyError } from '../lib/friendlyError';
   useAdminReferrals, useUpdateReferralStatus, useAdminUpgradeRequests, useUpdateUpgradeStatus,
   useAdminRenewalRequests, useUpdateRenewalRequestStatus, useAdminCrossSellRequests, useUpdateCrossSellStatus,
   useAdminNewLeadRows, useConvertLeadToClient, useReferredLeads, useUpdateReferredLeadStatus, useAddReferredClient,
@@ -18,6 +17,7 @@ import { friendlyError } from '../lib/friendlyError';
   usePaidCancellations, useApprovePaidCancellation, useRejectPaidCancellation,
   personName, REF_LEAD_STATUSES, type Referral, type AdminNewLead, type InvoiceRaisedLead, type PaidCancellation,
 } from '../lib/adminRequestQueries';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ ADMIN — Requests (referrals + upgrade/renewal/cross-sell approvals) ============ */
 

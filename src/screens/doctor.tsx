@@ -16,7 +16,6 @@ import { EssentialsCancelledAlert } from '../components/essentialsCancelledAlert
 import { NucleusHomeCard } from './nucleus';
 import { useStore } from '../store';
 import { TRAINER_MODALITIES, DOCTOR_MODALITIES, useMyManagerTeam } from '../lib/managerChatQueries';
-import { friendlyError } from '../lib/friendlyError';
 
 /** A doctor's roster modalities: physio first, then every trainer workout modality. */
 const DOCTOR_ROSTER_MODALITIES = [...DOCTOR_MODALITIES, ...TRAINER_MODALITIES.filter((m) => !DOCTOR_MODALITIES.includes(m))];
@@ -43,6 +42,7 @@ import { SessionOtpSheet } from '../components/SessionOtpSheet';
 import { useClientsOtpFlags, useMySessionOtpStatus, saveSessionOtpOffline, savedOtpsFrom } from '../lib/sessionOtpQueries';
 import { otpGateNeeded, savedOtpCovers, istDayOf } from '../lib/sessionOtp';
 import { useOutboxAll } from '../lib/offline';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ DOCTOR WORKSPACE (web /doctor/* port, obsidian/ember UI) ============ */
 

@@ -14,7 +14,6 @@ import { DoctorTodayRoster } from './doctor';
 import { useMyManagerTeam } from '../lib/managerChatQueries';
 import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import {
-import { friendlyError } from '../lib/friendlyError';
   useTherapistId, useTherapistClients, useTherapistTodayRoster, useTherapySessions,
   useAddTherapySession, fmtTherapyAt, fmtTherapyTime, TherapistClient, THERAPY_MODALITIES,
 } from '../lib/therapistQueries';
@@ -25,6 +24,7 @@ import { VoiceNotesComposer, SessionVoicePlaylistPlayer, toggleTakeFlag } from '
 import * as SN from '../lib/sharedCoachNote';
 import { discardTake, queueSessionVoiceNote, PendingVoiceTake, hasPainNote } from '../lib/sessionVoiceQueries';
 import { startTimer, finishTimer, clearTimer } from '../lib/sessionTiming';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ Therapist workspace — web /therapist parity ============
    Identity: PURPLE ("Therapy" chip is a purple outline everywhere). Sessions

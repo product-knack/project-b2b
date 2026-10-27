@@ -1,4 +1,3 @@
-import { friendlyError } from '../lib/friendlyError';
 /* ============ QHP Standardized Assessment — native multistep form ============
    Faithful port of the web StandardizedAssessmentForm (Start Now flow):
    - Coach Presence Check first (supporting_trainer_id), then the wizard.
@@ -22,6 +21,7 @@ import { C, F, hexA } from '../theme';
 import { Icon } from '../icons';
 import { Serif, Body, Mono } from '../components/primitives';
 import { supabase } from '../lib/supabase';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ---------- shared helpers ---------- */
 type FD = Record<string, any>;

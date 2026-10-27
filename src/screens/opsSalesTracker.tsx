@@ -7,11 +7,11 @@ import { Page, TitleBlock, Badge, HScroll, AnimChip } from './common';
 import { SheetShell } from './reportDetail';
 import { useAuth } from '../auth';
 import {
-import { friendlyError } from '../lib/friendlyError';
   useDerivedDailySales, useSalesTargets, useUpsertMonthTarget, useUpdateTarget, useDeleteTarget, useProfilesByIds,
   computeMonthlySummaries, monthLabelOf, inr, SALES_TRACKER_START,
   type DerivedSaleRow, type MonthlySummary, type SalesTargetRow, type SalesProfileInfo,
 } from '../lib/opsSalesTrackerQueries';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ OPS — Sales Tracker (web /ops/sales-tracker) ============
    Daily: read-only derived sale rows for one IST month.

@@ -10,10 +10,10 @@ import { useAuth } from '../auth';
 import { istToday, prettyDate, useBatchStudents, AttStatus } from '../lib/academyQueries';
 import { parseTimeRange } from './academyCalendar';
 import {
-import { friendlyError } from '../lib/friendlyError';
   useMyAcademyLink, useTeacherBatches, useWeekAttendance, useBatchDateMarks, useSubmitTeacherAttendance,
   TeacherBatch, BatchDateMark,
 } from '../lib/academyAttendanceQueries';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============================================================================
    Academy Teacher — the teacher-facing workspace (academy_users.role 'teacher'

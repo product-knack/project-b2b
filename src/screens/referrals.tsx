@@ -10,10 +10,10 @@ import { Page, TitleBlock, AccessPending } from './common';
 import { useAuth } from '../auth';
 import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import {
-import { friendlyError } from '../lib/friendlyError';
   MyReferral, ReferralClientOption, ReferralStatus,
   useCreateReferral, useMyReferralClients, useMyReferrals,
 } from '../lib/referralQueries';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ My Referrals — submit side ============
    Port of the web's TrainerReferrals / DoctorReferrals page (one screen, both

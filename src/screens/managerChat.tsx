@@ -15,7 +15,6 @@ import { useAuth } from '../auth';
 import { istDayLabel, istTimeParts } from '../lib/trainerQueries';
 import { supabase } from '../lib/supabase';
 import {
-import { friendlyError } from '../lib/friendlyError';
   useMyManagerTeam, useManagerTeamMessages, useManagerChatRealtime, useSendManagerTeamMessage,
   useManagerChatUnread, markManagerChatRead, useTomorrowCompose, tomorrowPlanBody, fmt12h,
   usePlanOutcome, usePlanScheduleRows, useMemberClients, usePhysioHod, useHodTeams, useHodFeedMessages, useClientProtocols, useClientsEssentials, ClientProtocol, protoModalityLabel, protoEntryCount, istToday, serverNow, ManagerChatMessage, ManagerTeamInfo, TomorrowPlanEntry, PlanRescheduleHop,
@@ -27,6 +26,7 @@ import { CycleChip, CyclePopup, CyclePopupInfo } from '../components/cycleLabel'
 import { EssentialsBadge } from '../components/essentialsBadge';
 import { LatestVoiceChip, LatestVoicePopup, LatestVoiceInfo } from '../components/SessionVoice';
 import { useClientsLatestVoiceNotes } from '../lib/sessionVoiceQueries';
+import { friendlyError } from '../lib/friendlyError';
 
 /* "My Crew" identity: PINK (user pick). Semantic colors stay: green =
    done/approved, red = missed/rejected, gold = plans/times. */

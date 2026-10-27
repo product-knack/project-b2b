@@ -7,12 +7,12 @@ import { Serif, Body, Mono } from '../components/primitives';
 import { Page, Badge, MiniAvatar, AnimChip, HScroll, TimeDial } from './common';
 import { useAuth } from '../auth';
 import {
-import { friendlyError } from '../lib/friendlyError';
   useMonthRoster, useRosterPeople, useBulkCreateRoster, useRescheduleRosterSession,
   useCancelRosterSession, useDeleteFutureSessions, countFutureSessions, useInferRoster, MODALITIES, modalityColor, RosterSession, RosterConflict,
 } from '../lib/rosterQueries';
 import { SheetShell } from './reportDetail';
 import { EssentialsBadge } from '../components/essentialsBadge';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ CRM: Roster Management — live month agenda over session_schedule
    + the web's "Create Roster" bulk flow with identical conflict rules. ============ */

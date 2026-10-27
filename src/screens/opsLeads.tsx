@@ -9,7 +9,6 @@ import { Page, TitleBlock, Badge, HScroll } from './common';
 import { useStore } from '../store';
 import { OpsSearch } from './ops';
 import {
-import { friendlyError } from '../lib/friendlyError';
   LEAD_STAGES, LEAD_SOURCES, CANDIDATE_TYPES, SUBSCRIPTION_TYPES, LEAD_CATEGORIES, RESCHEDULE_REASONS, LEAD_ASSIGNEES,
   useLeadsList, useLeadStats, useColdLeads, useDumpLeadsCount, useMyOpsProfile, useLeadOptions, useAddLeadOption, useDeleteLeadOption,
   useCreateLead, useUpdateLead, useScheduleFollowUp, useCompleteFollowUp, useAddLeadRemark, useConvertWithPackage,
@@ -19,6 +18,7 @@ import { friendlyError } from '../lib/friendlyError';
   readQhpPrefAlt, fmtAltSlotShort,
   type Lead, type LeadFilters, type RemarkEntry, type FollowUpEntry, type FollowUpReminder, type CallAttemptEntry,
 } from '../lib/opsLeadQueries';
+import { friendlyError } from '../lib/friendlyError';
 
 /* ============ OPS — Leads pipeline (web /ops/leads) ============ */
 
