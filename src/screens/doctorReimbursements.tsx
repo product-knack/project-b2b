@@ -379,7 +379,7 @@ function DecisionSheet({ row, decision, onClose, onDone }: { row: ReimbursementW
     });
   };
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={() => !reviewM.isPending && onClose()}>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={() => { if (!reviewM.isPending) onClose(); }}>
       <View style={{ flex: 1, justifyContent: 'flex-end' }}>
         <Pressable onPress={() => !reviewM.isPending && onClose()} accessibilityRole="button" accessibilityLabel="Close" importantForAccessibility="no-hide-descendants"
           style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.64)' }} />

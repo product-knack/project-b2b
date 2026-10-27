@@ -297,7 +297,7 @@ function ThreadView({ meId, meRole, threadId, clientId, clientName, onBack }: {
   useClientThreadRealtime(threadId);
   const [text, setText] = React.useState('');
   const [replyTo, setReplyTo] = React.useState<ClientThreadMessage | null>(null);
-  const scrollRef = React.useRef<ScrollView>(null);
+  const scrollRef = React.useRef<React.ComponentRef<typeof ScrollView>>(null);
 
   const [kbH, setKbH] = React.useState(0);
   React.useEffect(() => {

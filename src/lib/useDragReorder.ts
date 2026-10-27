@@ -23,7 +23,7 @@ import * as Haptics from 'expo-haptics';
    changes, so memoised row components (React.memo) skip re-renders while
    the user types elsewhere on the page. */
 export function useDragReorder(opts: {
-  scrollRef: React.RefObject<ScrollView | null>;
+  scrollRef: React.RefObject<React.ComponentRef<typeof ScrollView> | null>;
   scrollOffsetRef: React.MutableRefObject<number>; // Page writes the live offset here
   setScrollEnabled: (v: boolean) => void;
 }) {

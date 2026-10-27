@@ -641,7 +641,7 @@ function PieceView({ piece, all, local, onOpen, onBack }: { piece: NucleusPiece;
   const related = relatedPieces(all, piece, 3);
   const blocks = React.useMemo(() => parseBody(piece.body), [piece.body]);
   const saved = local.isSaved(piece.id);
-  const scrollRef = React.useRef<ScrollView>(null);
+  const scrollRef = React.useRef<React.ComponentRef<typeof ScrollView>>(null);
   const [pos, setPos] = React.useState<NucleusPosition | null>(() => local.getPosition(piece.id));
   const [posReady, setPosReady] = React.useState(!!local.getPosition(piece.id));
   const [progress, setProgress] = React.useState(0);

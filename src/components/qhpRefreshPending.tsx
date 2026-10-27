@@ -141,8 +141,8 @@ function QhpRefreshRequestSheet({ row, onClose, onSent }: { row: QhpRefreshRow |
   const [minute, setMinute] = React.useState(0);
   const [note, setNote] = React.useState('');
   const [busy, setBusy] = React.useState(false);
-  const dateRef = React.useRef<ScrollView>(null);
-  const hourRef = React.useRef<ScrollView>(null);
+  const dateRef = React.useRef<React.ComponentRef<typeof ScrollView>>(null);
+  const hourRef = React.useRef<React.ComponentRef<typeof ScrollView>>(null);
   const visible = !!row;
 
   const days = React.useMemo(() => Array.from({ length: 14 }, (_, i) => {
@@ -194,7 +194,7 @@ function QhpRefreshRequestSheet({ row, onClose, onSent }: { row: QhpRefreshRow |
   const chip = (on: boolean, col: string) => ({ width: CHIP_W, alignItems: 'center' as const, paddingVertical: 9, borderRadius: 13, backgroundColor: on ? hexA(col, 0.14) : 'rgba(255,255,255,0.03)', borderWidth: 1, borderColor: on ? hexA(col, 0.45) : 'rgba(255,255,255,0.08)' });
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={() => !busy && onClose()}>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={() => { if (!busy) onClose(); }}>
       <View style={{ flex: 1, justifyContent: 'flex-end' }}>
         <Pressable onPress={() => !busy && onClose()} accessibilityRole="button" accessibilityLabel="Close" importantForAccessibility="no-hide-descendants"
           style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.62)' }} />

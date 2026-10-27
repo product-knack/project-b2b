@@ -117,7 +117,7 @@ export function SignIn() {
   // window (adjustResize is defeated), covering the password box on shorter
   // screens with no way to scroll. Track the height, pad the scroll content,
   // ease the change, and pull the password field into view on focus.
-  const signInScrollRef = React.useRef<ScrollView>(null);
+  const signInScrollRef = React.useRef<React.ComponentRef<typeof ScrollView>>(null);
   const [signInKbH, setSignInKbH] = React.useState(0);
   React.useEffect(() => {
     const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
@@ -305,7 +305,7 @@ const SLOT_BANDS: { label: string; slots: string[] }[] = [
 function RescheduleSheet({ row, visible, onClose }: { row: RosterRow; visible: boolean; onClose: () => void }) {
   const insets = useSafeAreaInsets();
   const { height: winH } = useWindowDimensions();
-  const scrollRef = React.useRef<ScrollView>(null);
+  const scrollRef = React.useRef<React.ComponentRef<typeof ScrollView>>(null);
   const reschedM = useRequestReschedule();
   const [date, setDate] = React.useState<string | null>(null);
   const [slot, setSlot] = React.useState<string | null>(null);
@@ -372,7 +372,7 @@ function RescheduleSheet({ row, visible, onClose }: { row: RosterRow; visible: b
   const label = (text: string) => <Mono style={{ fontSize: 10, letterSpacing: 1.2, color: C.mono2, marginBottom: 8 }}>{text}</Mono>;
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={() => !busy && onClose()}>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={() => { if (!busy) onClose(); }}>
         <Pressable onPress={() => !busy && onClose()} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' }}>
           <Pressable onPress={() => {}} style={{ maxHeight: Math.min(winH * 0.88, winH - kbH - insets.top - 12), backgroundColor: C.sheetBg, borderTopLeftRadius: 26, borderTopRightRadius: 26, borderWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 9, paddingBottom: (kbH > 0 ? 12 : insets.bottom + 18), marginBottom: kbH }}>
             <View style={{ alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.14)', marginBottom: 14 }} />
@@ -761,7 +761,7 @@ export function AddOwnSessionSheet({ visible, onClose, trainerId, initialDay = 0
 function RequestRosterSheet({ visible, onClose, trainerId }: { visible: boolean; onClose: () => void; trainerId: string }) {
   const insets = useSafeAreaInsets();
   const { height: winH } = useWindowDimensions();
-  const scrollRef = React.useRef<ScrollView>(null);
+  const scrollRef = React.useRef<React.ComponentRef<typeof ScrollView>>(null);
   const clientsQ = useMyClients(trainerId);
   const reqM = useRequestRoster();
   const [rosterType, setRosterType] = React.useState<'single' | 'full'>('single');
@@ -824,7 +824,7 @@ function RequestRosterSheet({ visible, onClose, trainerId }: { visible: boolean;
   const label = (text: string) => <Mono style={{ fontSize: 10, letterSpacing: 1.2, color: C.mono2, marginBottom: 8 }}>{text}</Mono>;
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={() => !busy && onClose()}>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={() => { if (!busy) onClose(); }}>
       <Pressable onPress={() => !busy && onClose()} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' }}>
         <Pressable onPress={() => {}} style={{ maxHeight: Math.min(winH * 0.88, winH - kbH - insets.top - 12), backgroundColor: C.sheetBg, borderTopLeftRadius: 26, borderTopRightRadius: 26, borderWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 9, paddingBottom: (kbH > 0 ? 12 : insets.bottom + 18), marginBottom: kbH }}>
           <View style={{ alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.14)', marginBottom: 14 }} />
@@ -4433,14 +4433,14 @@ export function ClientRecoverySection({ clientId }: { clientId: string | null })
 export function ClientTrendsSection({ clientId, scrollRef, scrollOffsetRef, canEdit = true }: {
   clientId: string | null;
   /** The page's ScrollView and offset (Page ref / scrollOffsetRef), for scroll-to-day; optional. */
-  scrollRef?: React.RefObject<ScrollView | null>;
+  scrollRef?: React.RefObject<React.ComponentRef<typeof ScrollView> | null>;
   scrollOffsetRef?: React.MutableRefObject<number>;
   /** Add / edit health data on the last 7 days (trainers); false on the doctor page. */
   canEdit?: boolean;
 }) {
   const { session } = useAuth();
   const myTrainerId = session?.user?.id ?? null;
-  const ownScrollRef = React.useRef<ScrollView>(null);
+  const ownScrollRef = React.useRef<React.ComponentRef<typeof ScrollView>>(null);
   const ownOffsetRef = React.useRef(0);
   const trendScrollRef = scrollRef ?? ownScrollRef;
   const trendOffsetRef = scrollOffsetRef ?? ownOffsetRef;
@@ -4455,7 +4455,7 @@ export function ClientTrendsSection({ clientId, scrollRef, scrollOffsetRef, canE
      - Tapping a day square scrolls the page to the day summary (90 px headroom).
      - Days within the last 7 (today and the 6 before, local) get an Add / Edit health data
        button; the sheet writes through submitHealthData with logDate = that day. */
-  const daySummaryRef = React.useRef<View>(null);
+  const daySummaryRef = React.useRef<React.ComponentRef<typeof View>>(null);
   const seededTrendWeekRef = React.useRef<string | null>(null);
   // The weekly summary query is declared further down; its latest data is mirrored here.
   const weeklyQDataRef = React.useRef<{ weekStart: string; days: { isFuture: boolean }[] }[] | undefined>(undefined);
@@ -5206,7 +5206,7 @@ export function ClientDetail() {
   const consultRows = consultQ.data ?? [];
 
   // Trends: the page ScrollView refs stay here (Page ref); ClientTrendsSection uses them for scroll-to-day.
-  const trendScrollRef = React.useRef<ScrollView>(null);
+  const trendScrollRef = React.useRef<React.ComponentRef<typeof ScrollView>>(null);
   const trendOffsetRef = React.useRef(0);
 
   const [openClientSession, setOpenClientSession] = React.useState<number | null>(null);
@@ -6254,7 +6254,7 @@ function RpeSlider({ value, onChange, colorFn, labelFn }: { value: number | null
   const wRef = React.useRef(0);
   const leftRef = React.useRef(0);       // track's absolute left edge (page X)
   const haveGeomRef = React.useRef(false); // geometry known for THIS gesture
-  const viewRef = React.useRef<View>(null);
+  const viewRef = React.useRef<React.ComponentRef<typeof View>>(null);
   const dragRef = React.useRef<number | null>(null);
   const onChangeRef = React.useRef(onChange);
   onChangeRef.current = onChange;
@@ -6622,7 +6622,7 @@ export function Workout() {
   const { modality, set, selectedClientId, selectedClientName, workoutScheduleId, editingOutboxId, back, canGoBack, go } = useStore();
   const insets = useSafeAreaInsets();
   const { height: winH } = useWindowDimensions();
-  const healthScrollRef = React.useRef<ScrollView>(null);
+  const healthScrollRef = React.useRef<React.ComponentRef<typeof ScrollView>>(null);
   const trainerId = useTrainerId();
   const gateQ = useModalityGate(selectedClientId, trainerId, modality || 'strength');
   const gate = gateQ.data;
@@ -7170,7 +7170,7 @@ export function Workout() {
   }, []);
   // Drag-to-reorder: hold the grip on an exercise card and move it; the page
   // scroll freezes while dragging and auto-scrolls near the screen edges.
-  const dragPageRef = React.useRef<ScrollView>(null);
+  const dragPageRef = React.useRef<React.ComponentRef<typeof ScrollView>>(null);
   const dragOffsetRef = React.useRef(0);
   const [pageScrollOk, setPageScrollOk] = React.useState(true);
   const drag = useDragReorder({ scrollRef: dragPageRef, scrollOffsetRef: dragOffsetRef, setScrollEnabled: setPageScrollOk });
@@ -8568,12 +8568,12 @@ export function Workout() {
                         <Body style={{ fontSize: 11.5, color: C.muted2 }}>Custom exercise</Body>
                       </View>
                     </Pressable>
-                  ) : null}
+                  ) : undefined}
                   ListEmptyComponent={!reformer && exDbQ.isLoading ? (
                     <Body style={{ color: C.muted2, textAlign: 'center', paddingVertical: 24 }}>Loading exercises…</Body>
                   ) : !q ? (
                     <Body style={{ color: C.muted2, textAlign: 'center', paddingVertical: 24 }}>No saved exercises for {modLabel}. Type a name above to add a custom one.</Body>
-                  ) : null}
+                  ) : undefined}
                   renderItem={({ item: e }: { item: any }) => {
                     const added = addedCounts[e.name.trim().toLowerCase()] ?? 0;
                     const dupHere = dupFlash === e.name.trim().toLowerCase();
@@ -10354,7 +10354,7 @@ function ScheduleQhpSheet({ visible, onClose, scheduledBy, prefill }: { visible:
   const fieldBox = { paddingVertical: 13, paddingHorizontal: 14, borderRadius: 13, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.03)' } as const;
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={() => !busy && onClose()}>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={() => { if (!busy) onClose(); }}>
       <Pressable onPress={() => !busy && onClose()} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' }}>
         <Pressable onPress={() => {}} style={{ height: '90%', backgroundColor: '#0E0A09', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 14 }}>
           <View style={{ width: 40, height: 4, borderRadius: 99, backgroundColor: 'rgba(255,255,255,0.2)', alignSelf: 'center', marginBottom: 14 }} />

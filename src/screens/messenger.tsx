@@ -779,7 +779,7 @@ function MessageThread({ meId, conv, onBack, subtabs }: { meId: string; conv: Ch
           onEndReachedThreshold={0.4}
           removeClippedSubviews
           windowSize={11}
-          ListFooterComponent={thread.isFetchingNextPage ? <View style={{ paddingVertical: 14 }}><ActivityIndicator color={C.muted3} /></View> : null}
+          ListFooterComponent={thread.isFetchingNextPage ? <View style={{ paddingVertical: 14 }}><ActivityIndicator color={C.muted3} /></View> : undefined}
         />
       )}
 

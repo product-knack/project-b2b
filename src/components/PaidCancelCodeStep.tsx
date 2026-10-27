@@ -28,7 +28,7 @@ export function PaidCancelCodeStep({ clientId, scheduleId, clientName, onBack, o
   const verifyM = useVerifyPaidCancellationCode();
   const [code, setCode] = React.useState('');
   const [err, setErr] = React.useState<string | null>(null);
-  const inputRef = React.useRef<TextInput>(null);
+  const inputRef = React.useRef<React.ComponentRef<typeof TextInput>>(null);
 
   const submit = async () => {
     if (code.length !== 4 || verifyM.isPending) return;

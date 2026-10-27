@@ -995,7 +995,7 @@ export function RaiseTicketSheet({ onClose, onDone }: { onClose: () => void; onD
      the keyboard eats the bottom of the screen and the footer eats the bottom of what
      is left, so the field you just tapped ends up half-hidden behind the buttons.
      Nudge the focused input clear of BOTH, the way Page does for full screens. */
-  const scrollRef = React.useRef<ScrollView>(null);
+  const scrollRef = React.useRef<React.ComponentRef<typeof ScrollView>>(null);
   const offsetRef = React.useRef(0);
   React.useEffect(() => {
     if (!kb) return;

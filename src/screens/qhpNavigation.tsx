@@ -90,7 +90,7 @@ export function QhpNavigation() {
   // Where Exit lands when there is no history: the QHP page for a QHP ride, else the role's home (trainer or doctor roster).
   const leave = (kind: 'qhp' | 'session' | null) => (canGoBack ? back() : go(kind === 'qhp' ? 'qhp' : homeRouteFor(role)));
   const target = React.useRef<NavTarget | null>(navTargetRef.current).current;
-  const web = React.useRef<WebView>(null);
+  const web = React.useRef<React.ComponentRef<typeof WebView>>(null);
   const speech = useSpeech();
   const [mapReady, setMapReady] = React.useState(false);
   const [mapError, setMapError] = React.useState<string | null>(null);

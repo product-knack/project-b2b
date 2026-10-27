@@ -178,12 +178,12 @@ function RefreshPill({ visible }: { visible: boolean }) {
 // off instead of jumping to the top. Keyed by the caller's `scrollKey`.
 const scrollMemory = new Map<string, number>();
 
-export const Page = React.forwardRef<ScrollView, { children: React.ReactNode; gap?: number; pt?: number; pb?: number; kbAware?: boolean; scrollKey?: string; scrollEnabled?: boolean; scrollOffsetRef?: React.MutableRefObject<number> }>(function Page({ children, gap = 22, pt = 8, pb = 92, kbAware = false, scrollKey, scrollEnabled = true, scrollOffsetRef }, ref) {
+export const Page = React.forwardRef<React.ComponentRef<typeof ScrollView>, { children: React.ReactNode; gap?: number; pt?: number; pb?: number; kbAware?: boolean; scrollKey?: string; scrollEnabled?: boolean; scrollOffsetRef?: React.MutableRefObject<number> }>(function Page({ children, gap = 22, pt = 8, pb = 92, kbAware = false, scrollKey, scrollEnabled = true, scrollOffsetRef }, ref) {
   const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = React.useState(false);
-  const scrollRef = React.useRef<ScrollView>(null);
+  const scrollRef = React.useRef<React.ComponentRef<typeof ScrollView>>(null);
   // Expose the ScrollView so screens can imperatively scrollTo a section.
-  React.useImperativeHandle(ref, () => scrollRef.current as ScrollView, []);
+  React.useImperativeHandle(ref, () => scrollRef.current as React.ComponentRef<typeof ScrollView>, []);
   const restored = React.useRef(false);
 
   // ---- Keyboard awareness, ON for every page (Android) ----

@@ -613,7 +613,7 @@ export function QhpAssessmentForm({
   // column pads itself by the keyboard height (footer stays reachable) and the
   // focused input is scrolled above the keyboard, the same way Page does it.
   const kb = useKeyboardHeight();
-  const formScrollRef = React.useRef<ScrollView>(null);
+  const formScrollRef = React.useRef<React.ComponentRef<typeof ScrollView>>(null);
   const formOffsetRef = React.useRef(0);
   React.useEffect(() => {
     if (Platform.OS !== 'android' || kb <= 0) return;

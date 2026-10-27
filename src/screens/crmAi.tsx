@@ -61,7 +61,7 @@ export function CrmAi() {
   const [input, setInput] = React.useState('');
   const [sending, setSending] = React.useState(false);
   const [kbH, setKbH] = React.useState(0);
-  const scrollRef = React.useRef<ScrollView>(null);
+  const scrollRef = React.useRef<React.ComponentRef<typeof ScrollView>>(null);
   const loadedRef = React.useRef(false);
 
   // Restore the last conversation; keep the cache fresh in the background.

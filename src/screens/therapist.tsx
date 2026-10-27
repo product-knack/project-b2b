@@ -119,7 +119,7 @@ function AddTherapySessionSheet({ open, clients, presetClient, onClose }: {
       onError: (e: any) => Alert.alert('Could not save session', friendlyError(e, 'Please try again.')),
     });
   };
-  const scrollRef = React.useRef<ScrollView>(null);
+  const scrollRef = React.useRef<React.ComponentRef<typeof ScrollView>>(null);
   return (
     <Modal visible={open} transparent animationType="slide" onRequestClose={onClose}>
       {/* KeyboardAvoidingView lifts the whole sheet above the keyboard so the

@@ -35,7 +35,7 @@ export function SessionOtpSheet({ visible, scheduleId, clientName, couple, onVer
   const [code, setCode] = React.useState('');
   const [err, setErr] = React.useState<string | null>(null);
   const [netFailed, setNetFailed] = React.useState(false);
-  const inputRef = React.useRef<TextInput>(null);
+  const inputRef = React.useRef<React.ComponentRef<typeof TextInput>>(null);
   const submitting = React.useRef(false);
   const busy = verifyM.isPending;
   // Save mode: no network, or the last call never reached the server. Needs a caller that queues.

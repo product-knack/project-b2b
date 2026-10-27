@@ -458,7 +458,7 @@ export function CreatePlan() {
   };
   // Drag-to-reorder: hold the grip on an exercise row and move it within its
   // workout section; the page scroll freezes and auto-scrolls near the edges.
-  const dragPageRef = React.useRef<ScrollView>(null);
+  const dragPageRef = React.useRef<React.ComponentRef<typeof ScrollView>>(null);
   const dragOffsetRef = React.useRef(0);
   const [pageScrollOk, setPageScrollOk] = React.useState(true);
   const drag = useDragReorder({ scrollRef: dragPageRef, scrollOffsetRef: dragOffsetRef, setScrollEnabled: setPageScrollOk });

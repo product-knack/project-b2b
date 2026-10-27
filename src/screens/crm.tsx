@@ -1186,7 +1186,7 @@ export function CrmApprovals() {
   return (
     <Page gap={14} pt={6}>
       {/* Schedule Session sheet — single-day roster approve (web CreateSessionDialog port) */}
-      <Modal visible={!!schedFor} transparent animationType="slide" onRequestClose={() => !reviewM.isPending && setSchedFor(null)}>
+      <Modal visible={!!schedFor} transparent animationType="slide" onRequestClose={() => { if (!reviewM.isPending) setSchedFor(null); }}>
         <Pressable onPress={() => !reviewM.isPending && setSchedFor(null)} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' }}>
           <Pressable onPress={() => {}} style={{ backgroundColor: C.sheetBg, borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: 'rgba(255,150,90,0.14)', paddingHorizontal: 18, paddingTop: 10, paddingBottom: kb > 0 ? kb + 14 : 26, maxHeight: '88%' }}>
             <View style={{ alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.14)', marginBottom: 14 }} />

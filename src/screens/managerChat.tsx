@@ -1682,7 +1682,7 @@ export function ManagerChat() {
     }
   }, [msgsQ.data, meId, qc, team?.scoreId]);
   const [kbH, setKbH] = React.useState(0);
-  const listRef = React.useRef<FlatList<ManagerChatMessage>>(null);
+  const listRef = React.useRef<React.ComponentRef<typeof FlatList<ManagerChatMessage>>>(null);
   const msgs = msgsQ.data ?? [];
   // Quoted replies (§3): the message being replied to + flash-highlight target.
   const [replyTo, setReplyTo] = React.useState<{ id: string; name: string; body: string } | null>(null);
@@ -1852,7 +1852,7 @@ export function ManagerChat() {
   }, [team?.scoreId, msgs.length]);
   React.useEffect(() => { setReplyTo(null); }, [team?.scoreId]);
 
-  const inputRef = React.useRef<TextInput>(null);
+  const inputRef = React.useRef<React.ComponentRef<typeof TextInput>>(null);
   const sendText = async () => {
     const body = input.trim();
     if (!body || !team || sendM.isPending) return;

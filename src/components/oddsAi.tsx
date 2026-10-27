@@ -121,7 +121,7 @@ export function OddsAiChat() {
   const [text, setText] = useState('');
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const nextId = useRef(1);
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
 
   // Track keyboard height so we can lift the input bar above it (KeyboardAvoidingView
   // can't push content up inside a fixed-height sheet anchored to the screen bottom).

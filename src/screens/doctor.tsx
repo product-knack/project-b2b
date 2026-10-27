@@ -1681,7 +1681,7 @@ const WHEEL_ITEM = 40;
    contentOffset prop is iOS-only), and value updates on BOTH drag-end and
    momentum-end (slow drags never fire onMomentumScrollEnd). */
 function WheelColumn({ data, value, width, onChange }: { data: string[]; value: string; width: number; onChange: (v: string) => void }) {
-  const ref = React.useRef<ScrollView>(null);
+  const ref = React.useRef<React.ComponentRef<typeof ScrollView>>(null);
   const settle = (y: number) => {
     const idx = Math.max(0, Math.min(data.length - 1, Math.round(y / WHEEL_ITEM)));
     onChange(data[idx]);

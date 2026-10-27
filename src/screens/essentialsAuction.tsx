@@ -329,7 +329,7 @@ export function EssentialsAuction() {
   // Focus (22 Oct 2026): a crew card or an unsold push names a client; the page scrolls to that card and outlines
   // it in gold. Cleared on leave so the next visit opens at the top.
   const { auctionFocusClientId: focusId, set: setStore } = useStore();
-  const pageRef = React.useRef<ScrollView>(null);
+  const pageRef = React.useRef<React.ComponentRef<typeof ScrollView>>(null);
   React.useEffect(() => () => { setStore({ auctionFocusClientId: null }); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // Physiotherapists see the rehab sessions, trainers the trainings (the database
   // filters the rows by role); only the wording differs here.
