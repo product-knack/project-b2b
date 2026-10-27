@@ -67,6 +67,7 @@
       "expo-video",
       "expo-asset",
       "./plugins/withReleaseSigning",
+      "./plugins/withCMakeLongPaths",
       "expo-sharing"
     ]
   }
