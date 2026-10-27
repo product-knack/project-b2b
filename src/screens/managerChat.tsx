@@ -26,6 +26,8 @@ import { CycleChip, CyclePopup, CyclePopupInfo } from '../components/cycleLabel'
 import { EssentialsBadge } from '../components/essentialsBadge';
 import { LatestVoiceChip, LatestVoicePopup, LatestVoiceInfo } from '../components/SessionVoice';
 import { useClientsLatestVoiceNotes } from '../lib/sessionVoiceQueries';
+import { ListenStatusChip, ListenNowSheet, type ListenNowInfo } from '../components/clientHealthSummaryCard';
+import { useMyListenStatuses } from '../lib/clientHealthSummaryQueries';
 import { friendlyError } from '../lib/friendlyError';
 
 /* "My Crew" identity: PINK (user pick). Semantic colors stay: green =
@@ -1401,6 +1403,10 @@ function TomorrowPlanSheet({ visible, onClose, onSend, sending, existing, addOnl
   const [cycleFor, setCycleFor] = React.useState<CyclePopupInfo>(null);
   // The client's latest session voice notes (30 Sep 2026): hear what was said after her last workout.
   const latestVoiceQ = useClientsLatestVoiceNotes(rows.map((r) => r.clientId), visible);
+  // The listen rule on each row (27 Oct 2026): one batched read, the chip opens the Listen now sheet.
+  const listenQ = useMyListenStatuses(rows.map((r) => r.clientId), visible);
+  const listenById = listenQ.data ?? {};
+  const [listenFor, setListenFor] = React.useState<ListenNowInfo>(null);
   const latestVoice = latestVoiceQ.data ?? {};
   const [voiceFor, setVoiceFor] = React.useState<LatestVoiceInfo>(null);
   // Add-only mode: already-shared clients are locked (visible for context, not
@@ -1506,6 +1512,7 @@ function TomorrowPlanSheet({ visible, onClose, onSend, sending, existing, addOnl
             </View>
           </Pressable>
           {latestVoice[r.clientId] ? <LatestVoiceChip latest={latestVoice[r.clientId]} onPress={() => setVoiceFor({ name: r.name, latest: latestVoice[r.clientId] })} /> : null}
+          <ListenStatusChip status={listenById[r.clientId]} onPress={() => setListenFor({ id: r.clientId, name: r.name })} />
           {cycles[r.clientId] ? <CycleChip cycle={cycles[r.clientId]} onPress={() => setCycleFor({ name: r.name, cycle: cycles[r.clientId] })} /> : null}
           {essentials[r.clientId] ? <EssentialsBadge status={essentials[r.clientId]} compact /> : null}
           {protocols[r.clientId] ? <ProtocolChip onPress={() => setProtoFor({ name: r.name, proto: protocols[r.clientId] })} /> : null}
@@ -1603,6 +1610,7 @@ function TomorrowPlanSheet({ visible, onClose, onSend, sending, existing, addOnl
       <ProtocolPopup info={protoFor} onClose={() => setProtoFor(null)} />
       <CyclePopup info={cycleFor} onClose={() => setCycleFor(null)} />
       <LatestVoicePopup info={voiceFor} onClose={() => setVoiceFor(null)} />
+      <ListenNowSheet info={listenFor} onClose={() => { setListenFor(null); listenQ.refetch(); }} />
     </Modal>
   );
 }

@@ -158,6 +158,57 @@ export const listenGate = (row: ClientHealthSummaryRow | null | undefined, uid: 
 });
 export const gateDue = (g: ListenGate): boolean => g.weekly === 'due' || g.context === 'due';
 
+/* ---------- The rule, written once (27 Oct 2026) ----------
+   Owner: "add the rule everywhere so the trainer knows why it matters and cannot log without it". Every
+   surface with the two Play rows (Today's Roster strip, the Log Health Data popup, the client page, the gate
+   sheet, My Crew) shows the same header and the same line under each row. */
+export const LISTEN_WHY = 'Each summary must be heard once after it changes, or Submit stays off.';
+export const LISTEN_HEADER_DUE = 'NOT HEARD · LISTEN NOW';
+export const LISTEN_HEADER_OK = 'CLIENT SUMMARIES';
+export const listenHeaderText = (g: ListenGate): string => (gateDue(g) ? LISTEN_HEADER_DUE : LISTEN_HEADER_OK);
+
+/** The line under a Play row. Null when that summary does not exist. */
+export const listenRuleLine = (which: Which, state: GateState, clientFirstName?: string | null): string | null => {
+  const name = (clientFirstName ?? '').trim().split(/\s+/)[0] || 'this client';
+  if (state === 'none') return null;
+  if (state === 'done') return 'Heard after the latest update. You can log.';
+  return which === 'context'
+    ? `Listen to this at least once. It changed since you last heard it. You cannot log a workout for ${name} until you do.`
+    : `Listen to this at least once today. You cannot log ${name}'s workout until you do.`;
+};
+
+/** My Crew: the chip on a client row and the sentence in the Listen now sheet. */
+export const LISTEN_CHIP_DUE = 'NOT HEARD · LISTEN NOW';
+export const LISTEN_CHIP_OK = 'HEARD';
+export const listenNowLine = (clientFirstName: string | null | undefined, when: 'tomorrow' | 'today' = 'tomorrow'): string =>
+  `You have not heard ${(clientFirstName ?? '').trim().split(/\s+/)[0] || 'this client'}'s summaries. You cannot log ${when}'s session without this. Listen now.`;
+
+/** One row of get_my_listen_status (a batched read for My Crew): the same gate, computed from flat fields. */
+export type ListenStatusRow = {
+  client_id: string;
+  has_weekly: boolean;
+  has_context: boolean;
+  weekly_generated_at: string | null;
+  context_generated_at: string | null;
+  my_last_weekly_at: string | null;
+  my_last_context_at: string | null;
+};
+export const gateFromStatus = (s: ListenStatusRow | null | undefined, nowMs: number = Date.now()): ListenGate => {
+  const one = (which: Which): GateState => {
+    if (!s) return 'none';
+    const has = which === 'weekly' ? s.has_weekly : s.has_context;
+    const g = which === 'weekly' ? s.weekly_generated_at : s.context_generated_at;
+    const mine = which === 'weekly' ? s.my_last_weekly_at : s.my_last_context_at;
+    if (!has || !g) return 'none';
+    if (!mine) return 'due';
+    const heardAt = new Date(mine).getTime();
+    if (!isFinite(heardAt) || heardAt < new Date(g).getTime()) return 'due';
+    if (which === 'weekly' && istDayOf(mine) !== istDayOf(nowMs)) return 'due';
+    return 'done';
+  };
+  return { weekly: one('weekly'), context: one('context') };
+};
+
 /* ---------- The Add Workout listen sheet (22 Oct 2026) ----------
    Owner: "after both listens the trainer must tap Proceed to workout". Play records the listen on the server at
    once, so the refreshed row reads "done" seconds into the audio. Before this fix the second Play therefore made

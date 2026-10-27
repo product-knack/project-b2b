@@ -1277,7 +1277,7 @@ function RosterCard({ row, trainerName, highlight, onAddWorkout, plans, devPos, 
         const day = istDate(new Date(row.scheduled_datetime));
         // latest (22 Oct 2026): opened, the strip also lists the latest WHOOP recovery, sleep, nutrition, steps
         // and hydration with their dates (Today's Roster only; the Essentials auction cards stay as they are).
-        return <ClientSummaryStrip clientId={row.client_id} date={day === istDate() ? null : day} accent={C.gold} latest />;
+        return <ClientSummaryStrip clientId={row.client_id} clientName={row.client_name} date={day === istDate() ? null : day} accent={C.gold} latest />;
       })() : null}
 
       {/* Distance strip — captured home + device fix → instant estimate; tap for live route */}
@@ -8419,6 +8419,9 @@ export function Workout() {
               ) : null}
 
               {/* Last session voice notes (5 Oct 2026): what the previous trainer said, with date, time and name. */}
+              {/* The listen rule, where the trainer logs from (27 Oct 2026): the two Play rows and their lines, open */}
+              <Mono style={{ fontSize: 9.5, letterSpacing: 1.2, color: C.gold }}>BEFORE YOU LOG</Mono>
+              <ClientSummaryStrip clientId={selectedClientId} clientName={clientName} accent={C.gold} defaultOpen />
               <LatestVoiceInline latest={latestVoice} loading={latestVoiceQ.isFetching && !latestVoiceQ.data} clientName={clientName} />
 
               {saveHealthM.isError ? (

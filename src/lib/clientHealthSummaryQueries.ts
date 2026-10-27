@@ -9,7 +9,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from './supabase';
 import { withTimeout, NET_MS } from './withTimeout';
-import type { ClientHealthSummaryRow, ListenEntry, Which } from './clientHealthSummary';
+import type { ClientHealthSummaryRow, ListenEntry, Which, ListenStatusRow } from './clientHealthSummary';
 import { friendlyError } from './friendlyError';
 
 export const HEALTH_SUMMARY_KEY = 'client-health-summary';
@@ -72,5 +72,35 @@ export function useLogSummaryListen(clientId: string | null | undefined) {
       return data as ListenEntry;
     },
     onSettled: () => { qc.invalidateQueries({ queryKey: [HEALTH_SUMMARY_KEY, clientId ?? null] }); },
+  });
+}
+
+/** My Crew (27 Oct 2026): the listen gate inputs for a list of clients in one call (get_my_listen_status). A client the
+    caller may not listen to is missing from the map; before the migration (PGRST202) the map is empty, no chips. */
+export function useMyListenStatuses(clientIds: string[], enabled: boolean) {
+  const ids = [...new Set(clientIds.filter(Boolean))].sort();
+  return useQuery({
+    queryKey: ['listen-status', ids.join(',')],
+    enabled: enabled && ids.length > 0,
+    staleTime: 60_000,
+    refetchOnWindowFocus: true,
+    queryFn: async (): Promise<Record<string, ListenStatusRow>> => {
+      const { data, error } = await withTimeout(
+        Promise.resolve(supabase.rpc('get_my_listen_status', { p_client_ids: ids })) as Promise<{ data: any; error: any }>,
+        NET_MS, 'Listen status');
+      if (error) {
+        if (error.code === 'PGRST202' || /could not find the function/i.test(String(error.message ?? ''))) return {};
+        throw new Error(friendlyError(error, 'Could not read the listen status.'));
+      }
+      const out: Record<string, ListenStatusRow> = {};
+      for (const r of (data ?? []) as any[]) {
+        out[String(r.client_id)] = {
+          client_id: String(r.client_id), has_weekly: r.has_weekly === true, has_context: r.has_context === true,
+          weekly_generated_at: r.weekly_generated_at ?? null, context_generated_at: r.context_generated_at ?? null,
+          my_last_weekly_at: r.my_last_weekly_at ?? null, my_last_context_at: r.my_last_context_at ?? null,
+        };
+      }
+      return out;
+    },
   });
 }

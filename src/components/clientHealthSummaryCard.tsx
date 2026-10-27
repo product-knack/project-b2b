@@ -22,6 +22,7 @@ import {
   TITLES, type Which, type ClientHealthSummaryRow, type WeeklySummary, type ContextSummary,
   durationText, fmtStamp, historyOf, summaryOf, generatedAtOf, hasScript, lastListen, isNewSince,
   listenGate, gateDue, type GateState,
+  listenRuleLine, LISTEN_WHY, LISTEN_CHIP_DUE, LISTEN_CHIP_OK, listenNowLine, gateFromStatus, type ListenStatusRow,
   type ListenGate, type HeardMap, listenStillNeeded, listenAllHeard, LISTEN_PROCEED, LISTEN_WAIT,
 } from '../lib/clientHealthSummary';
 
@@ -112,6 +113,9 @@ function FindingChips({ which, row }: { which: Which; row: ClientHealthSummaryRo
 
 /* ---------- one summary row (shared by the card and the gate) ---------- */
 type RowProps = {
+  /** The rule line under the row (27 Oct 2026) and whether it is a due (red) one. */
+  rule?: string | null;
+  ruleDue?: boolean;
   which: Which;
   row: ClientHealthSummaryRow | null;
   uid: string | null;
@@ -132,7 +136,7 @@ type RowProps = {
   status?: { text: string; color: string } | null;
   ordinal?: number;
 };
-function SummaryRow({ which, row, uid, active, paused, busy, canPause, source, part, parts, transcriptOpen, onPlay, onStop, onToggleTranscript, status, ordinal }: RowProps) {
+function SummaryRow({ which, row, uid, active, paused, busy, canPause, source, part, parts, transcriptOpen, onPlay, onStop, onToggleTranscript, status, ordinal, rule, ruleDue }: RowProps) {
   const s = summaryOf(row, which);
   const col = colorOf(which);
   const has = hasScript(row, which);
@@ -181,6 +185,12 @@ function SummaryRow({ which, row, uid, active, paused, busy, canPause, source, p
       {transcriptOpen && s?.script ? (
         <Body style={{ fontSize: 12.5, color: C.ink, lineHeight: 19, padding: 11, borderRadius: 12, backgroundColor: 'rgba(0,0,0,0.3)' }}>{s.script}</Body>
       ) : null}
+      {rule ? (
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6, paddingVertical: 7, paddingHorizontal: 9, borderRadius: 10, backgroundColor: hexA(ruleDue ? C.red : C.green, 0.09), borderWidth: 1, borderColor: hexA(ruleDue ? C.red : C.green, 0.35) }}>
+          <Icon name={ruleDue ? 'alert' : 'checks'} size={12} color={ruleDue ? '#FF9B8F' : C.green} strokeWidth={2.3} />
+          <Text style={{ flex: 1, fontFamily: F.bodySemi, fontSize: 11.5, lineHeight: 16, color: ruleDue ? '#FF9B8F' : C.green }}>{rule}</Text>
+        </View>
+      ) : null}
       <Body style={{ fontSize: 10.5, color: C.muted3 }}>
         {last ? `Last listened by ${last.by_name ?? 'someone'} · ${fmtStamp(last.at)}` : has ? 'Nobody has listened yet' : ''}
       </Body>
@@ -223,7 +233,7 @@ function HistorySheet({ visible, onClose, row }: { visible: boolean; onClose: ()
 }
 
 /* ---------- the card ---------- */
-export function ClientHealthSummaryCard({ clientId }: { clientId: string | null | undefined }) {
+export function ClientHealthSummaryCard({ clientId, clientName }: { clientId: string | null | undefined; clientName?: string | null }) {
   const { session } = useAuth();
   const uid = session?.user?.id ?? null;
   const q = useClientHealthSummary(clientId ?? null);
@@ -275,8 +285,10 @@ export function ClientHealthSummaryCard({ clientId }: { clientId: string | null 
           </View>
         ) : (
           <View style={{ gap: 9 }}>
+            <Body style={{ fontSize: 10.5, color: C.muted2, lineHeight: 15 }}>{LISTEN_WHY}</Body>
             {(['weekly', 'context'] as Which[]).map((which) => (
               <SummaryRow key={which} which={which} row={row} uid={uid} {...rowVoiceProps(voice, which)} transcriptOpen={transcript === which}
+                rule={listenRuleLine(which, listenGate(row, uid)[which], clientName)} ruleDue={listenGate(row, uid)[which] === 'due'}
                 onPlay={() => play(which)} onStop={voice.stop} onToggleTranscript={() => setTranscript((t) => (t === which ? null : which))} />
             ))}
           </View>
@@ -296,16 +308,18 @@ export function ClientHealthSummaryCard({ clientId }: { clientId: string | null 
    asked for is that day's. */
 /* latest (22 Oct 2026, Today's Roster only): under the two Play rows, the client's latest WHOOP recovery, sleep,
    nutrition, steps and hydration, each with its date (LatestHealthDataBlock). Read only when the strip is open. */
-export function ClientSummaryStrip({ clientId, date, accent = GOLD, latest = false }: { clientId: string | null | undefined; date?: string | null; accent?: string; latest?: boolean }) {
+export function ClientSummaryStrip({ clientId, date, accent = GOLD, latest = false, clientName, defaultOpen = false }: { clientId: string | null | undefined; date?: string | null; accent?: string; latest?: boolean; clientName?: string | null; defaultOpen?: boolean }) {
   const { session } = useAuth();
   const uid = session?.user?.id ?? null;
-  const [open, setOpen] = React.useState(false);
+  const [open, setOpen] = React.useState(!!defaultOpen);
   const q = useClientHealthSummary(clientId ?? null, true, date ?? null);
   const logM = useLogSummaryListen(clientId ?? null);
   const voice = useSummaryVoice();
   const [transcript, setTranscript] = React.useState<Which | null>(null);
   const [err, setErr] = React.useState<string | null>(null);
   const row = q.data ?? null;
+  const gate = listenGate(row, uid);
+  const due = gateDue(gate);
   React.useEffect(() => { if (!open) voice.stop(); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!clientId || q.isError) return null;
   const hasWeekly = hasScript(row, 'weekly'), hasContext = hasScript(row, 'context');
@@ -322,20 +336,22 @@ export function ClientSummaryStrip({ clientId, date, accent = GOLD, latest = fal
   };
   return (
     <ReplayMask>
-      <View style={{ borderRadius: 14, backgroundColor: hexA(accent, 0.06), borderWidth: 1, borderColor: hexA(accent, open ? 0.4 : 0.22) }}>
+      <View style={{ borderRadius: 14, backgroundColor: hexA(due ? C.red : accent, 0.06), borderWidth: 1, borderColor: due ? hexA(C.red, 0.55) : hexA(accent, open ? 0.4 : 0.22) }}>
         <Pressable onPress={() => setOpen((o) => !o)} hitSlop={6} accessibilityRole="button" accessibilityState={{ expanded: open }} accessibilityLabel="Client summaries"
           style={{ flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 10, paddingHorizontal: 12 }}>
-          <Icon name="headphones" size={14} color={accent} strokeWidth={2.1} />
+          <Icon name={due ? 'alert' : 'headphones'} size={14} color={due ? '#FF9B8F' : accent} strokeWidth={2.1} />
           <View style={{ flex: 1 }}>
-            <Text style={{ fontFamily: F.bodySemi, fontSize: 12.5, color: '#fff' }}>Client summaries</Text>
+            <Text style={{ fontFamily: F.bodySemi, fontSize: 12.5, color: due ? '#FF9B8F' : '#fff' }}>{due ? 'Not heard · listen now' : 'Client summaries'}</Text>
             <Mono style={{ fontSize: 8, letterSpacing: 0.5, color: C.muted3, marginTop: 2 }} numberOfLines={1}>{summaryLine.toUpperCase()}</Mono>
           </View>
           <Icon name={open ? 'chevUp' : 'chevDown'} size={13} color={accent} strokeWidth={2.4} />
         </Pressable>
         {open ? (
           <View style={{ paddingHorizontal: 10, paddingBottom: 10, gap: 8 }}>
+            <Body style={{ fontSize: 10.5, color: due ? '#FF9B8F' : C.muted2, lineHeight: 15 }}>{LISTEN_WHY}</Body>
             {(['weekly', 'context'] as Which[]).map((which) => (
               <SummaryRow key={which} which={which} row={row} uid={uid} {...rowVoiceProps(voice, which)} transcriptOpen={transcript === which}
+                rule={listenRuleLine(which, gate[which], clientName)} ruleDue={gate[which] === 'due'}
                 onPlay={() => play(which)} onStop={voice.stop} onToggleTranscript={() => setTranscript((t) => (t === which ? null : which))} />
             ))}
             {voice.notice ? <Body style={{ fontSize: 11, color: GOLD }}>{voice.notice}</Body> : null}
@@ -425,7 +441,7 @@ export function ListenGateSheet({ visible, clientId, clientName, onContinue }: {
             </View>
             <View style={{ flex: 1 }}>
               <Serif style={{ fontSize: 20 }}>Listen before you log</Serif>
-              <Body style={{ fontSize: 11.5, color: C.muted2, marginTop: 3, lineHeight: 16 }}>You need to listen to this before adding {clientName}'s session. This week's training every day, and the health context whenever a new report has updated it.</Body>
+              <Body style={{ fontSize: 11.5, color: C.muted2, marginTop: 3, lineHeight: 16 }}>{LISTEN_WHY} This week's training changes every day; the health context changes when a new report arrives. Hear each one to the end, then tap Proceed to workout.</Body>
             </View>
           </View>
           <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 9, paddingBottom: 8 }}>
@@ -437,7 +453,8 @@ export function ListenGateSheet({ visible, clientId, clientName, onContinue }: {
             ) : (['weekly', 'context'] as Which[]).map((which, i) => (
               <SummaryRow key={which} which={which} row={row} uid={uid} ordinal={i + 1} {...rowVoiceProps(voice, which)} transcriptOpen={transcript === which}
                 onPlay={() => play(which)} onStop={voice.stop} onToggleTranscript={() => setTranscript((t) => (t === which ? null : which))}
-                status={gateStatus(which, gateNow[which], heard[which], row)} />
+                status={gateStatus(which, gateNow[which], heard[which], row)}
+                rule={listenRuleLine(which, gateNow[which], clientName)} ruleDue={gateNow[which] === 'due' && !heard[which]} />
             ))}
             {voice.notice ? <Body style={{ fontSize: 11, color: GOLD }}>{voice.notice}</Body> : null}
             {err ? <Body style={{ fontSize: 11.5, color: C.red }}>{err}</Body> : null}
@@ -458,3 +475,53 @@ export function ListenGateSheet({ visible, clientId, clientName, onContinue }: {
 }
 
 export { gateDue };
+
+/* ---------- My Crew (27 Oct 2026): the chip on a plan row and the Listen now sheet ---------- */
+/** Red "NOT HEARD · LISTEN NOW" while either summary is due for the signed-in trainer, green "HEARD" otherwise, nothing when none exists. */
+export function ListenStatusChip({ status, onPress }: { status: ListenStatusRow | null | undefined; onPress: () => void }) {
+  const gate = gateFromStatus(status);
+  if (gate.weekly === 'none' && gate.context === 'none') return null;
+  const due = gateDue(gate);
+  const col = due ? C.red : C.green;
+  return (
+    <Pressable onPress={onPress} hitSlop={10} accessibilityRole="button" accessibilityLabel={due ? 'Summaries not heard, listen now' : 'Summaries heard'}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 4, paddingHorizontal: 8, borderRadius: 999, backgroundColor: hexA(col, 0.12), borderWidth: 1, borderColor: hexA(col, 0.45) }}>
+      <Icon name={due ? 'alert' : 'checks'} size={9} color={col} strokeWidth={2.2} />
+      <Mono style={{ fontSize: 8, letterSpacing: 0.5, color: col }}>{due ? LISTEN_CHIP_DUE : LISTEN_CHIP_OK}</Mono>
+    </Pressable>
+  );
+}
+
+export type ListenNowInfo = { id: string; name: string; when?: 'tomorrow' | 'today' } | null;
+
+/** The sheet behind the chip: the rule sentence and the two Play rows (the strip, open). */
+export function ListenNowSheet({ info, onClose }: { info: ListenNowInfo; onClose: () => void }) {
+  const insets = useSafeAreaInsets();
+  return (
+    <Modal visible={!!info} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={{ flex: 1, justifyContent: 'flex-end' }}>
+        <Pressable onPress={onClose} accessibilityRole="button" accessibilityLabel="Close" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.62)' }} />
+        <ReplayMask style={{ maxHeight: '88%' }}>
+          <View style={{ backgroundColor: '#0E0A09', borderTopLeftRadius: 26, borderTopRightRadius: 26, borderTopWidth: 1, borderColor: hexA(C.red, 0.3), paddingHorizontal: 18, paddingTop: 14, paddingBottom: insets.bottom + 18, flexShrink: 1 }}>
+            <View style={{ width: 40, height: 4, borderRadius: 99, backgroundColor: 'rgba(255,255,255,0.2)', alignSelf: 'center', marginBottom: 14 }} />
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+              <View style={{ width: 40, height: 40, borderRadius: 13, backgroundColor: hexA(C.red, 0.14), borderWidth: 1, borderColor: hexA(C.red, 0.35), alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name="headphones" size={18} color="#FF9B8F" strokeWidth={2.1} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Serif style={{ fontSize: 19 }}>Listen now</Serif>
+                <Body style={{ fontSize: 11.5, color: C.muted2, marginTop: 2, lineHeight: 16 }}>{info ? listenNowLine(info.name, info.when ?? 'tomorrow') : ''}</Body>
+              </View>
+              <Pressable onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel="Close" style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name="close" size={14} color={C.muted} strokeWidth={2.3} />
+              </Pressable>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 12, paddingBottom: 6 }}>
+              {info ? <ClientSummaryStrip clientId={info.id} clientName={info.name} accent={GOLD} defaultOpen /> : null}
+            </ScrollView>
+          </View>
+        </ReplayMask>
+      </View>
+    </Modal>
+  );
+}
