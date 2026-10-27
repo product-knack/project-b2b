@@ -78,6 +78,12 @@ eq('headline no winner', A.resultHeadline({ ...res, result: 'no_winner' }), "No 
 eq('headline cancelled', A.resultHeadline({ ...res, result: 'cancelled' }), "Aarav Mehra's Strength on Fri 2 Oct at 7:00 AM was cancelled");
 eq('detail cancelled is the bid only', A.resultDetail({ ...res, result: 'cancelled' }), 'Your bid: 4 of 5 correct');
 eq('cancellation line', A.cancellationLine({ client_name: 'Aarav Mehra', modality: 'Strength', training_date: '2026-10-02', slot_time: '07:00' }), 'Aarav Mehra cancelled Strength on Fri 2 Oct at 7:00 AM');
+// 27 Oct 2026: the client app's cancel rule on the card (tagged today / tomorrow, paid or free; normal otherwise)
+const cc = { client_name: 'Aarav Mehra', modality: 'Strength', training_date: '2026-10-28', slot_time: '19:00', tagged: true, kind: 'paid', hours_before: 4.2 };
+eq('client cancel line, tagged paid tomorrow', A.clientCancelLine(cc, '2026-10-27'), "Aarav Mehra cancelled tomorrow's 7:00 PM Strength in the app, 4.2 hours before: a paid cancellation, one of their 20. Mark it on your roster.");
+eq('client cancel line, tagged free today', A.clientCancelLine({ ...cc, training_date: '2026-10-27', kind: 'free', hours_before: 14.1 }, '2026-10-27'), "Aarav Mehra cancelled today's 7:00 PM Strength in the app, 14.1 hours before: a free cancellation. Mark it on your roster.");
+eq('client cancel line, normal', A.clientCancelLine({ ...cc, training_date: '2026-10-30', tagged: false, kind: 'free', hours_before: null }, '2026-10-27'), "Aarav Mehra cancelled Fri 30 Oct's 7:00 PM Strength in the app. It is off your roster.");
+eq('marked lines', [A.markedLine('paid'), A.markedLine('free')], ['Marked as a paid cancellation. The care team approves the payout.', 'Marked as a free cancellation. Nothing counts.']);
 eq('locked error', [A.isEssentialsLockedError('ESSENTIALS_LOCKED: this Essentials session was booked through the auction.'), A.isEssentialsLockedError('PAID_CANCEL_CODE_REQUIRED: x'), A.isEssentialsLockedError(null)], [true, false, false]);
 eq('detail won', A.resultDetail({ ...res, won: true, my_points: 5 }), '5 of 5 correct · 3 bids · the session is on your roster');
 eq('detail won, one bid', A.resultDetail({ ...res, won: true, my_points: 5, bids_count: 1 }), '5 of 5 correct · 1 bid · the session is on your roster');

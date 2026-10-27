@@ -1237,6 +1237,8 @@ function RosterCard({ row, trainerName, highlight, onAddWorkout, plans, devPos, 
               </View>
             ) : null}
             {row.modality ? chip(row.modality, C.ink3) : null}
+            {/* The client cancelled this session in the Essentials app (27 Oct 2026): mark it from the home alert */}
+            {row.client_cancel ? chip(row.client_cancel === 'paid' ? 'Cancelled by the client · paid, mark it' : 'Cancelled by the client · free, mark it', C.red) : null}
             {/* Voice notes on the logged session: listen, and record more (30 Sep 2026) */}
             {logged && onVoice ? (
               <Pressable onPress={onVoice} hitSlop={8} accessibilityRole="button" accessibilityLabel={`Shared coach notes for this session${hasPainNote(row.voice_notes) ? ', pain or discomfort reported' : ''}`}

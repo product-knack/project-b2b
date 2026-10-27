@@ -42,11 +42,30 @@ export type EssentialsCancellation = {
   cancelled_at: string;
   session_id: string | null;
   was_winner: boolean;
+  /* The client app's verdict (27 Oct 2026): a training on today's or tomorrow's date is TAGGED (the roster row
+     stays until the trainer marks it); kind paid = one of the client's 20, free = not counted. */
+  tagged: boolean;
+  kind: 'paid' | 'free';
+  hours_before: number | null;
+  schedule_status: string | null;
+  marked: boolean;
 };
 
 /** The dashboard alert line: "Aarav Mehra cancelled Strength on Tue 27 Oct at 7:00 PM". */
 export const cancellationLine = (c: Pick<EssentialsCancellation, 'client_name' | 'modality' | 'training_date' | 'slot_time'>): string =>
   `${c.client_name} cancelled ${c.modality || 'the training'} on ${formatLotDate(c.training_date)}${c.slot_time ? ` at ${formatTime12(c.slot_time)}` : ''}`;
+
+/** The whole card line: the client app's own words for a tagged day, the plain line otherwise. */
+export const clientCancelLine = (c: Pick<EssentialsCancellation, 'client_name' | 'modality' | 'training_date' | 'slot_time' | 'tagged' | 'kind' | 'hours_before'>, todayYmd: string): string => {
+  const when = c.training_date === todayYmd ? "today's" : c.training_date === addDays(todayYmd, 1) ? "tomorrow's" : `${formatLotDate(c.training_date)}'s`;
+  const what = `${when}${c.slot_time ? ` ${formatTime12(c.slot_time)}` : ''} ${c.modality || 'training'}`;
+  if (!c.tagged) return `${c.client_name} cancelled ${what} in the app. It is off your roster.`;
+  const hours = c.hours_before != null ? `, ${Math.round(c.hours_before * 10) / 10} hours before` : '';
+  return `${c.client_name} cancelled ${what} in the app${hours}: ${c.kind === 'paid' ? 'a paid cancellation, one of their 20' : 'a free cancellation'}. Mark it on your roster.`;
+};
+
+/** The second line under a tagged card once the trainer marked it. */
+export const markedLine = (kind: 'paid' | 'free'): string => (kind === 'paid' ? 'Marked as a paid cancellation. The care team approves the payout.' : 'Marked as a free cancellation. Nothing counts.');
 
 /** One row of get_essentials_auction (the bid fields since 10 Oct 2026, migration 20261010120000). */
 export type AuctionLot = {

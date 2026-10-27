@@ -64,6 +64,8 @@ export type RosterRow = {
   reschedule_proposed_time: string | null;
   missed_remarks: any[] | null;
   paid_cancellation: boolean;
+  /** The client cancelled in the Essentials app on today's or tomorrow's date (27 Oct 2026): the row stays until the trainer marks it. */
+  client_cancel: 'paid' | 'free' | null;
   admin_approval: string | null;
   is_open_past: boolean;
   /** Client ack on the logged training_sessions row: true/false once logged, null when not logged. */
@@ -123,7 +125,7 @@ export type ManagerLeaderboard = {
 // Today's roster — composed exactly like the web TodayRosterCard:
 //   [ Open Past (overdue, no action) ] + [ Pending Reschedule Carry-Over ] + [ Today's day list ]
 const ROSTER_SELECT =
-  'id, scheduled_datetime, session_type, modality, status, client_id, workout_session_id, reschedule_request, reschedule_requested_at, reschedule_status, reschedule_proposed_date, reschedule_proposed_time, missed_remarks, paid_cancellation, admin_approval, clients:client_id(first_name, last_name, status, brb_location, subscription_type, essentials_extensions)';
+  'id, scheduled_datetime, session_type, modality, status, client_id, workout_session_id, reschedule_request, reschedule_requested_at, reschedule_status, reschedule_proposed_date, reschedule_proposed_time, missed_remarks, paid_cancellation, admin_approval, canceled_by, cancellation_remark, clients:client_id(first_name, last_name, status, brb_location, subscription_type, essentials_extensions)';
 /* Fresh start (1 Sept 2026 IST): unlogged sessions from BEFORE the cutoff stay in
    the DB but out of Today's Roster — the August backlog was never going to be
    remarked one by one. Same rule the doctor and therapist rosters already use;
@@ -146,6 +148,8 @@ const mapRosterRow = (s: any, isOpenPast: boolean): RosterRow => ({
   reschedule_proposed_time: s.reschedule_proposed_time ?? null,
   missed_remarks: Array.isArray(s.missed_remarks) ? s.missed_remarks : null,
   paid_cancellation: s.paid_cancellation === true,
+  client_cancel: s.canceled_by === 'Client' && /^cancelled by the client in the app/i.test(String(s.cancellation_remark ?? '')) && String(s.status ?? '').toLowerCase() !== 'cancelled'
+    ? (/paid cancellation/i.test(String(s.cancellation_remark)) && !/free cancellation/i.test(String(s.cancellation_remark)) ? 'paid' : 'free') : null,
   admin_approval: s.admin_approval ?? null,
   is_open_past: isOpenPast,
   acknowledged: null,

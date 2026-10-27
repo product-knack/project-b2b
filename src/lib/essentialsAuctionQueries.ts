@@ -321,7 +321,32 @@ export function useMyEssentialsCancellations(hours = 48, enabled = true) {
         cancelled_at: String(r.cancelled_at),
         session_id: r.session_id ?? null,
         was_winner: !!r.was_winner,
+        tagged: r.tagged === true,
+        kind: r.kind === 'paid' ? 'paid' : 'free',
+        hours_before: r.hours_before == null ? null : Number(r.hours_before),
+        schedule_status: r.schedule_status ?? null,
+        marked: r.marked === true,
       }));
+    },
+  });
+}
+
+/** The trainer marks a tagged client cancellation on the roster (27 Oct 2026): the server turns the roster row
+    cancelled and, for a paid one, writes the cancelled training_sessions row that counts as one of the 20. */
+export function useMarkClientCancellation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (scheduleId: string) => {
+      const { data, error } = await withTimeout(
+        Promise.resolve(supabase.rpc('essentials_mark_client_cancellation', { p_schedule_id: scheduleId })) as Promise<RpcResult>,
+        NET_MS, 'Mark cancellation');
+      if (error) throw new Error(describeGrabError(error));
+      return (data ?? {}) as { ok?: boolean; paid?: boolean; already?: boolean };
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['essentials-cancellations'] });
+      qc.invalidateQueries({ queryKey: ['roster'] });
+      qc.invalidateQueries({ queryKey: ['trainer-roster'] });
     },
   });
 }

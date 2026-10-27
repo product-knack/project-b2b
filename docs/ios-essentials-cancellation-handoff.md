@@ -236,3 +236,44 @@ Run `node tests/rules/auction_rules_test.js`.
 ## 5. Nothing else
 No new screen, no store change, no capability change. Web has the same banner (`EssentialsCancelledBanner`) on
 the trainer dashboard. No build was made on Android (builds on request only).
+
+## 6. The client app's own cancel rule (27 Oct 2026, added)
+The client app (live since 26 Oct) cancels through `essentials_cancel_training` / `essentials_cancel_plan_day`: more than
+6 hours before the start = free, 6 hours or less = paid (one of the 20). A training on **today's or tomorrow's** date is
+**tagged, not removed**: the roster row stays `scheduled` with `canceled_by = 'Client'` and a remark starting
+"Cancelled by the client in the app" (it says paid or free), and the trainer must mark it. Two or more days ahead the
+row is already cancelled and the day removed. Server side (hub-track migration `20261027100000`, run by the owner):
+the trainer is pushed with the client app's own words, the round carries `client_cancel`, and
+`essentials_mark_client_cancellation(p_schedule_id)` turns the row cancelled (paid → `paid_cancellation`, admin approval
+and a cancelled `training_sessions` row with `paid_cancellation = true`; free → nothing counts).
+
+### iOS edits (mirror of the Android commit of 27 Oct 2026)
+1. `src/lib/essentialsAuction.ts`: `EssentialsCancellation` gains `tagged: boolean; kind: 'paid' | 'free';
+   hours_before: number | null; schedule_status: string | null; marked: boolean`. Add:
+   ```ts
+   export const clientCancelLine = (c, todayYmd) => {
+     const when = c.training_date === todayYmd ? "today's" : c.training_date === addDays(todayYmd, 1) ? "tomorrow's" : `${formatLotDate(c.training_date)}'s`;
+     const what = `${when}${c.slot_time ? ` ${formatTime12(c.slot_time)}` : ''} ${c.modality || 'training'}`;
+     if (!c.tagged) return `${c.client_name} cancelled ${what} in the app. It is off your roster.`;
+     const hours = c.hours_before != null ? `, ${Math.round(c.hours_before * 10) / 10} hours before` : '';
+     return `${c.client_name} cancelled ${what} in the app${hours}: ${c.kind === 'paid' ? 'a paid cancellation, one of their 20' : 'a free cancellation'}. Mark it on your roster.`;
+   };
+   export const markedLine = (kind) => (kind === 'paid' ? 'Marked as a paid cancellation. The care team approves the payout.' : 'Marked as a free cancellation. Nothing counts.');
+   ```
+2. `src/lib/essentialsAuctionQueries.ts`: map the five new RPC columns; add `useMarkClientCancellation()` calling
+   `rpc('essentials_mark_client_cancellation', { p_schedule_id })` and invalidating `['essentials-cancellations']` and
+   `['trainer-roster']`.
+3. `src/components/essentialsCancelledAlert.tsx`: copy the Android file whole. The card line is `clientCancelLine(r,
+   istParts().date)`; a tagged, unmarked row shows **Mark as cancelled on my roster** (confirm alert, then the RPC) and
+   cannot be dismissed; a marked row shows `markedLine(kind)` and Got it.
+4. Today's Roster (`trainerQueries.ts`): select `canceled_by, cancellation_remark`; `RosterRow.client_cancel: 'paid' |
+   'free' | null` (canceled_by Client, remark starting "Cancelled by the client in the app", status not cancelled; paid
+   when the remark says "paid cancellation" and not "free cancellation"); the card shows a red chip "Cancelled by the
+   client · paid, mark it" / "· free, mark it".
+5. Tests: the four `clientCancelLine` / `markedLine` checks in `tests/rules/auction_rules_test.js`.
+
+### Verify
+The client cancels tomorrow's booked training in their app less than 6 hours before: the push arrives with the client
+app's words; the home card shows Mark as cancelled on my roster; the roster chip reads "Cancelled by the client · paid,
+mark it"; after marking, the roster row is cancelled, the card reads "Marked as a paid cancellation…", and the admin's
+Paid Cancel queue lists it. A cancellation two days ahead arrives as "… It is off your roster." with Got it.
