@@ -20,5 +20,11 @@ if (!auction && !assigned && m.senderId !== mgrId && (!hodId || m.senderId !== h
   "ASSIGNED BY THE ESSENTIALS MANAGER" in gold (auction and assigned share the gold colour).
 - Stream bubble: `source === 'essentials_assigned'` → "ASSIGNED AFTER THE ESSENTIALS AUCTION" in gold.
 
+**Second bug, same day: the HOD's view of another team showed no manager adds at all.** In `ManagerChat`, the three
+memos `addsByDate`, `reqStatus` and the time-edit map read `teamQ.data?.managerId`, which is the viewer's OWN team.
+The physio HOD is in no team (she sees other teams through `hodTeams`), so `managerId` was undefined and every memo
+returned empty: on her phone no session added by a manager ever appeared on any team's day card. Replace all six
+uses with `team?.managerId` (the team actually on screen; `team` is already defined above the memos).
+
 No server change. Verify: assign an unsold session from the Essentials Manager page; the member's section on the
 day card shows the client with "ASSIGNED", and the stream shows the gold bubble.

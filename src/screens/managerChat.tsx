@@ -1821,7 +1821,7 @@ export function ManagerChat() {
   // payload.source = 'essentials_auction', so the booking sits in their section.
   const addsByDate = React.useMemo(() => {
     const by = new Map<string, Map<string, Map<string, TomorrowPlanEntry>>>();
-    const mgrId = teamQ.data?.managerId;
+    const mgrId = team?.managerId;
     if (!mgrId) return by;
     msgs.forEach((m) => {
       if (m.kind !== 'plan_add') return;
@@ -1838,7 +1838,7 @@ export function ManagerChat() {
       byTr.get(p.trainer_id)!.set(p.client_id, { client_id: p.client_id, name: p.name ?? 'Client', time: p.time, modality: p.modality ?? null, schedule_id: p.schedule_id ?? null, roster: p.schedule_id ? 'created' : 'conflict', ...(auction ? { auction: true } : {}), ...(assigned ? { assigned: true } : {}) });
     });
     return by;
-  }, [msgs, teamQ.data?.managerId, hodId]);
+  }, [msgs, team?.managerId, hodId]);
   const [addFor, setAddFor] = React.useState<{ date: string; trainerId: string; trainerName: string; scheduledIds: string[]; scoreId: string } | null>(null);
   // The add RPC's clash reply for the open Add Session modal (Force create warning), and
   // a busy flag covering the RPC itself (sendM.isPending only covers the chat message).
@@ -1848,7 +1848,7 @@ export function ManagerChat() {
   // request id; REJECTED when a manager decision message does; else PENDING.
   const reqStatus = React.useMemo(() => {
     const map = new Map<string, 'approved' | 'rejected'>();
-    const mgrId = teamQ.data?.managerId;
+    const mgrId = team?.managerId;
     if (!mgrId) return map;
     msgs.forEach((m) => {
       if (m.senderId !== mgrId && m.senderId !== hodId) return;
@@ -1858,13 +1858,13 @@ export function ManagerChat() {
       else if (m.kind === 'plan_reschedule_decision' && m.payload?.approved === false && map.get(rid) !== 'approved') map.set(rid, 'rejected');
     });
     return map;
-  }, [msgs, teamQ.data?.managerId]);
+  }, [msgs, team?.managerId]);
   // Manager time edits: latest plan_time_edit per (date, trainer, client), manager-sent only.
   // Applied ON TOP of a trainer's plan at render, but only when newer than that trainer's
   // plan message — a trainer re-sharing later supersedes older manager tweaks.
   const timeEditsByDate = React.useMemo(() => {
     const by = new Map<string, Map<string, { time: string; modality?: string | null; remark?: string | null; history?: PlanRescheduleHop[] | null; createdAt: string }>>();
-    const mgrId = teamQ.data?.managerId;
+    const mgrId = team?.managerId;
     if (!mgrId) return by;
     msgs.forEach((m) => {
       if (m.kind !== 'plan_time_edit' || (m.senderId !== mgrId && m.senderId !== hodId)) return;
@@ -1874,7 +1874,7 @@ export function ManagerChat() {
       by.get(d)!.set(`${tid}:${cid}`, { time: t, modality: m.payload?.modality ?? null, remark: m.payload?.remark ?? null, history: m.payload?.history ?? null, createdAt: m.createdAt }); // asc order → latest wins
     });
     return by;
-  }, [msgs, teamQ.data?.managerId, hodId]);
+  }, [msgs, team?.managerId, hodId]);
   const [editTime, setEditTime] = React.useState<{ date: string; clientId: string; name: string; trainerId: string; current: string; currentModality: string | null; scheduleId: string | null } | null>(null);
   const [editMod, setEditMod] = React.useState<string | null>(null);
   const [editRemark, setEditRemark] = React.useState('');
