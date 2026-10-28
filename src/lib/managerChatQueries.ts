@@ -107,7 +107,7 @@ export function useMyManagerTeam(enabled: boolean = true) {
 /* ---------- messages ---------- */
 // schedule_id/roster arrive from plan_sync_roster: the entry's linked
 // session_schedule row and how it got there ('created' | 'linked' | 'moved' | 'conflict').
-export type TomorrowPlanEntry = { client_id: string | null; name: string; time: string; modality?: string | null; schedule_id?: string | null; roster?: string | null; auction?: boolean }; // time 'HH:mm'; auction = booked from the Essentials Auction (1 Oct 2026)
+export type TomorrowPlanEntry = { client_id: string | null; name: string; time: string; modality?: string | null; schedule_id?: string | null; roster?: string | null; auction?: boolean; assigned?: boolean }; // time 'HH:mm'; auction = booked from the Essentials Auction (1 Oct 2026); assigned = given by the Essentials manager after the close (28 Oct 2026)
 
 /* Modality options per role + normalizer for the mixed-case session_type values
    that exist in training_sessions ('Strength', 'strength', 'recovery', …). */

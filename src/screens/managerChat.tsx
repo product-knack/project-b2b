@@ -785,7 +785,7 @@ function MergedPlanCard({ date, bySender, team, meId, timeEdits, onEditTime, onR
                       </View>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginLeft: 28 }}>
                         <View style={{ flex: 1, gap: 1.5 }}>
-                          {e.modality ? <Mono style={{ fontSize: 8, letterSpacing: 0.6, color: C.muted2 }}>{e.modality.toUpperCase()}{e.added ? (e.auction ? ' · AUCTION' : ' · ADDED') : ''}</Mono> : e.added ? <Mono style={{ fontSize: 8, letterSpacing: 0.6, color: e.auction ? C.gold : PINK_SOFT }}>{e.auction ? 'WON IN THE ESSENTIALS AUCTION' : 'ADDED BY MANAGER'}</Mono> : null}
+                          {e.modality ? <Mono style={{ fontSize: 8, letterSpacing: 0.6, color: C.muted2 }}>{e.modality.toUpperCase()}{e.added ? (e.auction ? ' · AUCTION' : e.assigned ? ' · ASSIGNED' : ' · ADDED') : ''}</Mono> : e.added ? <Mono style={{ fontSize: 8, letterSpacing: 0.6, color: e.auction || e.assigned ? C.gold : PINK_SOFT }}>{e.auction ? 'WON IN THE ESSENTIALS AUCTION' : e.assigned ? 'ASSIGNED BY THE ESSENTIALS MANAGER' : 'ADDED BY MANAGER'}</Mono> : null}
                           {e.roster === 'conflict' || e.roster === 'plan_expired' ? (
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                               <Mono style={{ fontSize: 8, letterSpacing: 0.6, color: C.red }}>{e.roster === 'plan_expired' ? COVER_CARD_TAG : 'ROSTER CONFLICT · NOT BOOKED'}</Mono>
@@ -1827,12 +1827,15 @@ export function ManagerChat() {
       if (m.kind !== 'plan_add') return;
       const p = m.payload ?? {};
       const auction = p.source === 'essentials_auction' && !!p.trainer_id && m.senderId === p.trainer_id;
-      if (!auction && m.senderId !== mgrId && (!hodId || m.senderId !== hodId)) return;
+      // 28 Oct 2026: the Essentials manager's assignment after the close is posted the same way (as the trainer,
+      // source essentials_assigned); it was dropped here and never reached the card.
+      const assigned = p.source === 'essentials_assigned' && !!p.trainer_id && m.senderId === p.trainer_id;
+      if (!auction && !assigned && m.senderId !== mgrId && (!hodId || m.senderId !== hodId)) return;
       if (!p.date || !p.client_id || !p.trainer_id || !p.time) return;
       if (!by.has(p.date)) by.set(p.date, new Map());
       const byTr = by.get(p.date)!;
       if (!byTr.has(p.trainer_id)) byTr.set(p.trainer_id, new Map());
-      byTr.get(p.trainer_id)!.set(p.client_id, { client_id: p.client_id, name: p.name ?? 'Client', time: p.time, modality: p.modality ?? null, schedule_id: p.schedule_id ?? null, roster: p.schedule_id ? 'created' : 'conflict', ...(auction ? { auction: true } : {}) });
+      byTr.get(p.trainer_id)!.set(p.client_id, { client_id: p.client_id, name: p.name ?? 'Client', time: p.time, modality: p.modality ?? null, schedule_id: p.schedule_id ?? null, roster: p.schedule_id ? 'created' : 'conflict', ...(auction ? { auction: true } : {}), ...(assigned ? { assigned: true } : {}) });
     });
     return by;
   }, [msgs, teamQ.data?.managerId, hodId]);
@@ -2415,7 +2418,7 @@ export function ManagerChat() {
                 <View style={{ borderRadius: 15, overflow: 'hidden', minWidth: 230, backgroundColor: 'rgba(26,20,15,0.92)', borderWidth: 1, borderColor: hexA(PINK, 0.45) }}>
                   <View style={{ height: 2.5, backgroundColor: hexA(PINK, 0.6) }} />
                   <View style={{ padding: 11, gap: 5 }}>
-                    <Mono style={{ fontSize: 9, letterSpacing: 1, color: m.payload?.source === 'essentials_auction' ? C.gold : PINK_SOFT }}>{m.payload?.source === 'essentials_auction' ? 'WON IN THE ESSENTIALS AUCTION' : 'SESSION ADDED BY MANAGER'}</Mono>
+                    <Mono style={{ fontSize: 9, letterSpacing: 1, color: m.payload?.source === 'essentials_auction' || m.payload?.source === 'essentials_assigned' ? C.gold : PINK_SOFT }}>{m.payload?.source === 'essentials_auction' ? 'WON IN THE ESSENTIALS AUCTION' : m.payload?.source === 'essentials_assigned' ? 'ASSIGNED AFTER THE ESSENTIALS AUCTION' : 'SESSION ADDED BY MANAGER'}</Mono>
                     <Body style={{ fontSize: 14, fontFamily: F.bodySemi, color: '#fff' }}>{m.payload?.name ?? 'Client'}</Body>
                     <Mono style={{ fontSize: 10, color: C.muted2 }}>
                       {m.payload?.date ? istDayLabel(m.payload.date) : ''} · {m.payload?.time ? fmt12h(m.payload.time) : ''}{m.payload?.modality ? `  ·  ${m.payload.modality}` : ''} · for {(team.members.find((mm) => mm.id === m.payload?.trainer_id)?.name ?? 'a member').split(' ')[0]}
