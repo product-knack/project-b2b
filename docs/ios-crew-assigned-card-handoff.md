@@ -28,3 +28,15 @@ uses with `team?.managerId` (the team actually on screen; `team` is already defi
 
 No server change. Verify: assign an unsold session from the Essentials Manager page; the member's section on the
 day card shows the client with "ASSIGNED", and the stream shows the gold bubble.
+
+---
+
+## Also 28 Oct 2026: member names on My Crew
+
+Owner: "all trainers' names are not showing in full; check". By design the chips, bubbles, flags chips and the
+@mention picker show the first name. Change: the day card's **section header shows the full name**; everywhere else
+stays first-name, but when two members of one team share a first name the label adds the surname initial
+("Faizan O.", "Faizaan A."). Pure helper `src/lib/crewNames.ts` (`firstWord`, `shortNames(members)`,
+`shortNameFor(map, id, name)`), 9 checks in `tests/rules/crew_names_test.js`; `MergedPlanCard` and `ManagerChat`
+each build the map once with `useMemo` over `team.members`. The @mention token inserted into the message stays the
+first name (the highlighter matches on it).

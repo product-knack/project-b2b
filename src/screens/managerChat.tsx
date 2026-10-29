@@ -29,6 +29,7 @@ import { useClientsLatestVoiceNotes } from '../lib/sessionVoiceQueries';
 import { ListenStatusChip, ListenNowSheet, type ListenNowInfo } from '../components/clientHealthSummaryCard';
 import { useMyListenStatuses } from '../lib/clientHealthSummaryQueries';
 import { friendlyError } from '../lib/friendlyError';
+import { shortNames, shortNameFor } from '../lib/crewNames';
 import { usePlanCover } from '../lib/managerChatQueries';
 import { coverFor, coverBlockedLine, coverReviewLine, coverKicker, coverAction, coverSendBlockedText, coverServerRefusedText, isPlanExpiredResult, planModalityFor, COVER_CTA, COVER_CTA_REVISION, COVER_CARD_TAG, type PlanCoverRow } from '../lib/planCover';
 
@@ -529,6 +530,8 @@ function MergedPlanCard({ date, bySender, team, meId, timeEdits, onEditTime, onR
 }) {
   const dayLab = new Date(date + 'T12:00:00Z').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
   const today = istToday();
+  // Member names (28 Oct 2026): first name, plus the surname initial when two members share it.
+  const shortMap = React.useMemo(() => shortNames(team.members), [team.members]);
   const mode: 'upcoming' | 'live' | 'final' = date > today ? 'upcoming' : date === today ? 'live' : 'final';
   // Current members in team order first (a plan message OR manager-added
   // sessions give a member a section), then any sender who has since left.
@@ -651,7 +654,7 @@ function MergedPlanCard({ date, bySender, team, meId, timeEdits, onEditTime, onR
                 style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 2.5, paddingHorizontal: 7, borderRadius: 999, backgroundColor: hexA(C.red, 0.1), borderWidth: 1, borderColor: hexA(C.red, 0.32) }}
               >
                 <AvatarDot name={mm.name} size={13} />
-                <Text style={{ fontFamily: F.bodySemi, fontSize: 11, color: '#F5C0B5' }}>{mm.name.split(' ')[0]}</Text>
+                <Text style={{ fontFamily: F.bodySemi, fontSize: 11, color: '#F5C0B5' }}>{shortNameFor(shortMap, mm.id, mm.name)}</Text>
                 {onAddSession && mode !== 'final' && !isHodManagedRole(mm.role) ? <Mono style={{ fontSize: 8, color: '#F5C0B5' }}>+</Mono> : null}
               </Pressable>
             ))}
@@ -705,7 +708,7 @@ function MergedPlanCard({ date, bySender, team, meId, timeEdits, onEditTime, onR
               {hideHeader ? null : (
               <Pressable disabled={singleSec} onPress={() => toggleSec(s.id)} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 9, paddingHorizontal: 10, backgroundColor: 'rgba(255,255,255,0.03)', borderBottomWidth: expanded ? 1 : 0, borderBottomColor: 'rgba(255,255,255,0.05)' }}>
                 <AvatarDot name={s.name} size={20} url={team.members.find((mm) => mm.id === s.id)?.avatarUrl} />
-                <Text style={{ fontFamily: F.bodySemi, fontSize: 13.5, color: '#fff' }}>{s.name.split(' ')[0]}</Text>
+                <Text style={{ fontFamily: F.bodySemi, fontSize: 13.5, color: '#fff' }} numberOfLines={1}>{s.name}</Text>
                 {s.isManager ? <Icon name="crown" size={10} color={C.gold} strokeWidth={2.2} /> : null}
                 {/* Role tag: doctor and therapist sections share one card — the
                    label tells them apart (HOD territory either way). */}
@@ -1699,6 +1702,8 @@ export function ManagerChat() {
   const [hodTeamIdx, setHodTeamIdx] = React.useState(0);
   const [hodView, setHodView] = React.useState<'all' | 'team'>('all'); // HOD lands on the All-Physios feed
   const team = teamQ.data ?? (meIsHod ? hodTeams[Math.min(hodTeamIdx, Math.max(0, hodTeams.length - 1))] ?? null : null);
+  // Member names (28 Oct 2026): first name, plus the surname initial when two members share it.
+  const shortMap = React.useMemo(() => shortNames(team?.members ?? []), [team?.members]);
   // Doctor members: HOD controls them, the manager is VIEW-ONLY.
   const doctorIds = React.useMemo(() => new Set((team?.members ?? []).filter((mm) => isHodManagedRole(mm.role)).map((mm) => mm.id)), [team?.members]);
   const msgsQ = useManagerTeamMessages(team?.scoreId ?? null);
@@ -2396,7 +2401,7 @@ export function ManagerChat() {
           <View style={{ flexShrink: 1 }}>
             {!mine && !sameRun ? (
               <Mono style={{ fontSize: 9.5, color: C.muted2, marginLeft: 7, marginBottom: 3 }}>
-                {m.senderName.split(' ')[0].toUpperCase()}
+                {shortNameFor(shortMap, m.senderId, m.senderName).toUpperCase()}
               </Mono>
             ) : null}
             {isUpd ? (
@@ -2510,7 +2515,7 @@ export function ManagerChat() {
           {team.members.map((m) => (
             <View key={m.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 4, paddingHorizontal: 9, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: m.isManager ? hexA(C.gold, 0.4) : 'rgba(255,255,255,0.09)' }}>
               {m.isManager ? <Icon name="crown" size={10} color={C.gold} strokeWidth={2.2} /> : null}
-              <Text style={{ fontFamily: F.bodySemi, fontSize: 10.5, color: m.isManager ? C.gold : C.ink }}>{m.name.split(' ')[0]}{m.id === meId ? ' (you)' : ''}</Text>
+              <Text style={{ fontFamily: F.bodySemi, fontSize: 10.5, color: m.isManager ? C.gold : C.ink }}>{shortNameFor(shortMap, m.id, m.name)}{m.id === meId ? ' (you)' : ''}</Text>
             </View>
           ))}
         </HScroll>
@@ -2677,7 +2682,7 @@ export function ManagerChat() {
                   return (
                     <Pressable key={mm.id} onPress={() => requestAnimationFrame(() => setInput((prev) => prev.replace(/(^|\s)@\w*$/, `$1@${first} `)))} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 5, paddingHorizontal: 10, borderRadius: 999, backgroundColor: hexA(PINK, 0.12), borderWidth: 1, borderColor: hexA(PINK, 0.4) }}>
                       <AvatarDot name={mm.name} size={18} url={mm.avatarUrl} />
-                      <Text style={{ fontFamily: F.bodySemi, fontSize: 11.5, color: '#FBD3E2' }}>@{first}</Text>
+                      <Text style={{ fontFamily: F.bodySemi, fontSize: 11.5, color: '#FBD3E2' }}>@{shortNameFor(shortMap, mm.id, mm.name)}</Text>
                       <Mono style={{ fontSize: 7, letterSpacing: 0.5, color: mm.isManager ? C.gold : C.muted3 }}>{mm.isManager ? 'MGR' : (mm.role ?? 'member').slice(0, 7).toUpperCase()}</Mono>
                     </Pressable>
                   );
