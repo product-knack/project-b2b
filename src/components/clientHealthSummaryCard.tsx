@@ -22,7 +22,7 @@ import {
   TITLES, type Which, type ClientHealthSummaryRow, type WeeklySummary, type ContextSummary,
   durationText, fmtStamp, historyOf, summaryOf, generatedAtOf, hasScript, lastListen, isNewSince,
   listenGate, gateDue, type GateState,
-  listenRuleLine, LISTEN_WHY, LISTEN_CHIP_DUE, LISTEN_CHIP_OK, listenNowLine, gateFromStatus, type ListenStatusRow,
+  listenRuleLine, LISTEN_WHY, LISTEN_CHIP_DUE, LISTEN_CHIP_DUE_SHORT, LISTEN_CHIP_OK, listenNowLine, gateFromStatus, type ListenStatusRow,
   type ListenGate, type HeardMap, listenStillNeeded, listenAllHeard, LISTEN_PROCEED, LISTEN_WAIT,
 } from '../lib/clientHealthSummary';
 
@@ -478,7 +478,7 @@ export { gateDue };
 
 /* ---------- My Crew (27 Oct 2026): the chip on a plan row and the Listen now sheet ---------- */
 /** Red "NOT HEARD · LISTEN NOW" while either summary is due for the signed-in trainer, green "HEARD" otherwise, nothing when none exists. */
-export function ListenStatusChip({ status, onPress }: { status: ListenStatusRow | null | undefined; onPress: () => void }) {
+export function ListenStatusChip({ status, onPress, compact = false }: { status: ListenStatusRow | null | undefined; onPress: () => void; compact?: boolean }) {
   const gate = gateFromStatus(status);
   if (gate.weekly === 'none' && gate.context === 'none') return null;
   const due = gateDue(gate);
@@ -487,7 +487,7 @@ export function ListenStatusChip({ status, onPress }: { status: ListenStatusRow 
     <Pressable onPress={onPress} hitSlop={10} accessibilityRole="button" accessibilityLabel={due ? 'Summaries not heard, listen now' : 'Summaries heard'}
       style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 4, paddingHorizontal: 8, borderRadius: 999, backgroundColor: hexA(col, 0.12), borderWidth: 1, borderColor: hexA(col, 0.45) }}>
       <Icon name={due ? 'alert' : 'checks'} size={9} color={col} strokeWidth={2.2} />
-      <Mono style={{ fontSize: 8, letterSpacing: 0.5, color: col }}>{due ? LISTEN_CHIP_DUE : LISTEN_CHIP_OK}</Mono>
+      <Mono style={{ fontSize: 8, letterSpacing: 0.5, color: col }}>{due ? (compact ? LISTEN_CHIP_DUE_SHORT : LISTEN_CHIP_DUE) : LISTEN_CHIP_OK}</Mono>
     </Pressable>
   );
 }

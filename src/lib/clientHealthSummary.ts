@@ -180,6 +180,8 @@ export const listenRuleLine = (which: Which, state: GateState, clientFirstName?:
 /** My Crew: the chip on a client row and the sentence in the Listen now sheet. */
 export const LISTEN_CHIP_DUE = 'NOT HEARD · LISTEN NOW';
 export const LISTEN_CHIP_OK = 'HEARD';
+/** The short form for crowded rows (Tomorrow's Plan, 30 Oct 2026); the chip's accessibility label keeps the full sense. */
+export const LISTEN_CHIP_DUE_SHORT = 'NOT HEARD';
 export const listenNowLine = (clientFirstName: string | null | undefined, when: 'tomorrow' | 'today' = 'tomorrow'): string =>
   `You have not heard ${(clientFirstName ?? '').trim().split(/\s+/)[0] || 'this client'}'s summaries. You cannot log ${when}'s session without this. Listen now.`;
 
@@ -192,6 +194,11 @@ export type ListenStatusRow = {
   context_generated_at: string | null;
   my_last_weekly_at: string | null;
   my_last_context_at: string | null;
+};
+/** True when the listen chip has something to say (a summary exists for at least one kind). */
+export const listenChipShown = (s: ListenStatusRow | null | undefined, nowMs: number = Date.now()): boolean => {
+  const g = gateFromStatus(s, nowMs);
+  return !(g.weekly === 'none' && g.context === 'none');
 };
 export const gateFromStatus = (s: ListenStatusRow | null | undefined, nowMs: number = Date.now()): ListenGate => {
   const one = (which: Which): GateState => {

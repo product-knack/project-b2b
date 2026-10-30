@@ -320,7 +320,7 @@ export const latestHasPain = (latest: ClientLatestVoice | null | undefined): boo
 
 /** Compact chip on a plan row: "NOTES · 30 SEP" (the client's latest session day with notes);
     red "PAIN · 30 SEP" when a note of that day reported pain or discomfort. */
-export function LatestVoiceChip({ latest, onPress }: { latest: ClientLatestVoice; onPress: () => void }) {
+export function LatestVoiceChip({ latest, onPress, compact = false }: { latest: ClientLatestVoice; onPress: () => void; compact?: boolean }) {
   const n = latest.sessions.reduce((a, s) => a + s.notes.length, 0);
   const pain = latestHasPain(latest);
   const col = pain ? C.red : ACCENT;
@@ -328,7 +328,7 @@ export function LatestVoiceChip({ latest, onPress }: { latest: ClientLatestVoice
     <Pressable hitSlop={10} onPress={onPress} accessibilityRole="button" accessibilityLabel={`Play ${n} shared coach notes from ${dayLabel(latest.day)}${pain ? ', pain or discomfort reported' : ''}`}
       style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 4, paddingHorizontal: 8, borderRadius: 999, backgroundColor: hexA(col, 0.12), borderWidth: 1, borderColor: hexA(col, 0.45) }}>
       <Icon name={pain ? 'alert' : 'mic'} size={9} color={col} strokeWidth={2.2} />
-      <Mono style={{ fontSize: 8, letterSpacing: 0.5, color: col }}>{pain ? 'PAIN' : SN.CREW_CHIP} · {shortDay(latest.day)}</Mono>
+      <Mono style={{ fontSize: 8, letterSpacing: 0.5, color: col }}>{pain ? 'PAIN' : compact ? 'NOTE' : SN.CREW_CHIP} · {shortDay(latest.day)}</Mono>
     </Pressable>
   );
 }

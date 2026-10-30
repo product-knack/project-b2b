@@ -27,6 +27,7 @@ import { EssentialsBadge } from '../components/essentialsBadge';
 import { LatestVoiceChip, LatestVoicePopup, LatestVoiceInfo } from '../components/SessionVoice';
 import { useClientsLatestVoiceNotes } from '../lib/sessionVoiceQueries';
 import { ListenStatusChip, ListenNowSheet, type ListenNowInfo } from '../components/clientHealthSummaryCard';
+import { listenChipShown } from '../lib/clientHealthSummary';
 import { useMyListenStatuses } from '../lib/clientHealthSummaryQueries';
 import { friendlyError } from '../lib/friendlyError';
 import { shortNames, shortNameFor } from '../lib/crewNames';
@@ -708,7 +709,7 @@ function MergedPlanCard({ date, bySender, team, meId, timeEdits, onEditTime, onR
               {hideHeader ? null : (
               <Pressable disabled={singleSec} onPress={() => toggleSec(s.id)} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 9, paddingHorizontal: 10, backgroundColor: 'rgba(255,255,255,0.03)', borderBottomWidth: expanded ? 1 : 0, borderBottomColor: 'rgba(255,255,255,0.05)' }}>
                 <AvatarDot name={s.name} size={20} url={team.members.find((mm) => mm.id === s.id)?.avatarUrl} />
-                <Text style={{ fontFamily: F.bodySemi, fontSize: 13.5, color: '#fff' }} numberOfLines={1}>{s.name}</Text>
+                <Text style={{ fontFamily: F.bodySemi, fontSize: 13.5, color: '#fff', flexShrink: 1 }} numberOfLines={1}>{s.name}</Text>
                 {s.isManager ? <Icon name="crown" size={10} color={C.gold} strokeWidth={2.2} /> : null}
                 {/* Role tag: doctor and therapist sections share one card — the
                    label tells them apart (HOD territory either way). */}
@@ -786,11 +787,11 @@ function MergedPlanCard({ date, bySender, team, meId, timeEdits, onEditTime, onR
                           </View>
                         ) : null}
                       </View>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginLeft: 28 }}>
-                        <View style={{ flex: 1, gap: 1.5 }}>
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginLeft: 28 }}>
+                        <View style={{ flexGrow: 1, flexShrink: 1, minWidth: 120, gap: 1.5 }}>
                           {e.modality ? <Mono style={{ fontSize: 8, letterSpacing: 0.6, color: C.muted2 }}>{e.modality.toUpperCase()}{e.added ? (e.auction ? ' · AUCTION' : e.assigned ? ' · ASSIGNED' : ' · ADDED') : ''}</Mono> : e.added ? <Mono style={{ fontSize: 8, letterSpacing: 0.6, color: e.auction || e.assigned ? C.gold : PINK_SOFT }}>{e.auction ? 'WON IN THE ESSENTIALS AUCTION' : e.assigned ? 'ASSIGNED BY THE ESSENTIALS MANAGER' : 'ADDED BY MANAGER'}</Mono> : null}
                           {e.roster === 'conflict' || e.roster === 'plan_expired' ? (
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                            <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
                               <Mono style={{ fontSize: 8, letterSpacing: 0.6, color: C.red }}>{e.roster === 'plan_expired' ? COVER_CARD_TAG : 'ROSTER CONFLICT · NOT BOOKED'}</Mono>
                               {onRetryBooking && e.client_id && (s.id === meId || team.isManager || meIsHod) ? (
                                 <Pressable
@@ -1557,27 +1558,23 @@ function TomorrowPlanSheet({ visible, onClose, onSend, sending, existing, addOnl
     const verdict = on && !locked ? coverFor(cover, r.clientId, cur?.modality) : { blocked: false, row: null };
     // Options always include the row's current value even if it's off-list.
     const rowMods = cur?.modality && !modalityOptions.includes(cur.modality) ? [cur.modality, ...modalityOptions] : modalityOptions;
+    const hasChips = !!latestVoice[r.clientId] || listenChipShown(listenById[r.clientId]) || !!cycles[r.clientId] || !!essentials[r.clientId] || !!protocols[r.clientId];
     return (
       <Animated.View key={r.clientId} style={{ borderRadius: 13, backgroundColor: on ? hexA(C.gold, 0.07) : 'rgba(0,0,0,0.22)', borderWidth: 1, borderColor: locked ? hexA(C.gold, 0.3) : on ? hexA(C.gold, 0.35) : 'rgba(255,255,255,0.07)', transform: [{ translateX: locked && shakeId === r.clientId ? shakeX : 0 }] }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 11 }}>
-          <Pressable onPress={() => toggle(r.clientId, r.slotTime, r.lastModality)} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, padding: 11, paddingBottom: hasChips ? 5 : 11 }}>
+          <Pressable onPress={() => toggle(r.clientId, r.slotTime, r.lastModality)} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
             <View style={{ width: 21, height: 21, borderRadius: 7, alignItems: 'center', justifyContent: 'center', borderWidth: locked ? 1 : on ? 0 : 2, borderColor: locked ? hexA(C.gold, 0.5) : 'rgba(255,255,255,0.2)', backgroundColor: locked ? hexA(C.gold, 0.14) : on ? C.gold : 'transparent' }}>
               {locked
                 ? <Icon path="M7 11V7a5 5 0 0 1 10 0v4M19 11H5a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2Z" size={11} color={C.gold} strokeWidth={2.2} />
                 : on ? <Icon path="M20 6 9 17l-5-5" size={12} color="#1A1206" strokeWidth={3.2} /> : null}
             </View>
             <AvatarDot name={r.name} size={26} />
-            <View style={{ flex: 1 }}>
+            <View style={{ flex: 1, minWidth: 0 }}>
               <Body style={{ fontSize: 13.5, fontFamily: F.bodySemi, color: '#fff' }} numberOfLines={1}>{r.name}</Body>
               {locked ? <Mono style={{ fontSize: 8.5, color: C.gold, marginTop: 1 }}>LOCKED · ASK YOUR MANAGER TO EDIT</Mono>
                 : r.slotTime ? <Mono style={{ fontSize: 8.5, color: C.muted3, marginTop: 1 }}>ROSTER {fmt12h(r.slotTime)}</Mono> : null}
             </View>
           </Pressable>
-          {latestVoice[r.clientId] ? <LatestVoiceChip latest={latestVoice[r.clientId]} onPress={() => setVoiceFor({ name: r.name, latest: latestVoice[r.clientId] })} /> : null}
-          <ListenStatusChip status={listenById[r.clientId]} onPress={() => setListenFor({ id: r.clientId, name: r.name })} />
-          {cycles[r.clientId] ? <CycleChip cycle={cycles[r.clientId]} onPress={() => setCycleFor({ name: r.name, cycle: cycles[r.clientId] })} /> : null}
-          {essentials[r.clientId] ? <EssentialsBadge status={essentials[r.clientId]} compact /> : null}
-          {protocols[r.clientId] ? <ProtocolChip onPress={() => setProtoFor({ name: r.name, proto: protocols[r.clientId] })} /> : null}
           {on ? (
             <Pressable onPress={() => { if (locked) { shakeLocked(r.clientId); return; } setModFor(modFor === r.clientId ? null : r.clientId); setTimeFor(null); }} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 999, backgroundColor: hexA(PINK, locked ? 0.06 : 0.12), borderWidth: 1, borderColor: hexA(PINK, locked ? 0.2 : 0.4), opacity: locked ? 0.7 : 1 }}>
               <Text style={{ fontFamily: F.bodySemi, fontSize: 10.5, color: PINK_SOFT }} numberOfLines={1}>{cur?.modality ?? 'Modality'}</Text>
@@ -1591,6 +1588,17 @@ function TomorrowPlanSheet({ visible, onClose, onSend, sending, existing, addOnl
             </Pressable>
           ) : null}
         </View>
+        {/* 30 Oct 2026: the chips on their own line, wrapping, under the avatar. On one line they squeezed the name to
+            "…", drew over the checkbox and avatar, and pushed the modality and time buttons off the screen. */}
+        {hasChips ? (
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, paddingLeft: 42, paddingRight: 11, paddingBottom: 10 }}>
+              {latestVoice[r.clientId] ? <LatestVoiceChip compact latest={latestVoice[r.clientId]} onPress={() => setVoiceFor({ name: r.name, latest: latestVoice[r.clientId] })} /> : null}
+              <ListenStatusChip compact status={listenById[r.clientId]} onPress={() => setListenFor({ id: r.clientId, name: r.name })} />
+              {cycles[r.clientId] ? <CycleChip cycle={cycles[r.clientId]} onPress={() => setCycleFor({ name: r.name, cycle: cycles[r.clientId] })} /> : null}
+              {essentials[r.clientId] ? <EssentialsBadge status={essentials[r.clientId]} compact /> : null}
+              {protocols[r.clientId] ? <ProtocolChip onPress={() => setProtoFor({ name: r.name, proto: protocols[r.clientId] })} /> : null}
+          </View>
+        ) : null}
         {on && timeFor === r.clientId ? (
           <View style={{ paddingHorizontal: 11, paddingBottom: 10 }}>
             <HScroll gap={6}>
@@ -1652,7 +1660,7 @@ function TomorrowPlanSheet({ visible, onClose, onSend, sending, existing, addOnl
               <Icon name="close" size={14} color="#B8B2AC" strokeWidth={2.3} />
             </Pressable>
           </View>
-          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" nestedScrollEnabled contentContainerStyle={{ gap: 7, paddingBottom: 100 }}>
+          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" nestedScrollEnabled contentContainerStyle={{ gap: 7, paddingBottom: 100 + insets.bottom }}>
             {composeQ.isLoading ? (
               <View style={{ alignItems: 'center', paddingVertical: 26, gap: 10 }}>
                 <ActivityIndicator color={C.gold} />
@@ -1664,7 +1672,7 @@ function TomorrowPlanSheet({ visible, onClose, onSend, sending, existing, addOnl
               <Body style={{ fontSize: 12.5, color: C.muted3, textAlign: 'center', paddingVertical: 20 }}>No active clients in your book yet.</Body>
             ) : rows.map(renderRow)}
           </ScrollView>
-          <View style={{ position: 'absolute', left: 18, right: 18, bottom: insets.bottom + 12 }}>
+          <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 18, paddingTop: 10, paddingBottom: insets.bottom + 12, backgroundColor: '#0E0A09', borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)' }}>
             <Pressable onPress={send} disabled={!count || sending || (addOnly && newCount === 0)} style={{ opacity: !count || sending || (addOnly && newCount === 0) ? 0.5 : 1 }}>
               <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14, borderRadius: 14 }}>
                 <Icon name="send" size={15} color="#fff" strokeWidth={2.4} />

@@ -100,5 +100,10 @@ eq('heard: both heard to the end', R.listenAllHeard(both, { weekly: true, contex
 eq('heard: only the weekly was due at open', R.listenAllHeard({ weekly: 'due', context: 'done' }, { weekly: true, context: false }), true);
 eq('heard: a missing summary is never required', R.listenAllHeard({ weekly: 'none', context: 'due' }, { weekly: false, context: true }), true);
 eq('button copy', [R.LISTEN_PROCEED, R.LISTEN_WAIT], ['Proceed to workout', 'Listen first']);
+// Tomorrow's Plan row chips (30 Oct 2026): the chip shows when any summary exists; the short label for crowded rows
+eq('listen chip shown: both built', R.listenChipShown(st, NOW), true);
+eq('listen chip hidden: nothing built', R.listenChipShown({ ...st, has_weekly: false, has_context: false }, NOW), false);
+eq('listen chip shown: only the context built', R.listenChipShown({ ...st, has_weekly: false }, NOW), true);
+eq('short label', R.LISTEN_CHIP_DUE_SHORT, 'NOT HEARD');
 console.log(fails ? `${fails} FAILED` : 'ALL PASS');
 process.exit(fails ? 1 : 0);
