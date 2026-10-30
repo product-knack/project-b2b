@@ -37,7 +37,14 @@ eq('identifier-looking text falls back', F.friendlyError(E('essentials_weeks row
 eq('custom fallback', F.friendlyError(E('[object Object]'), 'Could not save the note. Try again.'), 'Could not save the note. Try again.');
 eq('empty error', [F.friendlyError(null), F.friendlyError(new Error('')), F.friendlyError(undefined, 'Try again.')], [F.FRIENDLY_FALLBACK, F.FRIENDLY_FALLBACK, 'Try again.']);
 eq('string input', F.friendlyError('permission denied for table clients'), F.NOT_ALLOWED);
-eq('too long falls back', F.friendlyError(E('a '.repeat(150) + 'sentence')), F.FRIENDLY_FALLBACK);
+// 30 Oct 2026: the expired-plan refusal from plan_manager_add_session (P0001) reaches the trainer word for word
+const coverPast = "Sadhvi's Strength plan ran out on 30 Oct 2026. The session was not added to the roster. Make a new plan and get it approved first.";
+const coverLong = "Shubhangini's Aqua Aerobics plan runs out on 30 Oct 2026, so it does not cover the 30 Oct session. The session was not added to the roster. Make a new plan and get it approved first.";
+eq('expired plan refusal kept', [F.friendlyError(E(coverPast, 'P0001')), F.friendlyError(E(coverLong, 'P0001'))], [coverPast, coverLong]);
+// 30 Oct 2026: words of E plus 4 letters are English, not error codes; capital codes still fall back
+eq('E words are not codes', F.friendlyError(E('Essentials sessions expired every evening.')), 'Essentials sessions expired every evening.');
+eq('capital error code falls back', F.friendlyError(E('EPIPE write after end')), F.FRIENDLY_FALLBACK);
+eq('too long falls back',F.friendlyError(E('a '.repeat(150) + 'sentence')), F.FRIENDLY_FALLBACK);
 // standing rule: no dashes in any constant
 const all = Object.values(F).filter((v) => typeof v === 'string').join(' ');
 eq('no dashes in the copy', /[–—]|\s-\s/.test(all), false);

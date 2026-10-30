@@ -132,6 +132,15 @@ export const coverServerRefusedText = (o: { clientFirst: string; modality: strin
   return `${o.clientFirst}'s ${o.modality || 'training'} plan ${day ? `expires on ${day}` : 'has expired'}. The session was not added to the roster. Make a new plan and get it approved, then retry.`;
 };
 
+/**
+ * True for the server's refusal sentence (30 Oct 2026, hub-track 20261030190000): plan_manager_add_session raises
+ * "Sadhvi's Strength plan ran out on 30 Oct 2026. The session was not added to the roster. Make a new plan and get
+ * it approved first." instead of answering plan_expired, so the Add alert can be titled "Plan expired". The server
+ * says "ran out" / "runs out" because builds before this fix took "expired" for a system error code.
+ */
+export const isPlanCoverRefusal = (message: string | null | undefined): boolean =>
+  /\bplan (ran out|runs out|has run out|expired|expires|has expired)\b[\s\S]*not added to the roster/i.test(String(message ?? ''));
+
 /** The day card tag for an entry the server refused. */
 export const COVER_CARD_TAG = 'PLAN EXPIRED · NOT BOOKED';
 

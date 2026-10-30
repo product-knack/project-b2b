@@ -31,7 +31,10 @@ const rawOf = (e: unknown): { msg: string; code: string; name: string } => {
 
 /** True when the text reads like code or a database message, not like a sentence for a person. */
 export const looksTechnical = (msg: string): boolean =>
-  /[A-Za-z]+Error\b|\berror:|\bnull\b|\bundefined\b|\bNaN\b|[{}\[\]]|\[object|\bat\s+\w+\s*\(|->|::|\bselect\b|\binsert\b|\bupsert\b|\bdelete from\b|\bwhere\b|\bpg_|\b[a-z]+_[a-z_]+\b|"[a-z_]+"|status code|\bhttp\b|\bAPI\b|\bRPC\b|\bSQL\b|\bRLS\b|\bjson\b|\bjsonb\b|\buuid\b|\brelation\b|\bschema\b|\bconstraint\b|\bviolates\b|\bsyntax\b|\bfetch\b|\bsocket\b|\bE[A-Z]{4,}\b|\bstack\b|\btoken\b|\bJWT\b|\bpayload\b|\bquery\b|\bcolumn\b|\btable\b/i.test(msg);
+  /[A-Za-z]+Error\b|\berror:|\bnull\b|\bundefined\b|\bNaN\b|[{}\[\]]|\[object|\bat\s+\w+\s*\(|->|::|\bselect\b|\binsert\b|\bupsert\b|\bdelete from\b|\bwhere\b|\bpg_|\b[a-z]+_[a-z_]+\b|"[a-z_]+"|status code|\bhttp\b|\bAPI\b|\bRPC\b|\bSQL\b|\bRLS\b|\bjson\b|\bjsonb\b|\buuid\b|\brelation\b|\bschema\b|\bconstraint\b|\bviolates\b|\bsyntax\b|\bfetch\b|\bsocket\b|\bstack\b|\btoken\b|\bJWT\b|\bpayload\b|\bquery\b|\bcolumn\b|\btable\b/i.test(msg)
+  // System error codes (ECONNREFUSED, EPIPE) in capitals only. Inside the case-blind test above this matched every
+  // English word of E plus 4 letters ("expired", "Essentials", "every"), so those plain sentences fell back (30 Oct 2026).
+  || /\bE[A-Z]{4,}\b/.test(msg);
 
 /** Strips a code prefix like "PLAN_LIMIT: " or "ESSENTIALS_LOCKED: " and tidies the dash rule. */
 const tidy = (s: string): string =>

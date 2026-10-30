@@ -105,3 +105,54 @@ modalityLabel, expiresAt})`, and the button from `coverAction`: Create plan (`on
 5. Manager Add Session on the same client + Strength: Add session disabled, the box shows; Yoga (never planned)
    adds normally.
 6. `node tests/rules/plan_cover_test.js` → 27 PASS.
+
+## 8. Update 30 Oct 2026: the exact reason on every build
+Found with Sadhvi Aggarwal: Sagar added her 5:30 PM session with Sahil Tanwar at 10:18 AM; her Strength plan ran
+out at 3:59 PM that day, the server answered `plan_expired`, and his older build took that for a success, so the
+card showed the entry and the roster had nothing. Hub-track `20261030190000_plan_expired_notice.sql` (the owner runs
+it) changes the server, and two small app changes follow.
+
+### 8.1 Server (no iOS work, but iOS sees it)
+- `plan_manager_add_session` no longer answers `{result: 'plan_expired'}`. It **raises** a plain sentence (error code
+  `P0001`), for example:
+  - "Sadhvi's Strength plan ran out on 30 Oct 2026. The session was not added to the roster. Make a new plan and get it approved first."
+  - "Sadhvi's Strength plan runs out on 30 Oct 2026, so it does not cover the 30 Oct session. The session was not added to the roster. Make a new plan and get it approved first."
+  - A first name of E plus 4 or more letters becomes "This client's" (see 8.3).
+  Keep the `plan_expired` branch in the code for safety, but the error path is now the one that runs.
+- Members get a push when a shared day plan has refused entries: title "Session not added to your roster" (or
+  "2 sessions not added to your roster"), body the sentence(s) + "It is added to your roster the moment the new plan
+  is approved.", data `{type: 'crew_plan_expired', route: 'home', date}`.
+- When the new plan is approved the server books the refused entries itself and pushes "Session added to your
+  roster" with "Sadhvi's Strength plan is approved. The 31 Oct 5:30 PM session is now on your roster.", data
+  `{type: 'crew_plan_booked', route: 'home', client_id, date, schedule_id}`. Both pushes open the home screen (any
+  `data.route` already does on Android).
+- `plan_sync_roster` is unchanged: the member's Send still gets `plan_expired` per entry.
+
+### 8.2 `planCover.ts` (copy byte for byte) + its test
+New export:
+```ts
+export const isPlanCoverRefusal = (message: string | null | undefined): boolean =>
+  /\bplan (ran out|runs out|has run out|expired|expires|has expired)\b[\s\S]*not added to the roster/i.test(String(message ?? ''));
+```
+In the manager's Add Session save (`saveAdd`), the error branch becomes:
+```ts
+if (error) { const msg = friendlyError(error); Alert.alert(isPlanCoverRefusal(msg) ? 'Plan expired' : 'Add failed', msg); return; }
+```
+Add `isPlanCoverRefusal` to the `../lib/planCover` import.
+
+### 8.3 `friendlyError.ts` bug (copy byte for byte) + its test
+`looksTechnical` had `\bE[A-Z]{4,}\b` (meant for ECONNREFUSED, EPIPE) inside the case-blind `/i` pattern, so every
+word of E plus 4 or more letters ("expired", "Essentials", "every", "Elena") counted as code and the person saw
+"Something went wrong. Please try again." instead of the server's sentence. The fix takes it out of the `/i` test:
+```ts
+export const looksTechnical = (msg: string): boolean =>
+  /...the same list without \bE[A-Z]{4,}\b.../i.test(msg)
+  || /\bE[A-Z]{4,}\b/.test(msg);
+```
+The server avoids those words for phones that have not updated, which is why it says "ran out".
+
+### 8.4 Verify
+1. `node tests/rules/plan_cover_test.js` and `node tests/rules/friendly_error_test.js`: ALL PASS.
+2. As a manager, Add Session for a client whose Strength plan ran out, with the PLAN EXPIRED box bypassed (or on a
+   phone whose cover read failed): the alert is titled "Plan expired" with the sentence above, nothing is posted.
+3. An Essentials refusal sentence (for example from a won session) now shows word for word, not the generic line.

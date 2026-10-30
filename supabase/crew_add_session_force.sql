@@ -1,4 +1,9 @@
 -- ============ My Crew: manager Add Session, Force create over a client clash ============
+-- DO NOT RE-RUN (30 Oct 2026). This is the 23 Sep 2026 text. The live function is in hub-track
+-- supabase/migrations/20261030190000_plan_expired_notice.sql: the same body plus the expired-plan
+-- gate (20261028100000), which now refuses with a plain sentence ("Sadhvi's Strength plan expired
+-- on 30 Oct 2026. The session was not added to the roster. Make a new plan and get it approved
+-- first."). Running this file would remove that gate.
 -- 23 Sep 2026. plan_manager_add_session answered {result:'conflict'} and stopped whenever
 -- the client already had an ACTIVE session at that exact datetime with another trainer
 -- (unique index uniq_session_schedule_client_datetime_active on (client_id,

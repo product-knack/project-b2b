@@ -52,7 +52,13 @@ eq('send blocked', P.coverSendBlockedText(['Aarav', 'Meera']), 'Aarav, Meera: th
 eq('server refused', P.coverServerRefusedText({ clientFirst: 'Aarav', modality: 'Strength', expiresAt: '2026-10-28T16:30:00+00:00' }),
   "Aarav's Strength plan expires on 28 Oct 2026. The session was not added to the roster. Make a new plan and get it approved, then retry.");
 eq('result flag', [P.isPlanExpiredResult({ result: 'plan_expired' }), P.isPlanExpiredResult({ result: 'created' }), P.isPlanExpiredResult(null)], [true, false, false]);
-eq('missing function', [P.isPlanCoverMissing('PGRST202: Could not find the function public.get_plan_cover'), P.isPlanCoverMissing('permission denied')], [true, false]);
+eq('server refusal sentence', [
+  P.isPlanCoverRefusal("Sadhvi's Strength plan ran out on 30 Oct 2026. The session was not added to the roster. Make a new plan and get it approved first."),
+  P.isPlanCoverRefusal("Sadhvi's Strength plan runs out on 30 Oct 2026, so it does not cover the 30 Oct session. The session was not added to the roster. Make a new plan and get it approved first."),
+  P.isPlanCoverRefusal("This client's Yoga plan has run out. The session was not added to the roster. Make a new plan and get it approved first."),
+  P.isPlanCoverRefusal('Something went wrong. Please try again.'),
+  P.isPlanCoverRefusal(null)], [true, true, true, false, false]);
+eq('missing function',[P.isPlanCoverMissing('PGRST202: Could not find the function public.get_plan_cover'), P.isPlanCoverMissing('permission denied')], [true, false]);
 
 // 5. Create Plan modality
 eq('plan modality: Strength', P.planModalityFor('Strength'), 'Strength Training');

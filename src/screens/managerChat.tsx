@@ -32,7 +32,7 @@ import { useMyListenStatuses } from '../lib/clientHealthSummaryQueries';
 import { friendlyError } from '../lib/friendlyError';
 import { shortNames, shortNameFor } from '../lib/crewNames';
 import { usePlanCover } from '../lib/managerChatQueries';
-import { coverFor, coverBlockedLine, coverReviewLine, coverKicker, coverAction, coverSendBlockedText, coverServerRefusedText, isPlanExpiredResult, planModalityFor, COVER_CTA, COVER_CTA_REVISION, COVER_CARD_TAG, type PlanCoverRow } from '../lib/planCover';
+import { coverFor, coverBlockedLine, coverReviewLine, coverKicker, coverAction, coverSendBlockedText, coverServerRefusedText, isPlanExpiredResult, isPlanCoverRefusal, planModalityFor, COVER_CTA, COVER_CTA_REVISION, COVER_CARD_TAG, type PlanCoverRow } from '../lib/planCover';
 
 /* "My Crew" identity: PINK (user pick). Semantic colors stay: green =
    done/approved, red = missed/rejected, gold = plans/times. */
@@ -2068,7 +2068,7 @@ export function ManagerChat() {
           p_score: addFor.scoreId, p_trainer: addFor.trainerId, p_client: clientId,
           p_date: addFor.date, p_time: time, p_modality: modality, ...(force ? { p_force: true } : {}),
         });
-        if (error) { Alert.alert('Add failed', friendlyError(error)); return; }
+        if (error) { const msg = friendlyError(error); Alert.alert(isPlanCoverRefusal(msg) ? 'Plan expired' : 'Add failed', msg); return; }
         const res = data as any;
         if (res?.result === 'conflict') {
           if (res.force_blocked === 'logged') {
