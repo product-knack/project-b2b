@@ -32,7 +32,8 @@ export const LOGO_URL = 'https://passport.oddsfitness.com/lovable-uploads/5a7e1b
 /** Room for the body between the patient block (top 447) and the signature rule (999), less a gap. */
 const BODY_MAX_H = 538;
 
-export const FREQUENCY_TEXT: Record<string, string> = { OD: 'once daily', BD: 'twice daily', TDS: 'three times daily', QID: 'four times daily', HS: 'at bedtime', SOS: 'as needed' };
+// Weekly / Monthly / Alternate days (30 Oct 2026): the web panel stores them as these words; same wording as the web sheet.
+export const FREQUENCY_TEXT: Record<string, string> = { OD: 'once daily', BD: 'twice daily', TDS: 'three times daily', QID: 'four times daily', HS: 'at bedtime', SOS: 'as needed', Weekly: 'once a week', Monthly: 'once a month', 'Alternate days': 'on alternate days' };
 
 const esc = (s: unknown): string => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string));
 
@@ -63,18 +64,28 @@ export const medicineFields = (m: RxMedicineLine): MedicineField[] => {
   return fields.filter((f) => f.value !== '');
 };
 /** SCHEDULE column as the sample words it. */
+// 30 Oct 2026: only the daily codes are DAILY. Before, every other frequency fell to DAILY, so a weekly
+// Mounjaro injection or a monthly vitamin D printed as DAILY on the app's PDF. A frequency this list does not
+// know prints as its own words in capitals instead of a wrong DAILY.
 export const scheduleLabel = (m: RxMedicineLine): string => {
   switch (m.frequency) {
     case 'SOS': return 'AS NEEDED';
     case 'HS': return 'NIGHTLY';
-    default: return m.frequency ? 'DAILY' : '';
+    case 'OD':
+    case 'BD':
+    case 'TDS':
+    case 'QID': return 'DAILY';
+    case 'Weekly': return 'WEEKLY';
+    case 'Monthly': return 'MONTHLY';
+    case 'Alternate days': return 'ALTERNATE DAYS';
+    default: return (m.frequency || '').trim().toUpperCase();
   }
 };
 /** INSTRUCTIONS column: the doctor's own note, else one sentence from dose, frequency, timing and duration. */
 export const instructionText = (m: RxMedicineLine): string => {
   const own = (m.instruction || '').trim();
   if (own) return own;
-  const times: Record<string, string> = { OD: 'Once a day', BD: 'Two times a day', TDS: 'Three times a day', QID: 'Four times a day', HS: 'At bedtime', SOS: 'When needed' };
+  const times: Record<string, string> = { OD: 'Once a day', BD: 'Two times a day', TDS: 'Three times a day', QID: 'Four times a day', HS: 'At bedtime', SOS: 'When needed', Weekly: 'Once a week', Monthly: 'Once a month', 'Alternate days': 'On alternate days' };
   const timing = (m.timing || '').trim();
   const when = /any time/i.test(timing) ? '' : /empty/i.test(timing) ? 'on an empty stomach' : /early/i.test(timing) ? 'early in the morning' : timing.toLowerCase();
   const duration = m.duration_value != null && String(m.duration_value) !== '' ? `for ${m.duration_value} ${m.duration_unit}` : '';

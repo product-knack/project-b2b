@@ -150,3 +150,14 @@ Open `meet_url` in a full-screen `react-native-webview` with `mediaPlaybackRequi
 - Complete writes `status` only; the CRM's next follow-up and the AI generation are independent of it.
 - `ai_notes` and `meeting_summary` have no history; a regeneration overwrites. The doctor app never regenerates.
 - The room itself trusts the route, not the viewer; the native Join only opens the prebuilt link, so it never grants the host code.
+
+## Update 30 Oct 2026: prescription frequencies and the PDF sheet
+
+**Fixed in code for build 44** (owner asked for it in code, not only here; `src/lib/prescriptionSheet.ts`, test `tests/rules/prescription_schedule_test.js`, 13 cases):
+- `scheduleLabel`: only OD / BD / TDS / QID print DAILY. Weekly, Monthly and Alternate days print WEEKLY, MONTHLY, ALTERNATE DAYS; any other word prints itself in capitals. Before, every frequency the list did not know printed **DAILY**, so a weekly Mounjaro read DAILY on the app's PDF.
+- `FREQUENCY_TEXT` and `instructionText` word the three ("once a week", "once a month", "on alternate days").
+
+**Still for the app session** (the web did these on 30 Oct):
+1. `src/screens/consultantCalls.tsx` FREQUENCIES: add 'Weekly', 'Monthly', 'Alternate days' after 'HS' (stored as those words, no SQL).
+2. Sheet DATE: the consultation day of the slot (`consultation_date`), not `finalized_at || date`; when the last save fell on a later IST day, a small "Updated D Mon YYYY" line under the date (web `sheetDates` in `src/components/doctor/prescriptionPdf.ts`).
+3. INSTRUCTIONS: the doctor's instruction AND the duration ("Subcutaneous injection, for 3 weeks"); an instruction that already names a duration prints as written (web `instructionCell`). The app's `instructionText` still returns the instruction alone when there is one.
