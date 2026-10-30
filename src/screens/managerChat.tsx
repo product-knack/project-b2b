@@ -1592,11 +1592,11 @@ function TomorrowPlanSheet({ visible, onClose, onSend, sending, existing, addOnl
             "…", drew over the checkbox and avatar, and pushed the modality and time buttons off the screen. */}
         {hasChips ? (
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, paddingLeft: 42, paddingRight: 11, paddingBottom: 10 }}>
-              {latestVoice[r.clientId] ? <LatestVoiceChip compact latest={latestVoice[r.clientId]} onPress={() => setVoiceFor({ name: r.name, latest: latestVoice[r.clientId] })} /> : null}
-              <ListenStatusChip compact status={listenById[r.clientId]} onPress={() => setListenFor({ id: r.clientId, name: r.name })} />
-              {cycles[r.clientId] ? <CycleChip cycle={cycles[r.clientId]} onPress={() => setCycleFor({ name: r.name, cycle: cycles[r.clientId] })} /> : null}
-              {essentials[r.clientId] ? <EssentialsBadge status={essentials[r.clientId]} compact /> : null}
-              {protocols[r.clientId] ? <ProtocolChip onPress={() => setProtoFor({ name: r.name, proto: protocols[r.clientId] })} /> : null}
+              {latestVoice[r.clientId] ? <LatestVoiceChip compact latest={latestVoice[r.clientId]} onPress={() => setVoiceFor({ name: r.name, latest: latestVoice[r.clientId] })} /> : null}
+              <ListenStatusChip compact status={listenById[r.clientId]} onPress={() => setListenFor({ id: r.clientId, name: r.name })} />
+              {cycles[r.clientId] ? <CycleChip cycle={cycles[r.clientId]} onPress={() => setCycleFor({ name: r.name, cycle: cycles[r.clientId] })} /> : null}
+              {essentials[r.clientId] ? <EssentialsBadge status={essentials[r.clientId]} compact /> : null}
+              {protocols[r.clientId] ? <ProtocolChip onPress={() => setProtoFor({ name: r.name, proto: protocols[r.clientId] })} /> : null}
           </View>
         ) : null}
         {on && timeFor === r.clientId ? (
