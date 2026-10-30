@@ -1,33 +1,33 @@
-# Client overdue fee: Android handoff (30 Oct 2026)
+# New policy (pause allowance + Professional Holding Fee): Android staff app handoff (30 Oct 2026)
 
-Built on the web and the database on 30 Oct 2026 (hub-track migration `20261030120000_client_overdue_fee.sql`, feature file `b2b/docs/features/web/admin/client-overdue.md`). Nothing in this app has been changed. This note lists what the app needs so it says the same thing as the web.
+Replaces the first version of this file (93d8316, the 22-Oct "overdue fee" draft that was never run). Built on the web and the database on 30 Oct 2026: hub-track migrations `20261030130000_new_policy_pause_allowance.sql` and `20261030140000_professional_holding_fee.sql`; feature file `b2b/docs/features/web/admin/new-policy.md`; plan `b2b/docs/plans/new-policy-pause-payment-2026-10-30.md`. Nothing in this app has been changed. The client app has its own file: `b2c-pause-policy-handoff.md`.
 
-## The rule (server, nothing to compute in the app)
-- Clients onboarded on or after 22 Oct 2026 (`clients.payment_date`) whose package ends without a renewal owe Rs 800 a day, at most 7 days (Rs 5,600). Day 1 is the package end date. Paused days are skipped. A renewal stops it (the renewal day is not charged). A client marked inactive is frozen at that day. Essentials, Trial, Influencer and Staff are left out.
-- Couple: only the partner who paid sees it. Odds generation: only the family admin; members never.
-- After day 7, while unpaid and not renewed, new sessions cannot be booked for the client, the partner or the family members.
+## The rules (server, nothing to compute in the app)
+- Only accounts on the new policy (`clients.new_policy_adoption` on the card that holds the package; a couple follows the paying partner, a family its admin). Essentials, Trial, Influencer, Staff are outside it.
+- Pause allowance per package: 1 month 0, 2 = 7, 3 = 15, 4 = 20, 5 = 25, 6 = 30, 8 = 40, 12 = 60 days (5 a month from 3 months for other lengths). Paused days move the package end date. Unused days expire.
+- From the package end date until a renewal is recorded: no new bookings or session logs dated on or after the end date.
+- Holding fee: Rs 800 a day per professional reserved (trainer, therapist, physiotherapist; each person once; at least 1), at most 7 days, list frozen on day 1; renewal stops it; admin settles (paid, added to renewal, waived with a reason).
+- Day 8 without a renewal: the programme is put on hold (a pause row with `source = system_hold`), the professionals' `trainer_clients` rows are switched off, the CRM is told to assign a trainer when the client renews.
 
-## 1. Booking refusals (trainer app, every build that books sessions) **needed**
-- Any `session_schedule` insert by a trainer, manager, CRM or ops for a held client now fails with
-  `OVERDUE_LOCKED: <Name>'s package ended on 22 Nov 2026 and the overdue of Rs 5,600 for 7 days is unpaid, so new sessions cannot be booked. Ask the admin to record the renewal or mark the overdue paid.`
-- Show the sentence after `OVERDUE_LOCKED: ` through `friendlyError` (plain-English rule); never retry it. Admin and super admin bookings pass.
-- Sessions already booked can still be logged; workout logging is not affected.
+## 1. Messages the trainer / manager / CRM app will now get **needed**
+Show the sentence after the code through `friendlyError`; never retry these.
+- `PACKAGE_ENDED: <Name>'s package ended on 22 Nov 2026, so sessions from that day cannot be booked until the renewal is recorded.` on a `session_schedule` insert (or a move to another day), and the log variant ("a session on 30 Nov cannot be logged") on a `training_sessions` insert. An offline queued log dated before the end date is fine.
+- `PROGRAMME_PAUSED: <Name>'s programme is paused on 3 Nov 2026. Resume it first, or book another day.` on a booking on a paused day.
+- Pause dialogs (CRM / admin, which insert `client_pause_history` directly today) for a new-policy client: `PAUSE_NO_BALANCE`, `PAUSE_NOT_INCLUDED`, `PAUSE_OUTSIDE_PACKAGE`, `PAUSE_OVERLAP` sentences; an open-ended pause is cut to the balance by the server.
+- Admin and super admin bookings are not refused.
 
 ## 2. My Crew day plan **needed**
-- `plan_sync_roster` returns a new per-entry result `overdue_locked` with `message` (the sentence above), `schedule_id` null. Show it like `plan_expired`: a tag on the card entry and the message; nothing of that client was touched. The member also gets a push "Session not added to your roster" with the sentence (`data.type = crew_overdue_locked`).
+`plan_sync_roster` returns per entry `result = "package_ended"` or `"programme_paused"` with `message`, `schedule_id` null; nothing of that client is touched. Show it like `plan_expired` (a tag on the card entry + the message). The member also gets a push "Session not added to your roster" (`data.type = crew_package_ended` / `crew_programme_paused`).
 
-## 3. Admin client screen (admin workspace) optional, parity
-- Read `get_client_overdue(p_client_id uuid)` → `{visible, pending[], pending_total, settled[], per_day, max_days, as_of, account_kind, account_blocked}`; show nothing when `visible` is false.
-- Each pending item: `days, amount, max_days, package_end, first_day, last_day, completed, stopped (renewed | inactive | seven_days | null), stopped_at, paused_days, package_id`.
-- Mark as paid: `mark_client_overdue_paid(p_package_id, p_amount, p_note)` with `p_amount` = the item's `amount`, behind a confirmation. Errors: `OVERDUE_CHANGED` (amount moved on, reload), `OVERDUE_NOT_PENDING`, `OVERDUE_FORBIDDEN` (not admin).
-- Wording to copy from web `src/lib/clientOverdue.ts` (pure, copy byte for byte): `overdueHeadline` ("Day 3 of 7" / "7 days completed"), `overdueStatusLine`, `overdueChipText` ("Overdue ₹2,400 · day 3 of 7"), `amountIfRenewedToday`.
+## 3. Pushes the staff will receive (no app change needed, routes optional)
+`programme_paused`, `programme_resumed` (client paused or resumed from the client app), `package_ended` (booked sessions after the end date removed), `programme_on_hold` (day 8: professionals released), `assign_trainer_after_hold` (CRM: renewed after a hold).
 
-## 4. Admin renewal **optional**
-- After saving a renewal for a client with a pending overdue, `add_client_overdue_to_renewal(p_package_id, p_renewal_id, p_amount)` with `p_amount = amountIfRenewedToday(item)` records it as added. The web does this behind an unticked "Mark as added to this renewal".
-
-## 5. CRM client screen **optional, parity**
-- Same reader as 3, read-only banner: "Overdue payment pending: ₹X", the headline, "New sessions on hold" after day 7, the status line + "The admin collects it."
+## 4. Admin and CRM client screens **optional, parity with the web**
+- `get_client_overdue(p_client_id)` (crm, admin, super_admin) → `{visible, new_policy, pending[], pending_total, settled[], credits[], on_hold, hold{since, released[]}, professionals_now[]}`; each pending item has `days, amount, per_day, professional_count, professionals[{id,name,role}], package_end, package_end_base, paused_in_package, first_day, last_day, completed, stopped (renewed | seven_days | null), package_id`.
+- `get_pause_balance(p_client_id)` → the allowance card ("Total pause days: 15 · Used: 4 · Left: 11").
+- Admin only: `mark_client_overdue_paid(package_id, amount, note)`, `waive_client_overdue(package_id, reason)` (reason of 5+ characters), `apply_overdue_credit(package_id, 'refund', null, note)`, `set_client_new_policy(client_id, value, reason)`.
+- Wording to copy from web `src/lib/clientOverdue.ts` and `src/lib/pauseAllowance.ts` (pure files, copy byte for byte).
 
 ## Do not
-- Write `clients.overdues_status` or `client_renewals.overdues_status` (a guard refuses: `OVERDUE_SERVER_ONLY`).
-- Work out days or amounts on the device.
+- Write `clients.overdues_status`, `client_renewals.overdues_status` or `clients.new_policy_adoption` (server only).
+- Insert or update a `system_hold` pause, or work out days, amounts or balances on the device.
