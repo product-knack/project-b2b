@@ -56,6 +56,7 @@ export function useEssentialsAuction(date: string, enabled = true) {
         client_id: r.client_id,
         client_name: r.client_name ?? 'Client',
         modality: r.modality ?? '',
+        mode: r.mode ?? null, // home or virtual (23 Oct 2026, essentials_weeks); was never mapped, so the card's "at home" / "virtual" text never showed (found 2 Nov 2026)
         slot_time: String(r.slot_time ?? '').slice(0, 5),
         scheduled_for: r.scheduled_for,
         status: (r.status ?? 'open') as AuctionLot['status'],
