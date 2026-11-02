@@ -69,6 +69,7 @@ import { TherapistDashboard, TherapistClients, TherapistClientDetail } from './s
 import { DoctorClientDetail } from './screens/doctorClientDetail';
 import { DoctorRehabRecommendation } from './screens/doctorRehabRecommendation';
 import { DoctorReimbursements, DoctorReimbursementReview } from './screens/doctorReimbursements';
+import { DoctorPendingApprovals } from './screens/doctorApprovals';
 import { ConsultantDashboard } from './screens/consultantDashboard';
 import { ConsultantCalls } from './screens/consultantCalls';
 import { ConsultationJoin } from './screens/consultationJoin';
@@ -209,6 +210,8 @@ const SCREENS: Record<string, React.ComponentType> = {
   'doctor-rehab-recommendation': DoctorRehabRecommendation,
   'doctor-reimbursements': DoctorReimbursements,
   'doctor-reimbursement-review': DoctorReimbursementReview,
+  // Approval requests (2 Nov 2026): the doctors' manager approves or rejects (first type: Session code off)
+  'doctor-pending-approvals': DoctorPendingApprovals,
   // Consultant doctor: 'doctor-dashboard' forks to this dashboard for a consultant
   // (DoctorDashboard in screens/doctor.tsx); the alias exists for direct navigation.
   'doctor-consultant-dashboard': ConsultantDashboard,
@@ -264,6 +267,8 @@ const SENSITIVE_ROUTES = new Set([
   'doctor-client-detail', 'doctor-sessions', 'doctor-protocol-approvals', 'doctor-rehab-recommendation',
   // Reimbursements — payment screenshots (bank / UPI details)
   'doctor-reimbursements', 'doctor-reimbursement-review',
+  // Approval requests: a CRM's reason can mention the client's health
+  'doctor-pending-approvals',
   // Consultant — bookings, prescriptions, AI notes, meeting summaries, the video call
   'doctor-consultant-dashboard', 'doctor-consultant-calls', 'doctor-consultation-join',
   // Therapist — therapy session notes are clinical content

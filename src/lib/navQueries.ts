@@ -6,6 +6,7 @@ import { useRescheduleRequests, useRosterRequests } from './approvalQueries';
 import { useServiceBookings } from './serviceQueries';
 import { useEscalations } from './escalationQueries';
 import { useChatOverview } from './chatQueries';
+import { useApprovalCounts } from './approvalRequestQueries';
 
 /* ============ Sidebar / drawer: real signed-in account, not hardcoded ============
    The drawer used to show a fixed demo name ("Ananya Rao"/"CRM · Client Success").
@@ -91,6 +92,8 @@ export function useNavBadges(): Record<string, number> {
   const serviceQ = useServiceBookings();
   const escQ = useEscalations(crmId, 'open');
   const chatQ = useChatOverview(uid);
+  // Approval requests waiting for the doctors' manager (the RPC answers only for reviewers; 0 rows for everyone else)
+  const approvalQ = useApprovalCounts(role === 'doctor' || role === 'admin');
 
   const approvals = (reschedQ.data?.pending.length ?? 0) + ((rosterQ.data ?? []).filter((r) => r.status === 'pending').length);
   const service = role === 'crm' ? (serviceQ.data ?? []).filter((s) => s.status === 'pending').length : 0;
@@ -102,5 +105,6 @@ export function useNavBadges(): Record<string, number> {
     'crm-service': service,
     'crm-esc': escalations,
     'messenger': messenger,
+    'doctor-pending-approvals': (approvalQ.data ?? []).reduce((n, c) => n + (c.pending || 0), 0),
   };
 }

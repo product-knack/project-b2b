@@ -496,6 +496,7 @@ export const doctorNav: NavGroup[] = [
   { label: 'Workspace', items: [
     { label: 'Rehab Recommendation', icon: 'heart', route: 'doctor-rehab-recommendation' },
     { label: 'Reimbursements', icon: 'checks', route: 'doctor-reimbursement-review' },
+    { label: 'Pending Approvals', icon: 'checks', route: 'doctor-pending-approvals' },
     { label: 'Dashboard', icon: 'grid', route: 'doctor-dashboard' },
     { label: 'Sessions', icon: 'activity', route: 'doctor-sessions' },
     { label: 'Essentials Auction', icon: 'gavel', route: 'essentials-auction' },

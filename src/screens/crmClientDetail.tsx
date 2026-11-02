@@ -44,6 +44,7 @@ import { ServicesButton } from '../components/servicesButton';
 import { useRosterPeople } from '../lib/rosterQueries';
 import * as Clipboard from 'expo-clipboard';
 import { friendlyError } from '../lib/friendlyError';
+import { SessionCodeRow } from '../components/sessionCodeApproval';
 
 /* ============ CRM Client Detail — full web-parity page: 11 tabs + action rail.
    Mirrors CRMClientDetails.tsx (old app) restyled for obsidian/ember. ============ */
@@ -308,6 +309,8 @@ export function CrmClientDetail() {
                 ) : null}
               </View>
             </Pressable>
+            {/* Session code (clients.otp): on is direct; off goes to the doctors' manager for approval (2 Nov 2026). */}
+            <SessionCodeRow clientId={client.id} clientName={name} otpOn={client.otp === true} />
             {(client.phone || client.location) ? (
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                 {client.phone ? (
