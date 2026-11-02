@@ -1,8 +1,9 @@
-/* Team Wallet checkout (2 Nov 2026): a full-screen WebView on the server's wallet-checkout-page, which opens Razorpay
-   Standard Checkout at once and posts ONE message back: { ok, razorpay_order_id, razorpay_payment_id, razorpay_signature }
-   | { dismissed } | { failed, reason }. UPI and app intents (upi://, intent://, tez://, phonepe://, paytmmp://) are handed
-   to the system so GPay, PhonePe and Paytm open; Razorpay's page polls the payment when the user comes back.
-   Close = dismissed: the row stays "Waiting for payment" for 30 minutes and can be reopened from the history. */
+/* Team Wallet checkout (2 Nov 2026): a full-screen WebView on the checkout page built IN the app (walletCheckoutHtml,
+   inline html: the Supabase functions gateway serves any HTML answer as sandboxed text/plain, so the server page shows
+   blank), which opens Razorpay Standard Checkout at once and posts ONE message back: { ok, razorpay_order_id,
+   razorpay_payment_id, razorpay_signature } | { dismissed } | { failed, reason }. UPI and app intents (upi://, intent://,
+   tez://, phonepe://, paytmmp://) are handed to the system so GPay, PhonePe and Paytm open; Razorpay polls the payment
+   when the user comes back. Close = dismissed: the row stays "Waiting for payment" for 30 minutes and can be reopened. */
 import React from 'react';
 import { View, Text, Pressable, Modal, ActivityIndicator, Linking, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -11,6 +12,11 @@ import { C, F } from '../theme';
 import { Icon } from '../icons';
 import { Body } from './primitives';
 import { rupees } from '../lib/teamWallet';
+import { walletCheckoutHtml } from '../lib/walletCheckoutHtml';
+import type { TopupOrder } from '../lib/teamWalletQueries';
+
+/* The page's origin for the WebView (an https origin, so Razorpay's iframe and checkout.js load as from a site). */
+const PAGE_ORIGIN = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? 'https://odds.local').replace(/\/+$/, '') + '/';
 
 export type CheckoutMessage =
   | { ok: true; razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string }
@@ -19,17 +25,18 @@ export type CheckoutMessage =
 
 const EXTERNAL = /^(upi|intent|tez|phonepe|paytmmp|gpay|bhim|credpay|cred|market):/i;
 
-export function WalletCheckout({ visible, url, amountPaise, onMessage, onClose }: {
+export function WalletCheckout({ visible, order, onMessage, onClose }: {
   visible: boolean;
-  url: string | null;
-  amountPaise: number;
+  order: TopupOrder | null;
   onMessage: (m: CheckoutMessage) => void;
   onClose: () => void;
 }) {
   const insets = useSafeAreaInsets();
   const [loading, setLoading] = React.useState(true);
   const [note, setNote] = React.useState<string | null>(null);
-  React.useEffect(() => { if (visible) { setLoading(true); setNote(null); } }, [visible, url]);
+  const amountPaise = order?.amount_paise ?? 0;
+  const html = React.useMemo(() => (order ? walletCheckoutHtml({ key_id: order.key_id, order_id: order.order_id, amount_paise: order.amount_paise, tx_id: order.tx_id, name: order.name, email: order.email, contact: order.contact }) : null), [order?.tx_id, order?.order_id]);
+  React.useEffect(() => { if (visible) { setLoading(true); setNote(null); } }, [visible, order?.tx_id]);
 
   const handle = (raw: string) => {
     let m: any = null;
@@ -58,9 +65,10 @@ export function WalletCheckout({ visible, url, amountPaise, onMessage, onClose }
           </View>
         ) : null}
         <View style={{ flex: 1 }}>
-          {url ? (
+          {html ? (
             <WebView
-              source={{ uri: url }}
+              key={order?.tx_id}
+              source={{ html, baseUrl: PAGE_ORIGIN }}
               style={{ flex: 1, backgroundColor: '#0e0a09' }}
               javaScriptEnabled
               domStorageEnabled

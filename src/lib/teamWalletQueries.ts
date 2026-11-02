@@ -75,10 +75,16 @@ export function useTeamWalletPage(before: string | null) {
   });
 }
 
-export type TopupOrder = { tx_id: string; order_id: string; amount_paise: number; checkout_url: string; key_id: string };
+/** Everything the inline checkout page needs (walletCheckoutHtml); checkout_url is the server page, which the gateway
+    serves as sandboxed text/plain, so the app no longer loads it. */
+export type TopupOrder = { tx_id: string; order_id: string; amount_paise: number; checkout_url: string; key_id: string; name: string; email: string; contact: string };
 const parseOrder = (d: any): TopupOrder => {
-  if (!d?.tx_id || !d?.checkout_url) throw new Error('The checkout could not be prepared. Try again.');
-  return { tx_id: String(d.tx_id), order_id: String(d.order_id ?? ''), amount_paise: Number(d.amount_paise) || 0, checkout_url: String(d.checkout_url), key_id: String(d.key_id ?? '') };
+  if (!d?.tx_id || !d?.order_id || !d?.key_id) throw new Error('The checkout could not be prepared. Try again.');
+  const p = d.prefill && typeof d.prefill === 'object' ? d.prefill : {};
+  return {
+    tx_id: String(d.tx_id), order_id: String(d.order_id), amount_paise: Number(d.amount_paise) || 0, checkout_url: String(d.checkout_url ?? ''), key_id: String(d.key_id),
+    name: String(p.name ?? ''), email: String(p.email ?? ''), contact: String(p.contact ?? ''),
+  };
 };
 /** Add money: the pending row and the Razorpay order. { amount_inr } for a new top-up, { reopen_tx_id } to reopen a
     pending one from the history. */

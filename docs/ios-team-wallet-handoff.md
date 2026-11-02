@@ -44,6 +44,9 @@ Free drafts (owner, 2 Nov 2026 evening): a trainer's first 3 AI plans for non-Es
   `wallet-create-order` (2.3), then opens the checkout (1.3). A server refusal shows its sentence in red under the box.
 
 ### 1.3 Checkout (full-screen WebView)
+Built IN the app since 2 Nov 2026 night: the WebView loads inline HTML from `walletCheckoutHtml(order)` with an https
+`baseUrl` (the Supabase origin); the server's `wallet-checkout-page` is unused because the functions gateway serves any
+HTML as sandboxed text/plain (blank WebView). `wallet-create-order` answers everything the page needs.
 - A full-screen modal with a header "Pay Rs 2,000" and a Close button; the WebView loads the checkout page
   (2.3, `wallet-checkout-page`), which opens Razorpay Standard Checkout at once (UPI apps, cards, net banking).
 - The page posts a message to the app when done (2.3). On `{ok: true}` the app calls `wallet-verify-payment`; on
@@ -741,10 +744,16 @@ export function useTeamWalletPage(before: string | null) {
   });
 }
 
-export type TopupOrder = { tx_id: string; order_id: string; amount_paise: number; checkout_url: string; key_id: string };
+/** Everything the inline checkout page needs (walletCheckoutHtml); checkout_url is the server page, which the gateway
+    serves as sandboxed text/plain, so the app no longer loads it. */
+export type TopupOrder = { tx_id: string; order_id: string; amount_paise: number; checkout_url: string; key_id: string; name: string; email: string; contact: string };
 const parseOrder = (d: any): TopupOrder => {
-  if (!d?.tx_id || !d?.checkout_url) throw new Error('The checkout could not be prepared. Try again.');
-  return { tx_id: String(d.tx_id), order_id: String(d.order_id ?? ''), amount_paise: Number(d.amount_paise) || 0, checkout_url: String(d.checkout_url), key_id: String(d.key_id ?? '') };
+  if (!d?.tx_id || !d?.order_id || !d?.key_id) throw new Error('The checkout could not be prepared. Try again.');
+  const p = d.prefill && typeof d.prefill === 'object' ? d.prefill : {};
+  return {
+    tx_id: String(d.tx_id), order_id: String(d.order_id), amount_paise: Number(d.amount_paise) || 0, checkout_url: String(d.checkout_url ?? ''), key_id: String(d.key_id),
+    name: String(p.name ?? ''), email: String(p.email ?? ''), contact: String(p.contact ?? ''),
+  };
 };
 /** Add money: the pending row and the Razorpay order. { amount_inr } for a new top-up, { reopen_tx_id } to reopen a
     pending one from the history. */
@@ -843,7 +852,7 @@ import { useAuth } from '../auth';
 import { useStore } from '../store';
 import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import { useIsOnline } from '../lib/offline';
-import { useTeamWallet, useTeamWalletPage, useCreateTopup, useVerifyTopup, useWalletRealtime, walletErrorText } from '../lib/teamWalletQueries';
+import { useTeamWallet, useTeamWalletPage, useCreateTopup, useVerifyTopup, useWalletRealtime, walletErrorText, type TopupOrder } from '../lib/teamWalletQueries';
 import {
   DAILY_CAP_PAISE, TEST_TOPUP_PAISE, TOPUP_PICKS, fmtWhen, freeLeftLine, groupByMonth, isPendingBill, isPendingTopup, methodLabel, parseRupeeInput, rowAmountText, rowChip, rowSecondLine, rowTitle, rupees,
   signedRupees, topupExpired, topupProblem, topupRoomLine, type Tone, type WalletRow,
@@ -1046,7 +1055,7 @@ export function Wallet() {
   const verifyM = useVerifyTopup();
   const [addOpen, setAddOpen] = React.useState(false);
   const [addErr, setAddErr] = React.useState<string | null>(null);
-  const [checkout, setCheckout] = React.useState<{ url: string; txId: string; amountPaise: number } | null>(null);
+  const [checkout, setCheckout] = React.useState<TopupOrder | null>(null);
   const failedRef = React.useRef<string | null>(null);
   const announcedRef = React.useRef(new Set<string>());
   const [detail, setDetail] = React.useState<WalletRow | null>(null);
@@ -1080,7 +1089,7 @@ export function Wallet() {
     createM.mutate(r, {
       onSuccess: (o) => {
         setAddOpen(false); setDetail(null); failedRef.current = null;
-        setCheckout({ url: o.checkout_url, txId: o.tx_id, amountPaise: o.amount_paise });
+        setCheckout(o);
         trackEvent('Wallet Checkout Opened', { amount_paise: o.amount_paise, reopened: 'reopen_tx_id' in r });
       },
       onError: (e) => {
@@ -1095,8 +1104,8 @@ export function Wallet() {
     if ('ok' in m && m.ok) {
       const c = checkout;
       setCheckout(null);
-      verifyM.mutate({ tx_id: c.txId, razorpay_order_id: m.razorpay_order_id, razorpay_payment_id: m.razorpay_payment_id, razorpay_signature: m.razorpay_signature }, {
-        onSuccess: (r) => { trackEvent('Wallet Topup Paid', { amount_paise: c.amountPaise }); if (r.row) announce({ ...r.row, balance_after_paise: r.row.balance_after_paise ?? r.balance_paise }); else Alert.alert(`${rupees(c.amountPaise)} added`, `Balance ${rupees(r.balance_paise)}.`); },
+      verifyM.mutate({ tx_id: c.tx_id, razorpay_order_id: m.razorpay_order_id, razorpay_payment_id: m.razorpay_payment_id, razorpay_signature: m.razorpay_signature }, {
+        onSuccess: (r) => { trackEvent('Wallet Topup Paid', { amount_paise: c.amount_paise }); if (r.row) announce({ ...r.row, balance_after_paise: r.row.balance_after_paise ?? r.balance_paise }); else Alert.alert(`${rupees(c.amount_paise)} added`, `Balance ${rupees(r.balance_paise)}.`); },
         onError: (e) => Alert.alert('Payment check', walletErrorText(e, 'The payment could not be confirmed yet. If money left your account it is added within a few minutes.')),
       });
       return;
@@ -1178,22 +1187,141 @@ export function Wallet() {
         onClose={() => setAddOpen(false)} onContinue={(p) => openCheckout({ amount_inr: Math.round(p / 100) })} />
       <DetailSheet row={!addOpen && !checkout ? detail : null} now={now} onClose={() => setDetail(null)}
         onReopen={(r) => openCheckout({ reopen_tx_id: r.id })} onOpenBill={openBill} />
-      <WalletCheckout visible={!!checkout} url={checkout?.url ?? null} amountPaise={checkout?.amountPaise ?? 0}
+      <WalletCheckout visible={!!checkout} order={checkout}
         onMessage={onCheckoutMessage} onClose={() => onCheckoutMessage({ dismissed: true })} />
     </Page>
   );
 }
 ```
 
+### `src/lib/walletCheckoutHtml.ts` (new)
+Pure: the inline checkout page the WebView loads (the server cannot serve HTML: the Supabase gateway rewrites it to sandboxed text/plain). Copy byte for byte.
+
+```ts
+/* The Team Wallet checkout page the WebView loads as inline HTML (2 Nov 2026). It cannot come from the server: the
+   Supabase functions gateway rewrites every HTML answer to text/plain with a sandbox CSP, so a WebView given that URL
+   shows a blank page. The page holds only what wallet-create-order answered (public key id, order id, amount, prefill,
+   the row id in the notes), never a secret; it loads Razorpay Standard Checkout, opens it at once and posts ONE message
+   to the app through window.ReactNativeWebView.postMessage:
+     { ok: true, razorpay_order_id, razorpay_payment_id, razorpay_signature }   the app then calls wallet-verify-payment
+     { dismissed: true }                                                       the sheet was closed (row stays pending 30 min)
+     { failed: true, reason }                                                  an attempt failed (Razorpay offers a retry)
+   Pure: no React, no network; tested in node (tests/rules/wallet_checkout_html_test.js); copied byte for byte to iOS. */
+
+export type CheckoutPageInput = {
+  key_id: string;
+  order_id: string;
+  amount_paise: number;
+  tx_id: string;
+  name: string;
+  email: string;
+  contact: string;
+};
+
+const esc = (s: unknown) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+/** JSON for a <script>: no "</" sequence can close the tag. */
+const LS = String.fromCharCode(0x2028), PS = String.fromCharCode(0x2029);
+const jsonForScript = (v: unknown) => JSON.stringify(v).replace(/<\//g, '<\\/').split(LS).join('\\u2028').split(PS).join('\\u2029');
+
+/** "Rs 1,00,000" with Indian grouping (the same rule as teamWallet.ts; repeated so this file has no imports). */
+const rupees = (paise: number): string => {
+  const n = Math.round(Math.abs(Number(paise) || 0) / 100);
+  const s = String(n);
+  const last3 = s.slice(-3);
+  const rest = s.slice(0, -3);
+  return `Rs ${rest ? rest.replace(/\B(?=(\d{2})+(?!\d))/g, ',') + ',' + last3 : last3}`;
+};
+
+export const CHECKOUT_JS = 'https://checkout.razorpay.com/v1/checkout.js';
+
+export const walletCheckoutHtml = (o: CheckoutPageInput): string => {
+  const amount = rupees(o.amount_paise);
+  const options = {
+    key: o.key_id,
+    amount: Math.round(Number(o.amount_paise) || 0),
+    currency: 'INR',
+    name: 'Odds Fitness',
+    description: 'Team Wallet top-up',
+    order_id: o.order_id,
+    prefill: { name: o.name || '', email: o.email || '', contact: o.contact || '' },
+    notes: { purpose: 'team_wallet_topup', wallet_tx_id: o.tx_id },
+    theme: { color: '#F08A3C', backdrop_color: '#0e0a09' },
+    retry: { enabled: true, max_count: 3 },
+    remember_customer: false,
+  };
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"><title>Pay ${esc(amount)}</title><style>
+  html,body{margin:0;height:100%;background:#0e0a09;color:#fff;font-family:-apple-system,system-ui,"Segoe UI",Roboto,sans-serif}
+  .box{min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:24px;text-align:center;box-sizing:border-box}
+  .t{font-size:22px;font-weight:700}.s{font-size:14px;color:#a8a09a;line-height:1.5;max-width:320px}
+  button{margin-top:8px;padding:12px 22px;border-radius:12px;border:1px solid #f08a3c;background:rgba(240,138,60,0.14);color:#f08a3c;font-weight:700;font-size:15px}
+  .spin{width:28px;height:28px;border-radius:50%;border:3px solid rgba(255,255,255,0.15);border-top-color:#f08a3c;animation:r 0.9s linear infinite}@keyframes r{to{transform:rotate(360deg)}}
+</style></head><body><div class="box"><div class="spin" id="spin"></div><div class="t">Paying ${esc(amount)}</div><div class="s" id="s">Opening the Razorpay checkout. Choose UPI, a card or net banking.</div><button id="again" style="display:none">Open the checkout again</button></div><script>
+  window.__post = function (m) { var s = JSON.stringify(m); try { if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) { window.ReactNativeWebView.postMessage(s); return true; } } catch (e) {} return false; };
+  var opts = ${jsonForScript(options)};
+  var s = document.getElementById('s'), again = document.getElementById('again'), spin = document.getElementById('spin');
+  function status(t) { s.textContent = t; }
+  opts.handler = function (r) {
+    spin.style.display = 'none'; status('Payment received. Adding it to your wallet...');
+    if (!window.__post({ ok: true, razorpay_order_id: r.razorpay_order_id, razorpay_payment_id: r.razorpay_payment_id, razorpay_signature: r.razorpay_signature })) status('Payment received. Go back to the Odds app: your wallet updates in a moment.');
+  };
+  opts.modal = { ondismiss: function () { spin.style.display = 'none'; status('Checkout closed. Nothing was charged yet.'); again.style.display = 'inline-block'; window.__post({ dismissed: true }); }, escape: true, backdropclose: false, confirm_close: false };
+  var rzp = null;
+  function openCheckout() {
+    try {
+      if (!rzp) { rzp = new Razorpay(opts); rzp.on('payment.failed', function (e) { var why = (e && e.error && e.error.description) || 'The payment did not go through'; status('Payment failed: ' + why + '. You can try again.'); window.__post({ failed: true, reason: why }); }); }
+      spin.style.display = 'block'; again.style.display = 'none'; status('Opening the Razorpay checkout...');
+      rzp.open();
+    } catch (e) { spin.style.display = 'none'; status('The checkout could not open. Close this page and try again.'); again.style.display = 'inline-block'; }
+  }
+  again.onclick = openCheckout;
+  var tag = document.createElement('script'); tag.src = ${jsonForScript(CHECKOUT_JS)}; tag.onload = openCheckout;
+  tag.onerror = function () { spin.style.display = 'none'; status('Razorpay could not load. Check your connection, then open the checkout again.'); again.style.display = 'inline-block'; };
+  document.head.appendChild(tag);
+</script></body></html>`;
+};
+```
+
+### `tests/rules/wallet_checkout_html_test.js` (new)
+Rule test for the page (8 checks). Copy as is.
+
+```js
+// Rule test for the Odds staff app. ROOT = the repo root; point it at the iOS repo and run: node tests/rules/wallet_checkout_html_test.js
+const ROOT = require("path").resolve(__dirname, "../..");
+// Team Wallet checkout page (2 Nov 2026): the inline HTML the WebView loads carries exactly the order fields, escapes
+// what came from the server, and posts the three messages.
+const ts = require(ROOT + '/node_modules/typescript');
+const fs = require('fs');
+const src = fs.readFileSync(ROOT + '/src/lib/walletCheckoutHtml.ts', 'utf8');
+const js = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
+const m = { exports: {} }; new Function('module', 'exports', 'require', js)(m, m.exports, (n) => { throw new Error('unexpected require ' + n); });
+const H = m.exports;
+let fails = 0;
+const ok = (name, cond, extra) => { if (!cond) fails++; console.log(cond ? 'PASS' : 'FAIL', name, cond ? '' : extra ?? ''); };
+
+const html = H.walletCheckoutHtml({ key_id: 'rzp_live_x', order_id: 'order_1', amount_paise: 200000, tx_id: 'tx-1', name: 'Sagar <b>', email: 'a@b.c', contact: '9999' });
+ok('title shows the amount', html.includes('<title>Pay Rs 2,000</title>'));
+ok('options carry key, order, amount, notes', /"key":"rzp_live_x"/.test(html) && /"order_id":"order_1"/.test(html) && /"amount":200000/.test(html) && /"wallet_tx_id":"tx-1"/.test(html));
+ok('prefill name is JSON, not injected', html.includes('"name":"Sagar <b>"') && !html.includes('<b>Paying'));
+ok('no secret key', !/key_secret|rzp_live_[A-Za-z0-9]+:/.test(html));
+ok('posts ok, dismissed and failed', html.includes('{ ok: true, razorpay_order_id') && html.includes('{ dismissed: true }') && html.includes('{ failed: true, reason: why }'));
+ok('loads checkout.js from Razorpay', html.includes('https://checkout.razorpay.com/v1/checkout.js'));
+const sneaky = H.walletCheckoutHtml({ key_id: 'k', order_id: 'o</script><script>alert(1)</script>', amount_paise: 100, tx_id: 't', name: '', email: '', contact: '' });
+ok('a closing script tag in a value cannot break out', !sneaky.includes('o</script>'));
+ok('Rs 1 title', H.walletCheckoutHtml({ key_id: 'k', order_id: 'o', amount_paise: 100, tx_id: 't', name: '', email: '', contact: '' }).includes('<title>Pay Rs 1</title>'));
+console.log(fails ? `${fails} FAILED` : 'ALL PASS');
+process.exit(fails ? 1 : 0);
+```
+
 ### `src/components/WalletCheckout.tsx` (new)
-The full-screen WebView checkout.
+The full-screen WebView checkout, source = inline html with an https baseUrl.
 
 ```tsx
-/* Team Wallet checkout (2 Nov 2026): a full-screen WebView on the server's wallet-checkout-page, which opens Razorpay
-   Standard Checkout at once and posts ONE message back: { ok, razorpay_order_id, razorpay_payment_id, razorpay_signature }
-   | { dismissed } | { failed, reason }. UPI and app intents (upi://, intent://, tez://, phonepe://, paytmmp://) are handed
-   to the system so GPay, PhonePe and Paytm open; Razorpay's page polls the payment when the user comes back.
-   Close = dismissed: the row stays "Waiting for payment" for 30 minutes and can be reopened from the history. */
+/* Team Wallet checkout (2 Nov 2026): a full-screen WebView on the checkout page built IN the app (walletCheckoutHtml,
+   inline html: the Supabase functions gateway serves any HTML answer as sandboxed text/plain, so the server page shows
+   blank), which opens Razorpay Standard Checkout at once and posts ONE message back: { ok, razorpay_order_id,
+   razorpay_payment_id, razorpay_signature } | { dismissed } | { failed, reason }. UPI and app intents (upi://, intent://,
+   tez://, phonepe://, paytmmp://) are handed to the system so GPay, PhonePe and Paytm open; Razorpay polls the payment
+   when the user comes back. Close = dismissed: the row stays "Waiting for payment" for 30 minutes and can be reopened. */
 import React from 'react';
 import { View, Text, Pressable, Modal, ActivityIndicator, Linking, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -1202,6 +1330,11 @@ import { C, F } from '../theme';
 import { Icon } from '../icons';
 import { Body } from './primitives';
 import { rupees } from '../lib/teamWallet';
+import { walletCheckoutHtml } from '../lib/walletCheckoutHtml';
+import type { TopupOrder } from '../lib/teamWalletQueries';
+
+/* The page's origin for the WebView (an https origin, so Razorpay's iframe and checkout.js load as from a site). */
+const PAGE_ORIGIN = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? 'https://odds.local').replace(/\/+$/, '') + '/';
 
 export type CheckoutMessage =
   | { ok: true; razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string }
@@ -1210,17 +1343,18 @@ export type CheckoutMessage =
 
 const EXTERNAL = /^(upi|intent|tez|phonepe|paytmmp|gpay|bhim|credpay|cred|market):/i;
 
-export function WalletCheckout({ visible, url, amountPaise, onMessage, onClose }: {
+export function WalletCheckout({ visible, order, onMessage, onClose }: {
   visible: boolean;
-  url: string | null;
-  amountPaise: number;
+  order: TopupOrder | null;
   onMessage: (m: CheckoutMessage) => void;
   onClose: () => void;
 }) {
   const insets = useSafeAreaInsets();
   const [loading, setLoading] = React.useState(true);
   const [note, setNote] = React.useState<string | null>(null);
-  React.useEffect(() => { if (visible) { setLoading(true); setNote(null); } }, [visible, url]);
+  const amountPaise = order?.amount_paise ?? 0;
+  const html = React.useMemo(() => (order ? walletCheckoutHtml({ key_id: order.key_id, order_id: order.order_id, amount_paise: order.amount_paise, tx_id: order.tx_id, name: order.name, email: order.email, contact: order.contact }) : null), [order?.tx_id, order?.order_id]);
+  React.useEffect(() => { if (visible) { setLoading(true); setNote(null); } }, [visible, order?.tx_id]);
 
   const handle = (raw: string) => {
     let m: any = null;
@@ -1249,9 +1383,10 @@ export function WalletCheckout({ visible, url, amountPaise, onMessage, onClose }
           </View>
         ) : null}
         <View style={{ flex: 1 }}>
-          {url ? (
+          {html ? (
             <WebView
-              source={{ uri: url }}
+              key={order?.tx_id}
+              source={{ html, baseUrl: PAGE_ORIGIN }}
               style={{ flex: 1, backgroundColor: '#0e0a09' }}
               javaScriptEnabled
               domStorageEnabled

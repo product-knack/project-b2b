@@ -12,7 +12,7 @@ import { useAuth } from '../auth';
 import { useStore } from '../store';
 import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import { useIsOnline } from '../lib/offline';
-import { useTeamWallet, useTeamWalletPage, useCreateTopup, useVerifyTopup, useWalletRealtime, walletErrorText } from '../lib/teamWalletQueries';
+import { useTeamWallet, useTeamWalletPage, useCreateTopup, useVerifyTopup, useWalletRealtime, walletErrorText, type TopupOrder } from '../lib/teamWalletQueries';
 import {
   DAILY_CAP_PAISE, TEST_TOPUP_PAISE, TOPUP_PICKS, fmtWhen, freeLeftLine, groupByMonth, isPendingBill, isPendingTopup, methodLabel, parseRupeeInput, rowAmountText, rowChip, rowSecondLine, rowTitle, rupees,
   signedRupees, topupExpired, topupProblem, topupRoomLine, type Tone, type WalletRow,
@@ -215,7 +215,7 @@ export function Wallet() {
   const verifyM = useVerifyTopup();
   const [addOpen, setAddOpen] = React.useState(false);
   const [addErr, setAddErr] = React.useState<string | null>(null);
-  const [checkout, setCheckout] = React.useState<{ url: string; txId: string; amountPaise: number } | null>(null);
+  const [checkout, setCheckout] = React.useState<TopupOrder | null>(null);
   const failedRef = React.useRef<string | null>(null);
   const announcedRef = React.useRef(new Set<string>());
   const [detail, setDetail] = React.useState<WalletRow | null>(null);
@@ -249,7 +249,7 @@ export function Wallet() {
     createM.mutate(r, {
       onSuccess: (o) => {
         setAddOpen(false); setDetail(null); failedRef.current = null;
-        setCheckout({ url: o.checkout_url, txId: o.tx_id, amountPaise: o.amount_paise });
+        setCheckout(o);
         trackEvent('Wallet Checkout Opened', { amount_paise: o.amount_paise, reopened: 'reopen_tx_id' in r });
       },
       onError: (e) => {
@@ -264,8 +264,8 @@ export function Wallet() {
     if ('ok' in m && m.ok) {
       const c = checkout;
       setCheckout(null);
-      verifyM.mutate({ tx_id: c.txId, razorpay_order_id: m.razorpay_order_id, razorpay_payment_id: m.razorpay_payment_id, razorpay_signature: m.razorpay_signature }, {
-        onSuccess: (r) => { trackEvent('Wallet Topup Paid', { amount_paise: c.amountPaise }); if (r.row) announce({ ...r.row, balance_after_paise: r.row.balance_after_paise ?? r.balance_paise }); else Alert.alert(`${rupees(c.amountPaise)} added`, `Balance ${rupees(r.balance_paise)}.`); },
+      verifyM.mutate({ tx_id: c.tx_id, razorpay_order_id: m.razorpay_order_id, razorpay_payment_id: m.razorpay_payment_id, razorpay_signature: m.razorpay_signature }, {
+        onSuccess: (r) => { trackEvent('Wallet Topup Paid', { amount_paise: c.amount_paise }); if (r.row) announce({ ...r.row, balance_after_paise: r.row.balance_after_paise ?? r.balance_paise }); else Alert.alert(`${rupees(c.amount_paise)} added`, `Balance ${rupees(r.balance_paise)}.`); },
         onError: (e) => Alert.alert('Payment check', walletErrorText(e, 'The payment could not be confirmed yet. If money left your account it is added within a few minutes.')),
       });
       return;
@@ -347,7 +347,7 @@ export function Wallet() {
         onClose={() => setAddOpen(false)} onContinue={(p) => openCheckout({ amount_inr: Math.round(p / 100) })} />
       <DetailSheet row={!addOpen && !checkout ? detail : null} now={now} onClose={() => setDetail(null)}
         onReopen={(r) => openCheckout({ reopen_tx_id: r.id })} onOpenBill={openBill} />
-      <WalletCheckout visible={!!checkout} url={checkout?.url ?? null} amountPaise={checkout?.amountPaise ?? 0}
+      <WalletCheckout visible={!!checkout} order={checkout}
         onMessage={onCheckoutMessage} onClose={() => onCheckoutMessage({ dismissed: true })} />
     </Page>
   );
