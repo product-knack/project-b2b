@@ -81,6 +81,10 @@ export function PushTokenManager() {
     if (t === 'qhp_cancel_declined' || t === 'qhp_cancelled') { set({ qhpFocusTab: 'cancellations' }); go('qhp'); return; }
     // The client cancelled a sold Essentials session (26 Oct 2026): home, where the alert card sits.
     if (t === 'essentials_cancelled') { go(homeRouteFor(roleRef.current)); return; }
+    // QHP client location (2 Nov 2026): "no client location" lands ops on the Leads page and a QHP manager on their
+    // page; "location added" lands the assessor on the QHP page (Start navigation), anyone else on home.
+    if (t === 'qhp_location_missing') { go(dbRoleRef.current === 'ops' ? 'ops-leads' : 'qhp-manager'); return; }
+    if (t === 'qhp_location_added') { go(dbRoleRef.current === 'trainer' ? 'qhp' : homeRouteFor(roleRef.current)); return; }
     // 7 PM team-flags push → straight into the manager chat.
     if (t === 'manager_team_flags' || data.route === 'manager-chat') { go('manager-chat'); return; }
     // Anything else that names a route/session (unknown web routes included) → home.

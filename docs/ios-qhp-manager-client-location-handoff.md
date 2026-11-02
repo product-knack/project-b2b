@@ -699,12 +699,33 @@ On Hold Schedule button); (e) the sheet mounted next to the other QHP Manager sh
            <Pressable onPress={() => {}} style={{ maxHeight: '100%', borderRadius: 18, backgroundColor: '#141010', borderWidth: 1, borderColor: hexA(C.blue, 0.3), padding: 18, gap: 13 }}>
 ```
 
-### 3.7 Not to port
+### 3.7 `src/components/PushTokenManager.tsx`: where the two new pushes land on a tap (server pushes of 2 Nov 2026)
+The server (hub-track `20261102150000_qhp_location_reminders.sql`) pushes `qhp_location_missing` (every hour in the 4
+hours before a QHP while the client has no pin, to Preeti in ops and the QHP managers; a QHP before 8 AM gets 2 hours
+before plus 7, 8 and 9 PM the evening before) and `qhp_location_added` (once the pin is saved: Preeti, and the assigned
+assessor with "Before you go, open the QHP card and tap Start navigation"). Without this edit they land on home.
+```diff
+@@ -80,8 +80,12 @@ export function PushTokenManager() {
+     if (t === 'qhp_cancel_requested') { set({ qhpManagerFocusTab: 'cancellations' }); go('qhp-manager'); return; }
+     if (t === 'qhp_cancel_declined' || t === 'qhp_cancelled') { set({ qhpFocusTab: 'cancellations' }); go('qhp'); return; }
+     // The client cancelled a sold Essentials session (26 Oct 2026): home, where the alert card sits.
+     if (t === 'essentials_cancelled') { go(homeRouteFor(roleRef.current)); return; }
++    // QHP client location (2 Nov 2026): "no client location" lands ops on the Leads page and a QHP manager on their
++    // page; "location added" lands the assessor on the QHP page (Start navigation), anyone else on home.
++    if (t === 'qhp_location_missing') { go(dbRoleRef.current === 'ops' ? 'ops-leads' : 'qhp-manager'); return; }
++    if (t === 'qhp_location_added') { go(dbRoleRef.current === 'trainer' ? 'qhp' : homeRouteFor(roleRef.current)); return; }
+     // 7 PM team-flags push → straight into the manager chat.
+     if (t === 'manager_team_flags' || data.route === 'manager-chat') { go('manager-chat'); return; }
+     // Anything else that names a route/session (unknown web routes included) → home.
+     // plan_expiry lands on the trainer's home too: the roster cards there carry the
+```
+
+### 3.8 Not to port
 - The assessor's own capture on the QHP card (`useSaveClientHomeLocation`, only while the pin is empty) stays as it is.
 - The QHP navigation screen already flags pins with method `ops_whatsapp_paste` as "check with the client"; pins from
   this sheet carry the same method on purpose.
 
-### 3.8 Done when
+### 3.9 Done when
 - `node tests/rules/shared_location_test.js` and `node tests/rules/approval_requests_test.js` print ALL PASS; `npx
   tsc --noEmit` exits 0; the iOS bundle builds.
 
@@ -723,6 +744,10 @@ On Hold Schedule button); (e) the sheet mounted next to the other QHP Manager sh
 8. As the assigned assessor: that client's QHP card offers Start navigation to the pin.
 9. SQL: `select brb_location from clients where id = '<client>'` shows method `ops_whatsapp_paste`, accuracy null and
    `captured_by` = the manager's profile id.
+10. Pushes (server, once the owner has run the migration): as the assigned assessor, after a manager saves the pin,
+    the phone shows "Client location added"; tapping it opens the QHP page. As a QHP manager with a client who has
+    no pin and a QHP 4 hours away, "QHP today at <time>, no client location" arrives on the hour; tapping it opens the
+    QHP Manager page.
 
 Not confirmed: the iOS repo's `icons.tsx` has `pin`, `map` and `clipboard` (Android's does); `C.sheetBg` exists in
 the iOS theme (it does on Android since the Session code sheet); no device test was possible on Android (no QHP
