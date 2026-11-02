@@ -74,6 +74,7 @@ eq('own request (42501)', shown(E('APPROVAL_OWN_REQUEST: You cannot review your 
 eq('pending', shown(E('APPROVAL_PENDING: A request for this is already waiting for approval.', 'P0001')), 'A request for this is already waiting for approval.');
 eq('reject note', shown(E('APPROVAL_NOTE: Write why it is rejected (at least 5 characters).', 'P0001')), 'Write why it is rejected (at least 5 characters).');
 eq('already decided', shown(E('APPROVAL_DONE: This request is already approved. Refresh the page.', 'P0001')), 'This request is already approved. Refresh the page.');
+eq('client location refusal (42501, 2 Nov 2026)', shown(E('LOCATION_FORBIDDEN: Only ops, CRM, admin or a QHP manager can save a client location.', '42501')), 'Only ops, CRM, admin or a QHP manager can save a client location.');
 eq('other errors still friendly', shown(E('Failed to fetch')), FE.NO_CONNECTION);
 eq('a plain 42501 still generic', shown(E('new row violates row-level security policy for table "x"', '42501')), FE.NOT_ALLOWED);
 

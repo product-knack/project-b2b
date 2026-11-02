@@ -56,6 +56,9 @@ import { ClientThreadsCard } from '../components/clientThreadsCard';
 import { ManagerTeamChatCard } from './managerChat';
 import { istToday, useMyManagerTeam, TRAINER_MODALITIES } from '../lib/managerChatQueries';
 import { useKeyboardHeight } from '../lib/useKeyboardHeight';
+import { ClientLocationSheet, type LocationTarget } from '../components/ClientLocationSheet';
+import { useClientPins } from '../lib/clientLocationQueries';
+import { mapsLinkFor } from '../lib/sharedLocation';
 import { localToday, fetchScheduledSleepHours, useMedicineSuggestions } from '../lib/clientQueries';
 import { buildCheckinItems, initialTicked, isDuplicateName, nameKey, sourceLabel, lastCheckinLine, type MedicineCheckinPayload } from '../lib/medicineCheckin';
 import { startTimer, finishTimer, clearTimer, readTimer, SessionTiming, type TimerStart } from '../lib/sessionTiming';
@@ -10687,6 +10690,12 @@ export function QhpManager() {
   const { session } = useAuth();
   const { set, go } = useStore();
   const [tab, setTab] = React.useState<'task' | 'manager' | 'tracker' | 'requests' | 'linked' | 'review' | 'cancellations'>('task');
+  // Client location (2 Nov 2026): the pin chip on every Task Pending card and the Add / Update location sheet. The
+  // saved pin is clients.brb_location, the one QHP navigation and the roster distance read.
+  const pinIds = React.useMemo(() => [...(q.data?.taskNotScheduled ?? []), ...(q.data?.taskScheduled ?? []), ...(q.data?.taskOnHold ?? [])].map((c) => c.clientId), [q.data]);
+  const pinsQ = useClientPins(pinIds, isMgr);
+  const pins = pinsQ.data ?? {};
+  const [locFor, setLocFor] = React.useState<LocationTarget>(null);
   // Cancellation requests (26 Oct 2026): Pending and Decided lists, the decide sheet, the push-tap focus.
   const [cancelSeg, setCancelSeg] = React.useState<'pending' | 'decided'>('pending');
   const [decideFor, setDecideFor] = React.useState<DecideTarget>(null);
@@ -10820,6 +10829,26 @@ export function QhpManager() {
 
   const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' }) : '—');
   const fmtT = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: 'numeric', minute: '2-digit', hour12: true }).toUpperCase() : '');
+  // The pin line under a Task Pending card's actions: "Pin saved" (opens Google Maps) or "No pin yet", and the
+  // Add / Update location button that opens the paste sheet.
+  const pinRow = (c: import('../lib/qhpManagerQueries').PendingClient) => {
+    const pin = pins[c.clientId];
+    return (
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2 }}>
+        <Pressable onPress={() => { if (pin) Linking.openURL(mapsLinkFor(pin.lat, pin.lng)).catch(() => {}); }} disabled={!pin} hitSlop={10} accessibilityRole={pin ? 'link' : 'text'} accessibilityLabel={pin ? `Pin saved for ${c.name}, open in Google Maps` : `No pin yet for ${c.name}`}
+          style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 7, paddingHorizontal: 10, borderRadius: 10, backgroundColor: hexA(pin ? C.green : C.gold, 0.1), borderWidth: 1, borderColor: hexA(pin ? C.green : C.gold, 0.35) }}>
+          <Icon name="pin" size={12} color={pin ? C.green : C.gold} strokeWidth={2.2} />
+          <Text numberOfLines={1} style={{ flex: 1, fontFamily: F.bodySemi, fontSize: 11.5, color: pin ? C.green : C.gold }}>{pin ? 'Pin saved' : 'No pin yet'}</Text>
+          {pin ? <Icon name="chevRight" size={11} color={C.green} strokeWidth={2.4} /> : null}
+        </Pressable>
+        <Pressable onPress={() => setLocFor({ clientId: c.clientId, name: c.name })} hitSlop={10} accessibilityRole="button" accessibilityLabel={`${pin ? 'Update' : 'Add'} location for ${c.name}`}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 7, paddingHorizontal: 12, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)' }}>
+          <Icon name="map" size={12} color={C.ink3} strokeWidth={2.1} />
+          <Text style={{ fontFamily: F.bodyBold, fontSize: 11.5, color: C.ink }}>{pin ? 'Update location' : 'Add location'}</Text>
+        </Pressable>
+      </View>
+    );
+  };
 
   // Unknown (loading / paused offline / errored) is not "denied".
   if (caps.isPending || caps.isError) return <AccessPending paused={caps.isPaused} error={caps.isError} onRetry={caps.refetch} />;
@@ -10990,6 +11019,7 @@ export function QhpManager() {
                         </Pressable>
                         <Pressable onPress={() => setHoldFor(c)} style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 9, borderRadius: 11, backgroundColor: hexA(C.purple, 0.12), borderWidth: 1, borderColor: hexA(C.purple, 0.4) }}><Text style={{ fontFamily: F.bodyBold, fontSize: 12, color: C.purple }}>Hold</Text></Pressable>
                       </View>
+                      {pinRow(c)}
                     </View>
                   );
                 })
@@ -11025,6 +11055,7 @@ export function QhpManager() {
                           <Icon name="copy" size={14} color={C.ink3} strokeWidth={2} />
                         </Pressable>
                       </View>
+                      {pinRow(c)}
                     </View>
                   );
                 })
@@ -11048,6 +11079,7 @@ export function QhpManager() {
                         <Text style={{ fontFamily: F.bodyBold, fontSize: 12, color: '#fff' }}>Schedule QHP</Text>
                       </LinearGradient>
                     </Pressable>
+                    {pinRow(c)}
                   </View>
                 ))
               ) : (
@@ -11802,6 +11834,9 @@ export function QhpManager() {
 
       {/* Manager calendar "Add QHP" — blank sheet with its own client picker */}
       <ScheduleQhpSheet visible={mgrAddOpen} onClose={() => setMgrAddOpen(false)} scheduledBy={session?.user?.id ?? ''} />
+
+      {/* Add / Update client location (2 Nov 2026): the WhatsApp paste sheet behind the Task Pending card buttons */}
+      <ClientLocationSheet target={locFor} existing={locFor ? pins[locFor.clientId] ?? null : null} onClose={() => setLocFor(null)} />
 
       {/* Manager reschedule modal — 14-day picker + tap-to-cycle time */}
       <Modal visible={!!reschedFor} transparent animationType="fade" onRequestClose={() => setReschedFor(null)}>
