@@ -184,6 +184,10 @@ export async function updateOutboxItem(id: string, patch: { label?: string; payl
 export function getOutbox(): OutboxItem[] {
   return items;
 }
+/** The signed-in user's queued items right now, without subscribing (useOutboxAll re-renders on every change). */
+export function getOutboxMine(): OutboxItem[] {
+  return items.filter(mine);
+}
 
 /* ---- queued workout logs by roster slot (15 Oct 2026) ----
    The roster card must know that a slot already has a log waiting on this device, or the
@@ -415,9 +419,13 @@ export function initOffline(queryClient: QueryClient) {
     NetInfo.addEventListener((state) => {
       const next = !!state.isConnected && state.isInternetReachable !== false;
       const wasOffline = !online;
+      const changed = next !== online;
       online = next;
       setOnline(next);
-      notify();
+      // Only a real online/offline flip concerns the UI (2 Nov 2026). NetInfo also fires for signal and link changes
+      // with the same answer (often on mobile data); every one used to hand each useOutbox/useOutboxAll screen a new
+      // list and redraw it, the whole workout log form included.
+      if (changed) notify();
       if (next && wasOffline) drainOutbox();
     })
   );

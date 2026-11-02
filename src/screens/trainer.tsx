@@ -17,7 +17,8 @@ import {
   Serif, Body, Mono, Card, StatCard, QuickAction, IconChip, GradientButton, ProgressBar, Pill, Avatar, AvatarPhoto, CountUp,
 } from '../components/primitives';
 import { useSidebarProfile, useUploadAvatar } from '../lib/navQueries';
-import { Page, GreetingHeader, TitleBlock, BackLink, MiniStat, Badge, SessionCard, CollapsibleSessionCard, ActionBtn, MiniAvatar, HScroll, AccessPending } from './common';
+import { Page, PageRevealContext, GreetingHeader, TitleBlock, BackLink, MiniStat, Badge, SessionCard, CollapsibleSessionCard, ActionBtn, MiniAvatar, HScroll, AccessPending } from './common';
+import { splitBodyweightLoad, joinBodyweightLoad, decimalOnly } from '../lib/workoutLoad';
 import { AccountSwitch } from '../components/AccountSwitch';
 import { QhpReviewAlert, HeldReportsAlert } from '../components/qhpAlerts';
 import { OddsWordmark } from '../components/oddsAi';
@@ -45,7 +46,7 @@ import { useAddOwnSession, useTodayRoster, useTrainerStats, useTrainerProfile, u
 import { PrevSet, useMyClients, useClientDetail, useClientSessions, useClientPlans, useClientGoals, useSaveWeeklyGoals, useDeleteWeeklyGoal, useZone2Week, useLogZone2Session, useWeeklyHealthSummary, PLAN_VALID_DAYS, useClientReports, useClientConsultAi, ClientConsultAi, useClientBioAge, useClientProgression, useCreateWorkoutSession, useModalityGate, useWorkoutTemplates, useSaveWorkoutTemplate, useDeleteWorkoutTemplate, useClientHealthCheck, useSaveHealthData, useExerciseDb, useSessionExercises, uuidv4, HealthDataInput, useWeeklyProgressionAll, ackWeeklyReport, WeeklyProgressionRow, useApprovedPlansForLogging, usePartnerInfo, usePreviousExerciseData, checkDuplicateWorkoutToday, PlanExerciseRow, useClientDailyStats, useClientWhoopRecovery, useSaveClientHomeLocation, PILATES_REFORMER_EXERCISES, usePlanEditValidation, normalizePlanModality, PLAN_EDIT_MAX_WORKOUTS } from '../lib/clientQueries';
 import * as Location from 'expo-location';
 import KvStorage from 'expo-sqlite/kv-store';
-import { enqueueOutbox, getIsOnline, useIsOnline, useOutbox, useOutboxAll, retryOutboxItem, removeOutboxItem, drainOutbox, submitItem, updateOutboxItem, getOutboxItem, WorkoutLogOutboxPayload, OutboxItem, useSyncedNotices, dismissSyncedNotice, workoutQueueBySlot, queuedLine, pendingWorkoutForSlot, type QueuedWorkout } from '../lib/offline';
+import { enqueueOutbox, getIsOnline, useIsOnline, useOutbox, useOutboxAll, getOutboxMine, retryOutboxItem, removeOutboxItem, drainOutbox, submitItem, updateOutboxItem, getOutboxItem, WorkoutLogOutboxPayload, OutboxItem, useSyncedNotices, dismissSyncedNotice, workoutQueueBySlot, queuedLine, pendingWorkoutForSlot, type QueuedWorkout } from '../lib/offline';
 import { useClientThreadsUnread } from '../lib/clientThreadQueries';
 import { useClientsOtpFlags, useMySessionOtpStatus, saveSessionOtpOffline, savedOtpsFrom, failedVerifyReasonFor, discardSavedOtps } from '../lib/sessionOtpQueries';
 import { otpGateNeeded, isOtpGateError, savedOtpCovers, istDayOf, workoutOtpErrorText, OTP_SAVED_HINT } from '../lib/sessionOtp';
@@ -6375,14 +6376,22 @@ let setInputSeq = 0;
 /* Push every debounced set edit into state NOW — called before submit and before
    any structural change (add/remove/reorder) so an index-based commit can never
    land on the wrong set. */
-function flushPendingSetCommits() {
+function flushPendingSetCommits(): number {
   const fns = [...pendingSetCommits.values()];
   pendingSetCommits.clear();
   fns.forEach((f) => f());
+  return fns.length;
 }
 /* Uncontrolled-feeling input: typing only re-renders this leaf; the value is
-   committed to the exercises state on blur / end-editing / a short debounce. */
-const SetInput = React.memo(function SetInput({ value, digits, onCommit, onBlur, onEndEditing, ...rest }: { value: string; digits?: boolean; onCommit: (v: string) => void } & TextInputProps) {
+   committed to the exercises state on blur / end-editing / a short debounce.
+   2 Nov 2026 ("the workout log form is not smooth"): also used for Session name, Remarks, the exercise search and
+   the health check-in boxes, which used to redraw the whole form on every keystroke.
+     decimal             digits and one point (load, hours slept, litres)
+     commitOnEmptyChange commit at once when the box goes from empty to filled or back, so a button that needs a
+                         value (Save Health Data) turns on the moment it should; the rest still waits for the pause
+     on focus            the Page scrolls the box above an already-open keyboard (PageRevealContext) */
+const SetInput = React.memo(function SetInput({ value, digits, decimal, commitOnEmptyChange, onCommit, onBlur, onEndEditing, onFocus, ...rest }: { value: string; digits?: boolean; decimal?: boolean; commitOnEmptyChange?: boolean; onCommit: (v: string) => void } & TextInputProps) {
+  const reveal = React.useContext(PageRevealContext);
   const [local, setLocal] = React.useState(value);
   const committedRef = React.useRef(value);
   const latestRef = React.useRef(value);
@@ -6402,14 +6411,45 @@ const SetInput = React.memo(function SetInput({ value, digits, onCommit, onBlur,
   const onChange = (t: string) => {
     // Keyboard-suggestion guard (Android): a suggestion tap REPLACES the text with a
     // word; digits-only fields keep the previous value instead of being wiped.
-    const next = digits ? (t.replace(/[^0-9]/g, '') || (t.trim() ? latestRef.current : '')) : t;
+    const next = digits ? (t.replace(/[^0-9]/g, '') || (t.trim() ? latestRef.current : ''))
+      : decimal ? (decimalOnly(t) || (t.trim() ? latestRef.current : ''))
+      : t;
     latestRef.current = next;
     setLocal(next);
+    if (commitOnEmptyChange && (next.trim() === '') !== (committedRef.current.trim() === '')) { commit(); return; }
     pendingSetCommits.set(idRef.current, commit);
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(commit, SET_COMMIT_MS);
   };
-  return <TextInput {...rest} value={local} onChangeText={onChange} onBlur={(e) => { commit(); onBlur?.(e); }} onEndEditing={(e) => { commit(); onEndEditing?.(e); }} />;
+  return <TextInput {...rest} value={local} onChangeText={onChange} onFocus={(e) => { reveal?.(); onFocus?.(e); }} onBlur={(e) => { commit(); onBlur?.(e); }} onEndEditing={(e) => { commit(); onEndEditing?.(e); }} />;
+});
+
+/* Load box (2 Nov 2026): numbers on the decimal pad, and a BW button for a bodyweight load. The saved text keeps
+   its old shape ("20", "BW", "BW+5": src/lib/workoutLoad.ts), so nothing else changes. */
+const LoadCell = React.memo(function LoadCell({ value, setNo, placeholder, onCommit }: { value: string; setNo: number; placeholder: string; onCommit: (v: string) => void }) {
+  const { bw, extra } = splitBodyweightLoad(value);
+  const onCommitRef = React.useRef(onCommit); onCommitRef.current = onCommit;
+  const bwRef = React.useRef(bw); bwRef.current = bw;
+  // The newest number typed (a pending debounce included), so the BW toggle never drops it.
+  const extraRef = React.useRef(extra);
+  React.useEffect(() => { extraRef.current = extra; }, [extra]);
+  const commitExtra = React.useCallback((v: string) => { extraRef.current = v; onCommitRef.current(joinBodyweightLoad(bwRef.current, v)); }, []);
+  const toggleBw = () => {
+    flushPendingSetCommits(); // a number still waiting on the debounce lands first
+    const nextBw = !bwRef.current;
+    bwRef.current = nextBw;
+    onCommitRef.current(joinBodyweightLoad(nextBw, extraRef.current));
+  };
+  return (
+    <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+      <SetInput value={extra} decimal accessibilityLabel={`Set ${setNo} load in kilograms${bw ? ', on top of bodyweight' : ''}`} onCommit={commitExtra}
+        keyboardType="decimal-pad" placeholder={bw ? '+ kg' : placeholder} placeholderTextColor={C.muted3} style={cellInput} />
+      <Pressable onPress={toggleBw} hitSlop={10} accessibilityRole="button" accessibilityState={{ selected: bw }} accessibilityLabel={`Bodyweight load for set ${setNo}`}
+        style={{ width: 34, height: 42, borderRadius: 11, alignItems: 'center', justifyContent: 'center', backgroundColor: bw ? hexA(C.orange, 0.16) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: bw ? hexA(C.orange, 0.5) : 'rgba(255,255,255,0.1)' }}>
+        <Text style={{ fontFamily: F.mono, fontSize: 10.5, color: bw ? C.orange : C.muted2 }}>BW</Text>
+      </Pressable>
+    </View>
+  );
 });
 
 const setIncomplete = (e: WExercise, s: WSet) => (e.measurement === 'duration' ? !s.duration.trim() : !s.reps.trim());
@@ -6551,8 +6591,8 @@ const ExerciseCard = React.memo(function ExerciseCard(props: ExerciseCardProps) 
                         <SetInput value={st.reps} digits accessibilityLabel={`Set ${si + 1} reps`} onCommit={(v) => updateSet(ei, si, { reps: v })} keyboardType="number-pad" placeholder={metricPh} placeholderTextColor={missing ? hexA(C.gold, 0.8) : C.muted3} style={[cellInput, missing ? { borderWidth: 1, borderColor: hexA(C.gold, 0.4) } : null]} />
                       )}
                       {!isAerobicsModality ? (
-                        // Free text (web parity): bodyweight expressions like "BW+5" are valid loads.
-                        <SetInput value={st.load}  accessibilityLabel={`Set ${si + 1} load`}onCommit={(v) => updateSet(ei, si, { load: v })} autoCapitalize="characters" autoCorrect={false} placeholder={loadPh} placeholderTextColor={C.muted3} style={cellInput} />
+                        // Numbers + a BW button (2 Nov 2026); bodyweight loads are still saved as "BW" / "BW+5" (web parity).
+                        <LoadCell value={st.load} setNo={si + 1} placeholder={loadPh} onCommit={(v) => updateSet(ei, si, { load: v })} />
                       ) : null}
                       <Pressable onPress={() => removeSet(ei, si)} disabled={ex.sets.length === 1} accessibilityRole="button" accessibilityLabel={`Remove set ${si + 1}`} style={{ width: 26, paddingVertical: 8, alignItems: 'center', opacity: ex.sets.length === 1 ? 0.3 : 1 }} hitSlop={10}>
                         <Icon name="close" size={13} color={C.muted2} strokeWidth={2.2} />
@@ -6649,7 +6689,8 @@ export function Workout() {
   const [z2Date, setZ2Date] = React.useState<string | null>(null);
   const [z2Dur, setZ2Dur] = React.useState('');
   const isOnline = useIsOnline();
-  const outboxAllW = useOutboxAll(); // a session code saved offline that the server refused shows its own reason
+  // A session code saved offline that the server refused shows its own reason: read the queue only then (2 Nov 2026).
+  // Subscribing (useOutboxAll) redrew this whole form on every queue or network event.
   // Health data entered while offline — satisfies the gate locally and syncs
   // inside the same outbox item as the workout log.
   const [offlineHealth, setOfflineHealth] = React.useState<HealthDataInput | null>(null);
@@ -6717,18 +6758,20 @@ export function Workout() {
     Keyboard.dismiss();
     setTimeout(() => setHealthOpen(false), 80);
   }, []);
+  // Keyboard height for the three sheets that pad by it (health check-in, Add Exercise, templates). Listened to
+  // only while one of them is open (effect below the sheet flags): kept for the whole screen it redrew the entire
+  // form on every keyboard show, hide and height change, e.g. each reps (number pad) to load move (2 Nov 2026).
   const [kbH, setKbH] = React.useState(0);
-  React.useEffect(() => {
-    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const s = Keyboard.addListener(showEvt, (e: any) => setKbH(e.endCoordinates?.height ?? 0));
-    const h = Keyboard.addListener(hideEvt, () => setKbH(0));
-    return () => { s.remove(); h.remove(); };
-  }, []);
   const [hSleep, setHSleep] = React.useState('');
   const [hRating, setHRating] = React.useState<number | null>(null);
   const [hSteps, setHSteps] = React.useState('');
   const [hHydration, setHHydration] = React.useState(''); // litres, 5 Oct 2026
+  // The three boxes type locally (SetInput, 2 Nov 2026); saveHealth reads the newest values here after a flush.
+  const hValsRef = React.useRef({ sleep: '', steps: '', hydration: '' });
+  hValsRef.current = { sleep: hSleep, steps: hSteps, hydration: hHydration };
+  const commitHSleep = React.useCallback((v: string) => { hValsRef.current = { ...hValsRef.current, sleep: v }; setHSleep(v); }, []);
+  const commitHSteps = React.useCallback((v: string) => { hValsRef.current = { ...hValsRef.current, steps: v }; setHSteps(v); }, []);
+  const commitHHydration = React.useCallback((v: string) => { hValsRef.current = { ...hValsRef.current, hydration: v }; setHHydration(v); }, []);
   // Medicine check-in (14 Oct 2026): when the server says it is due (no trainer check-in in
   // the last 10 days), the sheet lists the latest prescription's and QHP's medicines plus
   // last time's ticked ones; the trainer ticks and adds. Save keeps the answer in the form;
@@ -6767,14 +6810,17 @@ export function Workout() {
       closeHealthSheet();
       return;
     }
+    // The boxes keep typing locally for a moment (SetInput): commit what is waiting, then read the newest values.
+    flushPendingSetCommits();
+    const { sleep: vSleep, steps: vSteps, hydration: vHydration } = hValsRef.current;
     const payload: HealthDataInput = {
       clientId: selectedClientId as string,
       trainerId,
-      hoursSlept: hSleep.trim() ? Number(hSleep) : null,
+      hoursSlept: vSleep.trim() ? Number(vSleep) : null,
       scheduledHours: health?.scheduledHours ?? 8,
       nutritionRating: hRating,
-      stepsCount: hSteps.trim() ? Number(hSteps) : null,
-      hydrationLitres: hHydration.trim() ? Number(hHydration) : null,
+      stepsCount: vSteps.trim() ? Number(vSteps) : null,
+      hydrationLitres: vHydration.trim() ? Number(vHydration) : null,
       // The check-in belongs to the WORKOUT day (today), stamped now at entry time so an
       // offline item that drains tomorrow still lands on today (iOS parity, 24 Sep 2026).
       logDate: localToday(),
@@ -6812,6 +6858,20 @@ export function Workout() {
   const setExercises = React.useCallback((u: React.SetStateAction<WExercise[]>) => { flushPendingSetCommits(); setExercisesRaw(u); }, []);
   const [pickerOpen, setPickerOpen] = React.useState(false);
   const [exSearch, setExSearch] = React.useState('');
+  // The search box keeps its typing locally (SetInput); the "add custom" buttons read the newest text from here.
+  const exSearchRef = React.useRef(exSearch); exSearchRef.current = exSearch;
+  const kbSheetOpen = healthOpen || pickerOpen || templatesOpen;
+  React.useEffect(() => {
+    if (!kbSheetOpen) { setKbH(0); return; }
+    const km: any = Keyboard as any;
+    const open = typeof km.isVisible === 'function' ? km.isVisible() : false;
+    setKbH(open ? (km.metrics?.()?.height ?? 0) : 0); // a sheet opened over a keyboard that is already up
+    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const s = Keyboard.addListener(showEvt, (e: any) => setKbH(e.endCoordinates?.height ?? 0));
+    const h = Keyboard.addListener(hideEvt, () => setKbH(0));
+    return () => { s.remove(); h.remove(); };
+  }, [kbSheetOpen]);
   // Pilates picker sub-tab: Mat = exercises_db list, Reformer = hardcoded list.
   // Resets to Mat each time the picker opens (web parity). Taps add instantly,
   // so selections naturally persist across tab switches.
@@ -6822,6 +6882,14 @@ export function Workout() {
   const [customMeasure, setCustomMeasure] = React.useState<'reps' | 'duration'>('reps');
   const exDbQ = useExerciseDb(modality || 'strength');
   const [remark, setRemark] = React.useState('');
+  // Session name and Remarks type into SetInput (local until a pause or blur, 2 Nov 2026). These refs carry the
+  // newest committed text; the commit handlers write them at once, so submit can read them right after
+  // flushPendingSetCommits() without waiting for a render.
+  const remarkRef = React.useRef(remark); remarkRef.current = remark;
+  const sessionNameRef = React.useRef(sessionName); sessionNameRef.current = sessionName;
+  const commitRemark = React.useCallback((v: string) => { remarkRef.current = v; setRemark(v); }, []);
+  const commitSessionName = React.useCallback((v: string) => { sessionNameRef.current = v; setSessionName(v); }, []);
+  const commitExSearch = React.useCallback((v: string) => { exSearchRef.current = v; setExSearch(v); }, []);
   const [rpe, setRpe] = React.useState<number | null>(null);
   // Voice notes (30 Sep 2026): durable local takes, queued behind the log on submit.
   const [voiceTakes, setVoiceTakes] = React.useState<PendingVoiceTake[]>([]);
@@ -6916,9 +6984,12 @@ export function Workout() {
   // same rule — A's exercises can never overwrite B's saved work again.
   const draftKeyFor = (cid: string) => `workout-draft:${trainerId}:${cid}`;
   const snapshotFormTo = (cid: string) => {
-    const meaningful = exercises.some((e) => e.name.trim()) || sessionName.trim() || remark.trim() || voiceTakes.length > 0;
+    flushPendingSetCommits(); // Session name / Remarks typed a moment ago land in their refs now
+    const sn = sessionNameRef.current;
+    const rm = remarkRef.current;
+    const meaningful = exercises.some((e) => e.name.trim()) || sn.trim() || rm.trim() || voiceTakes.length > 0;
     if (!meaningful || !trainerId) return;
-    KvStorage.setItem(draftKeyFor(cid), JSON.stringify({ sessionName, exercises, remark, rpe, modality, customModalityName, voiceTakes })).catch(() => {});
+    KvStorage.setItem(draftKeyFor(cid), JSON.stringify({ sessionName: sn, exercises, remark: rm, rpe, modality, customModalityName, voiceTakes })).catch(() => {});
   };
   /* Restore `cid`'s own draft if it has real content; otherwise carry the given
      selection over with values cleared. Marks the draft-restore effect as
@@ -6960,7 +7031,7 @@ export function Workout() {
     setPartnerPlan({ groupId: partnerPlan.groupId, next: outgoing });
     set({ selectedClientId: incoming.id, selectedClientName: incoming.name, workoutScheduleId: null });
     AsyncStorage.setItem(PARALLEL_STORE_KEY, JSON.stringify({ primaryId: incoming.id, primaryName: incoming.name, second: outgoing, groupId: partnerPlan.groupId, at: Date.now() })).catch(() => {});
-    await applyDraftOrCarry(incoming.id, exercises, sessionName);
+    await applyDraftOrCarry(incoming.id, exercises, sessionNameRef.current);
   };
   // Restore a stored pair for the SAME primary client within the TTL (web localStorage parity).
   React.useEffect(() => {
@@ -7238,7 +7309,8 @@ export function Workout() {
   const flushDraft = React.useCallback(() => {
     if (!draftDirtyRef.current || !draftKeyRef.current) return;
     draftDirtyRef.current = false;
-    KvStorage.setItem(draftKeyRef.current, JSON.stringify(draftStateRef.current)).catch(() => {});
+    // Session name and Remarks from their refs: they may hold text committed after the last render (2 Nov 2026).
+    KvStorage.setItem(draftKeyRef.current, JSON.stringify({ ...draftStateRef.current, sessionName: sessionNameRef.current, remark: remarkRef.current })).catch(() => {});
   }, []);
   React.useEffect(() => {
     if (!draftKey || done || editingOutboxId) return; // edits live in the outbox item, not the draft
@@ -7254,10 +7326,17 @@ export function Workout() {
     return () => clearTimeout(t);
   }, [draftKey, sessionName, exercises, remark, rpe, modality, customModalityName, done, flushDraft]);
   // Crash/kill safety net: flush the pending draft on unmount and whenever the app
-  // leaves the foreground — once each, never per keystroke.
+  // leaves the foreground — once each, never per keystroke. Text still waiting in a box's
+  // debounce is committed first (this cleanup runs before the boxes' own), so it is kept.
+  const draftEligibleRef = React.useRef(true);
+  draftEligibleRef.current = !done && !editingOutboxId; // the same rule as the draft effect above
   React.useEffect(() => {
-    const sub = AppState.addEventListener('change', (s) => { if (s !== 'active') flushDraft(); });
-    return () => { sub.remove(); flushDraft(); };
+    const flushAll = () => {
+      if (flushPendingSetCommits() > 0 && draftKeyRef.current && draftEligibleRef.current) draftDirtyRef.current = true;
+      flushDraft();
+    };
+    const sub = AppState.addEventListener('change', (s) => { if (s !== 'active') flushAll(); });
+    return () => { sub.remove(); flushAll(); };
   }, [flushDraft]);
   // Clearing also drops any pending flush, so a saved log can't be resurrected
   // by the unmount/background writer.
@@ -7348,7 +7427,7 @@ export function Workout() {
       // applyDraftOrCarry restores their saved work first, so logging client A
       // can never overwrite exercises the partner already picked.
       const carrySource: WExercise[] = exercises.filter(exHasData);
-      const carriedName = sessionName;
+      const carriedName = sessionNameRef.current;
       postSaveTimer.current = setTimeout(() => {
         postSaveTimer.current = null;
         // Second leg of the partner pair: same shared group id, no schedule slot.
@@ -7397,7 +7476,7 @@ export function Workout() {
     // explicit confirmation. Online only; edits skip it (web parity).
     if (!skipDupCheck && !editingOutboxId && getIsOnline()) {
       try {
-        const dup = await checkDuplicateWorkoutToday({ clientId: selectedClientId as string, trainerId, sessionModality: sessionName.trim() || modLabel });
+        const dup = await checkDuplicateWorkoutToday({ clientId: selectedClientId as string, trainerId, sessionModality: sessionNameRef.current.trim() || modLabel });
         if (dup) { setDupOpen(true); return; }
       } catch { /* allow on error (web parity) */ }
     }
@@ -7421,7 +7500,7 @@ export function Workout() {
         notesSessionId = base.sessionId ?? null;
         const updated = await updateOutboxItem(reuseId, {
           label,
-          payload: { ...base, sessionName: sessionName.trim() || modLabel, modality: effectiveModality, exercises: submitExercises, remark, rpe, clientName },
+          payload: { ...base, sessionName: sessionNameRef.current.trim() || modLabel, modality: effectiveModality, exercises: submitExercises, remark: remarkRef.current, rpe, clientName },
         });
         if (!updated) {
           // The item synced or was discarded while editing — nothing left to update.
@@ -7441,10 +7520,10 @@ export function Workout() {
           trainerId,
           clientId: selectedClientId as string,
           clientName,
-          sessionName: sessionName.trim() || modLabel,
+          sessionName: sessionNameRef.current.trim() || modLabel,
           modality: effectiveModality,
           exercises: submitExercises,
-          remark,
+          remark: remarkRef.current,
           rpe,
           scheduleSessionId: workoutScheduleId,
           partnerSessionGroupId: partnerPlan?.groupId ?? null,
@@ -7492,7 +7571,7 @@ export function Workout() {
         finishAfterSave(true);
       } else {
         // Server rejection: stays safely queued on this device, shown on Home.
-        setSyncError(isOtpGateError(res.error) ? workoutOtpErrorText(failedVerifyReasonFor(outboxAllW, workoutScheduleId)) : isPlanLimitError(res.error) ? planLimitText(res.error) : friendlyError(res.error, 'This log was not accepted. Check it and try again.'));
+        setSyncError(isOtpGateError(res.error) ? workoutOtpErrorText(failedVerifyReasonFor(getOutboxMine(), workoutScheduleId)) : isPlanLimitError(res.error) ? planLimitText(res.error) : friendlyError(res.error, 'This log was not accepted. Check it and try again.'));
         if (editingOutboxId) set({ editingOutboxId: null });
       }
     } finally {
@@ -7719,9 +7798,9 @@ export function Workout() {
                     })}
                   </View>
                 ) : null}
-                <TextInput
+                <SetInput
                   value={sessionName}
-                  onChangeText={setSessionName}
+                  onCommit={commitSessionName}
                   placeholder="e.g. Legs, Push, Full Body"
                   placeholderTextColor={C.muted3}
                   style={{ paddingVertical: 13, paddingHorizontal: 14, borderRadius: 13, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.03)', color: '#fff', fontFamily: F.body, fontSize: 15 }}
@@ -7996,9 +8075,9 @@ export function Workout() {
           />
           <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginVertical: 2 }} />
           <Mono style={{ fontSize: 10, letterSpacing: 1.2, color: C.mono2 }}>SESSION REMARKS</Mono>
-          <TextInput
+          <SetInput
             value={remark}
-            onChangeText={setRemark}
+            onCommit={commitRemark}
             placeholder="How did the session go? (optional)"
             placeholderTextColor={C.muted3}
             multiline
@@ -8255,7 +8334,7 @@ export function Workout() {
                   </View>
                 </View>
                 <View style={{ flexDirection: 'row', alignItems: 'center', borderRadius: 13, borderWidth: 1, borderColor: hSleep ? hexA(C.gold, 0.4) : 'rgba(255,255,255,0.12)', backgroundColor: 'rgba(0,0,0,0.25)', paddingHorizontal: 14 }}>
-                  <TextInput value={hSleep} onChangeText={(t) => setHSleep(t.replace(/[^0-9.]/g, ''))} keyboardType="decimal-pad" placeholder="0.0" placeholderTextColor={C.muted3} style={{ flex: 1, paddingVertical: 13, color: '#fff', fontFamily: F.mono, fontSize: 22 }} />
+                  <SetInput value={hSleep} decimal commitOnEmptyChange onCommit={commitHSleep} keyboardType="decimal-pad" placeholder="0.0" placeholderTextColor={C.muted3} style={{ flex: 1, paddingVertical: 13, color: '#fff', fontFamily: F.mono, fontSize: 22 }} />
                   <Mono style={{ fontSize: 12, color: C.muted2 }}>HOURS SLEPT</Mono>
                 </View>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}>
@@ -8302,7 +8381,7 @@ export function Workout() {
                   <Mono style={{ fontSize: 10, color: C.muted3 }}>{`YESTERDAY · ${dayMonth(dayBefore(localToday())).toUpperCase()}`}</Mono>
                 </View>
                 <View style={{ flexDirection: 'row', alignItems: 'center', borderRadius: 13, borderWidth: 1, borderColor: hSteps ? hexA(C.blue, 0.4) : 'rgba(255,255,255,0.12)', backgroundColor: 'rgba(0,0,0,0.25)', paddingHorizontal: 14 }}>
-                  <TextInput value={hSteps} onChangeText={(t) => setHSteps(t.replace(/[^0-9]/g, ''))} onFocus={() => setTimeout(() => healthScrollRef.current?.scrollToEnd({ animated: true }), 120)} keyboardType="number-pad" placeholder="0" placeholderTextColor={C.muted3} style={{ flex: 1, paddingVertical: 13, color: '#fff', fontFamily: F.mono, fontSize: 22 }} />
+                  <SetInput value={hSteps} digits commitOnEmptyChange onCommit={commitHSteps} onFocus={() => setTimeout(() => healthScrollRef.current?.scrollToEnd({ animated: true }), 120)} keyboardType="number-pad" placeholder="0" placeholderTextColor={C.muted3} style={{ flex: 1, paddingVertical: 13, color: '#fff', fontFamily: F.mono, fontSize: 22 }} />
                   <Mono style={{ fontSize: 12, color: C.muted2 }}>STEPS</Mono>
                 </View>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}>
@@ -8328,7 +8407,7 @@ export function Workout() {
                     <Mono style={{ fontSize: 10, color: C.muted3 }}>{`YESTERDAY · ${dayMonth(dayBefore(localToday())).toUpperCase()}`}</Mono>
                   </View>
                   <View style={{ flexDirection: 'row', alignItems: 'center', borderRadius: 13, borderWidth: 1, borderColor: hHydration ? hexA(HYDRATION, 0.4) : 'rgba(255,255,255,0.12)', backgroundColor: 'rgba(0,0,0,0.25)', paddingHorizontal: 14 }}>
-                    <TextInput value={hHydration} onChangeText={(t) => setHHydration(t.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1').slice(0, 4))} onFocus={() => setTimeout(() => healthScrollRef.current?.scrollToEnd({ animated: true }), 120)} keyboardType="decimal-pad" placeholder="e.g. 2.5" placeholderTextColor={C.muted3} style={{ flex: 1, paddingVertical: 12, fontFamily: F.bodySemi, fontSize: 16, color: '#fff' }} />
+                    <SetInput value={hHydration} decimal maxLength={4} commitOnEmptyChange onCommit={commitHHydration} onFocus={() => setTimeout(() => healthScrollRef.current?.scrollToEnd({ animated: true }), 120)} keyboardType="decimal-pad" placeholder="e.g. 2.5" placeholderTextColor={C.muted3} style={{ flex: 1, paddingVertical: 12, fontFamily: F.bodySemi, fontSize: 16, color: '#fff' }} />
                     <Mono style={{ fontSize: 12, color: C.muted2 }}>LITRES</Mono>
                   </View>
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}>
@@ -8508,10 +8587,10 @@ export function Workout() {
             <>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 12, paddingHorizontal: 14, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', marginBottom: 10 }}>
               <Icon name="search" size={17} color={C.muted3} strokeWidth={2} />
-              <TextInput value={exSearch} onChangeText={setExSearch} placeholder="Search exercises…" placeholderTextColor={C.muted3} autoCorrect={false} style={{ flex: 1, fontFamily: F.body, fontSize: 15, color: '#fff', padding: 0 }} />
+              <SetInput value={exSearch} onCommit={commitExSearch} placeholder="Search exercises…" placeholderTextColor={C.muted3} autoCorrect={false} style={{ flex: 1, fontFamily: F.body, fontSize: 15, color: '#fff', padding: 0 }} />
             </View>
 
-            <Pressable onPress={() => { setCustomName(exSearch.trim()); setCustomMeasure('reps'); setCustomFormOpen(true); }} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 13, borderRadius: 13, borderWidth: 1.5, borderStyle: 'dashed', borderColor: hexA(C.orange, 0.32), backgroundColor: hexA(C.orange, 0.05), marginBottom: 12 }}>
+            <Pressable onPress={() => { flushPendingSetCommits(); setCustomName(exSearchRef.current.trim()); setCustomMeasure('reps'); setCustomFormOpen(true); }} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 13, borderRadius: 13, borderWidth: 1.5, borderStyle: 'dashed', borderColor: hexA(C.orange, 0.32), backgroundColor: hexA(C.orange, 0.05), marginBottom: 12 }}>
               <Icon name="plus" size={15} color={C.orange} strokeWidth={2.6} />
               <Text style={{ fontFamily: F.bodyBold, fontSize: 13.5, color: C.orange }}>Add Custom Exercise</Text>
             </Pressable>
@@ -8559,7 +8638,7 @@ export function Workout() {
                   windowSize={9}
                   removeClippedSubviews
                   ListHeaderComponent={q && !exactMatch ? (
-                    <Pressable onPress={() => { setCustomName(exSearch.trim()); setCustomMeasure('reps'); setCustomFormOpen(true); }} style={{ flexDirection: 'row', alignItems: 'center', gap: 11, padding: 14, borderRadius: 13, backgroundColor: hexA(C.orange, 0.08), borderWidth: 1, borderColor: hexA(C.orange, 0.3), marginBottom: 8 }}>
+                    <Pressable onPress={() => { flushPendingSetCommits(); setCustomName(exSearchRef.current.trim()); setCustomMeasure('reps'); setCustomFormOpen(true); }} style={{ flexDirection: 'row', alignItems: 'center', gap: 11, padding: 14, borderRadius: 13, backgroundColor: hexA(C.orange, 0.08), borderWidth: 1, borderColor: hexA(C.orange, 0.3), marginBottom: 8 }}>
                       <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: hexA(C.orange, 0.14), alignItems: 'center', justifyContent: 'center' }}>
                         <Icon name="plus" size={16} color={C.orange} strokeWidth={2.6} />
                       </View>

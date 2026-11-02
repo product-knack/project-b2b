@@ -178,6 +178,10 @@ function RefreshPill({ visible }: { visible: boolean }) {
 // off instead of jumping to the top. Keyed by the caller's `scrollKey`.
 const scrollMemory = new Map<string, number>();
 
+/** The nearest Page's "scroll this focused input above the keyboard" (Android; a no-op elsewhere or with the
+    keyboard closed). Null outside a Page, e.g. inside a Modal sheet, where the page behind must not move. */
+export const PageRevealContext = React.createContext<((node?: any) => void) | null>(null);
+
 export const Page = React.forwardRef<React.ComponentRef<typeof ScrollView>, { children: React.ReactNode; gap?: number; pt?: number; pb?: number; kbAware?: boolean; scrollKey?: string; scrollEnabled?: boolean; scrollOffsetRef?: React.MutableRefObject<number> }>(function Page({ children, gap = 22, pt = 8, pb = 92, kbAware = false, scrollKey, scrollEnabled = true, scrollOffsetRef }, ref) {
   const queryClient = useQueryClient();
   const [refreshing, setRefreshing] = React.useState(false);
@@ -193,27 +197,37 @@ export const Page = React.forwardRef<React.ComponentRef<typeof ScrollView>, { ch
   // height and (b) auto-scrolls the focused TextInput just above the keyboard.
   // iOS is handled natively via automaticallyAdjustKeyboardInsets below.
   const [kbH, setKbH] = React.useState(0);
+  const kbHRef = React.useRef(0);
   const offsetRef = React.useRef(0);
+  // Scroll an input just above the keyboard. Runs when the keyboard opens, and (2 Nov 2026) when focus moves to
+  // another input while it is already open: keyboardDidShow does not fire again then, so the next set's box could
+  // sit behind the keyboard. Inputs call it through PageRevealContext on focus.
+  const reveal = React.useCallback((node?: any) => {
+    if (Platform.OS !== 'android') return;
+    const h = kbHRef.current;
+    const input: any = node ?? (TextInput as any).State?.currentlyFocusedInput?.();
+    if (!h || !input || !scrollRef.current) return;
+    requestAnimationFrame(() => {
+      try {
+        input.measureInWindow((_x: number, y: number, _w: number, ih: number) => {
+          const kbTop = Dimensions.get('window').height - h;
+          const overlap = y + ih + 24 - kbTop; // 24px breathing room above the keyboard
+          if (overlap > 0) scrollRef.current?.scrollTo({ y: offsetRef.current + overlap, animated: true });
+        });
+      } catch { /* input unmounted mid-measure */ }
+    });
+  }, []);
   React.useEffect(() => {
     if (Platform.OS !== 'android') return;
     const show = Keyboard.addListener('keyboardDidShow', (e: any) => {
       const h = e.endCoordinates?.height ?? 0;
+      kbHRef.current = h;
       setKbH(h);
-      const input: any = (TextInput as any).State?.currentlyFocusedInput?.();
-      if (!input || !scrollRef.current) return;
-      requestAnimationFrame(() => {
-        try {
-          input.measureInWindow((_x: number, y: number, _w: number, ih: number) => {
-            const kbTop = Dimensions.get('window').height - h;
-            const overlap = y + ih + 24 - kbTop; // 24px breathing room above the keyboard
-            if (overlap > 0) scrollRef.current?.scrollTo({ y: offsetRef.current + overlap, animated: true });
-          });
-        } catch { /* input unmounted mid-measure */ }
-      });
+      reveal();
     });
-    const hide = Keyboard.addListener('keyboardDidHide', () => setKbH(0));
+    const hide = Keyboard.addListener('keyboardDidHide', () => { kbHRef.current = 0; setKbH(0); });
     return () => { show.remove(); hide.remove(); };
-  }, []);
+  }, [reveal]);
   const onRefresh = React.useCallback(async () => {
     setRefreshing(true);
     // OFFLINE: refetching can only fail — errors would replace the cached (SQLite)
@@ -272,7 +286,7 @@ export const Page = React.forwardRef<React.ComponentRef<typeof ScrollView>, { ch
           />
         }
       >
-        {children}
+        <PageRevealContext.Provider value={reveal}>{children}</PageRevealContext.Provider>
       </ScrollView>
       <RefreshPill visible={refreshing} />
     </View>
