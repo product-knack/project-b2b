@@ -310,6 +310,7 @@ export const trainerNav: NavGroup[] = [
     { label: 'Essentials Auction', icon: 'gavel', route: 'essentials-auction' },
     { label: 'Essentials Manager', icon: 'gavel', route: 'essentials-manager' },
     { label: 'Payouts', icon: 'rupee', route: 'payouts' },
+    { label: 'Wallet', icon: 'rupee', route: 'wallet' },
     { label: 'Referrals', icon: 'userPlus', route: 'referrals' },
     { label: 'Incentive', icon: 'gift', route: 'incentives' },
   ] },
@@ -341,6 +342,7 @@ export const crmNav: NavGroup[] = [
     { label: 'Odds AI', icon: 'sparkle', route: 'crm-ai' },
     { label: 'My Clients', icon: 'users', route: 'crm-clients' },
     { label: 'Revenue Forecast', icon: 'rupee', route: 'crm-revenue-forecast' },
+    { label: 'Wallet', icon: 'rupee', route: 'wallet' },
     { label: 'Messenger', icon: 'chat', route: 'messenger' },
     { label: 'Client Threads', icon: 'atSign', route: 'client-threads' },
   ] },
@@ -372,6 +374,7 @@ export const coachNav: NavGroup[] = [
     { label: 'Dashboard', icon: 'grid', route: 'coach-dashboard' },
     { label: 'Trainers', icon: 'crown', route: 'coach-trainers' },
     { label: 'Assessments', icon: 'heart', route: 'coach-assessments' },
+    { label: 'Wallet', icon: 'rupee', route: 'wallet' },
   ] },
   { label: 'Clients', items: [
     { label: 'My Clients', icon: 'users', route: 'coach-clients' },
@@ -404,6 +407,7 @@ export const opsNav: NavGroup[] = [
     { label: 'Dashboard', icon: 'grid', route: 'ops-dashboard' },
     { label: 'Leads', icon: 'users', route: 'ops-leads' },
     { label: 'Clients', icon: 'layers', route: 'ops-clients' },
+    { label: 'Wallet', icon: 'rupee', route: 'wallet' },
     { label: 'Messenger', icon: 'chat', route: 'messenger' },
     { label: 'Client Threads', icon: 'atSign', route: 'client-threads' },
   ] },
@@ -433,6 +437,7 @@ export const adminNav: NavGroup[] = [
     { label: 'Clients', icon: 'users', route: 'admin-clients' },
     { label: 'Renewals', icon: 'swap', route: 'admin-renewals' },
     { label: 'Revenue Forecast', icon: 'rupee', route: 'admin-revenue-forecast' },
+    { label: 'Wallet', icon: 'rupee', route: 'wallet' },
     { label: 'Requests', icon: 'inbox', route: 'admin-requests' },
     { label: 'Incidents', icon: 'alert', route: 'admin-incidents' },
     { label: 'Users', icon: 'userCircle', route: 'admin-users' },
@@ -459,6 +464,7 @@ export const marketingNav: NavGroup[] = [
     { label: 'Influencer Clients', icon: 'users', route: 'marketing-clients' },
     { label: 'Leads', icon: 'userPlus', route: 'marketing-leads' },
     { label: 'Lead Analytics', icon: 'chart', route: 'marketing-lead-analytics' },
+    { label: 'Wallet', icon: 'rupee', route: 'wallet' },
     { label: 'Messenger', icon: 'chat', route: 'messenger' },
   ] },
   { label: 'Learn', items: [
@@ -481,6 +487,7 @@ export const academyNav: NavGroup[] = [
     { label: 'Progression', icon: 'chart', route: 'coach-progression' },
     { label: 'Academy Management', icon: 'award', route: 'academy-management' },
     { label: 'B2C Reports', icon: 'file', route: 'b2c-reports' },
+    { label: 'Wallet', icon: 'rupee', route: 'wallet' },
     { label: 'Messenger', icon: 'chat', route: 'messenger' },
     { label: 'Client Threads', icon: 'atSign', route: 'client-threads' },
   ] },
@@ -506,6 +513,7 @@ export const doctorNav: NavGroup[] = [
     { label: 'Client Threads', icon: 'atSign', route: 'client-threads' },
     { label: 'Referrals', icon: 'userPlus', route: 'referrals' },
     { label: 'Reimbursement', icon: 'rupee', route: 'doctor-reimbursements' },
+    { label: 'Wallet', icon: 'rupee', route: 'wallet' },
   ] },
   { label: 'Head Doctor', items: [
     { label: 'All Clients', icon: 'layers', route: 'doctor-all-clients' },
@@ -528,6 +536,7 @@ export const consultantNav: NavGroup[] = [
   { label: 'Workspace', items: [
     { label: 'Consultant Dashboard', icon: 'home', route: 'doctor-dashboard' },
     { label: 'All Calls', icon: 'calendar', route: 'doctor-consultant-calls' },
+    { label: 'Wallet', icon: 'rupee', route: 'wallet' },
   ] },
   { label: 'Learn', items: [
     { label: 'Odds Nucleus', icon: 'nucleus', route: 'nucleus' },
@@ -539,6 +548,7 @@ export const therapistNav: NavGroup[] = [
     { label: 'Dashboard', icon: 'grid', route: 'therapist-dashboard' },
     { label: 'My Clients', icon: 'users', route: 'therapist-clients' },
     { label: 'Sessions', icon: 'calendar', route: 'therapist-sessions' },
+    { label: 'Wallet', icon: 'rupee', route: 'wallet' },
     { label: 'Messenger', icon: 'chat', route: 'messenger' },
     { label: 'Client Threads', icon: 'atSign', route: 'client-threads' },
   ] },
@@ -554,6 +564,7 @@ export const therapistNav: NavGroup[] = [
 export const essentialManagerNav: NavGroup[] = [
   { label: 'Workspace', items: [
     { label: 'Essentials Manager', icon: 'gavel', route: 'essentials-manager' },
+    { label: 'Wallet', icon: 'rupee', route: 'wallet' },
   ] },
   { label: 'Learn', items: [
     { label: 'Odds Nucleus', icon: 'nucleus', route: 'nucleus' },
@@ -563,6 +574,7 @@ export const essentialManagerNav: NavGroup[] = [
 export const techNav: NavGroup[] = [
   { label: 'Workspace', items: [
     { label: 'Tech Desk', icon: 'activity', route: 'tech-desk-inbox' },
+    { label: 'Wallet', icon: 'rupee', route: 'wallet' },
   ] },
   { label: 'Learn', items: [
     { label: 'Odds Nucleus', icon: 'nucleus', route: 'nucleus' },

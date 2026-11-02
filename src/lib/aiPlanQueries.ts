@@ -6,6 +6,8 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { supabase } from './supabase';
 import { invokeWithTimeout, withTimeout, NET_MS } from './withTimeout';
 import type { AiPlanPreview, AiPlanResult, EssentialsPlanGap, SplitKey } from './aiPlanDraft';
+import { parseWalletGate, type AiBill, type BillPreview } from './teamWallet';
+import { parseAiPlanResult } from './teamWalletQueries';
 
 /** Generating takes 20 to 40 seconds (Gemini reads the QHP and picks from about 230 exercises). */
 export const AI_PLAN_MS = 100_000;
@@ -51,6 +53,7 @@ export function useAiPlanPreview(clientId: string | null | undefined, enabled = 
         client_name: String(d?.client_name ?? ''),
         sources: d?.sources ?? null,
         model: String(d?.model ?? ''),
+        wallet: parseWalletGate(d?.wallet),
       };
     },
   });
@@ -58,19 +61,23 @@ export function useAiPlanPreview(clientId: string | null | undefined, enabled = 
 
 /** sessionsPerWeek is optional: without it the server uses the client's weekly slot count (the app sends none since 16 Oct 2026). */
 export type AiPlanRequest = { clientId: string; split: SplitKey; sessionsPerWeek?: number; note?: string };
+/** The draft call's answer: the draft itself, or (a trainer, Team Wallet 2 Nov 2026) a bill holding it until
+    Deduct from wallet (wallet-settle-ai-plan returns the same AiPlanResult). */
+export type AiPlanAnswer = { kind: 'draft'; result: AiPlanResult } | { kind: 'bill'; bill: AiBill; preview: BillPreview | null };
 /** One draft (20 to 40 s). Throws the server's sentence on refusal. */
 export function useAiPlanDraft() {
   return useMutation({
-    mutationFn: async (r: AiPlanRequest): Promise<AiPlanResult> => {
+    mutationFn: async (r: AiPlanRequest): Promise<AiPlanAnswer> => {
       const d = await callPlanFn({ client_id: r.clientId, split: r.split, sessions_per_week: r.sessionsPerWeek ?? undefined, note: r.note?.trim() || undefined }, AI_PLAN_MS);
-      if (!d?.draft || !Array.isArray(d.draft.sections)) throw new Error('Odds AI returned no plan. Try Generate again.');
-      return {
-        draft: d.draft,
-        dropped: Array.isArray(d.dropped) ? d.dropped : [],
-        sources: d.sources ?? null,
-        model: String(d.model ?? ''),
-        generated_at: String(d.generated_at ?? new Date().toISOString()),
-      };
+      if (d?.bill?.tx_id) {
+        const p = d.preview && typeof d.preview === 'object' ? d.preview : null;
+        return {
+          kind: 'bill',
+          bill: { tx_id: String(d.bill.tx_id), bill_paise: Number(d.bill.bill_paise) || 0, balance_paise: Number(d.bill.balance_paise) || 0, blocks: Array.isArray(d.bill.blocks) ? d.bill.blocks.map(String) : [] },
+          preview: p ? { sections: Array.isArray(p.sections) ? p.sections.map(String) : [], exercise_count: Number(p.exercise_count) || 0, split_label: p.split_label ?? null } : null,
+        };
+      }
+      return { kind: 'draft', result: parseAiPlanResult(d) };
     },
   });
 }

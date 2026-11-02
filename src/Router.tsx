@@ -24,6 +24,7 @@ import { Incentives } from './screens/incentives';
 import { EssentialsAuction } from './screens/essentialsAuction';
 import { EssentialsManager } from './screens/essentialsManager';
 import { Nucleus, NucleusPiece } from './screens/nucleus';
+import { Wallet } from './screens/wallet';
 import { QhpNavigation } from './screens/qhpNavigation';
 import { WorkoutAnalyst } from './screens/workoutAnalyst';
 import { Messenger, ChatNotifications } from './screens/messenger';
@@ -129,6 +130,8 @@ const SCREENS: Record<string, React.ComponentType> = {
   // Odds Nucleus (16 Oct 2026): published education pieces, every role; NOT in SENSITIVE_ROUTES (no client data).
   nucleus: Nucleus,
   'nucleus-piece': NucleusPiece,
+  // Team Wallet (2 Nov 2026): every role; money on screen, so it is in SENSITIVE_ROUTES.
+  wallet: Wallet,
   'qhp-navigate': QhpNavigation,
   qhp: Qhp,
   'qhp-manager': QhpManager,
@@ -282,6 +285,8 @@ const SENSITIVE_ROUTES = new Set([
   'academy-teacher', 'academy-student',
   // Chats — client health details are routinely discussed in messages
   'messenger', 'client-threads', 'manager-chat',
+  // Team Wallet (2 Nov 2026): balances, payment ids and the Razorpay checkout
+  'wallet',
 ]);
 
 /* Memoised on (route, role): ScreenHost re-renders on every transition frame

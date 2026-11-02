@@ -13,6 +13,9 @@ import { Body, Mono, Serif } from './primitives';
 import { trackEvent } from '../lib/amplitude';
 import { useAiPlanDraft } from '../lib/aiPlanQueries';
 import { SPLITS, splitOf, aiPromptLine, sourcesLine, draftExerciseCount, draftNewExercises, type AiPlanPreview, type AiPlanResult, type SplitKey } from '../lib/aiPlanDraft';
+import { useStore } from '../store';
+import { walletCardState, rupees } from '../lib/teamWallet';
+import { AiBillSheet, type AiBillTarget } from './AiBillSheet';
 
 const AI = '#A78BFA';
 const STEPS = ['Reading the QHP', 'Checking blood markers and medical history', 'Picking exercises from the Odds library', 'Setting sets, reps and rest', 'Checking every exercise against the library'];
@@ -26,7 +29,20 @@ export function AiPlanAssistant({ clientId, clientName, preview, onApply }: {
   onApply: (r: AiPlanResult, prompt: string) => void;
 }) {
   const draftM = useAiPlanDraft();
+  const { go } = useStore();
   const [open, setOpen] = React.useState(true);
+  /* Team Wallet (2 Nov 2026): a trainer's draft is held behind a bill of Rs 30 to 50 until Deduct from wallet.
+     The panel shows the wallet line, refuses Generate under Rs 50 or while a bill waits, and opens the bill sheet
+     after the draft (or for the waiting bill the preview reports). */
+  const [bill, setBill] = React.useState<AiBillTarget>(null);
+  const [billNote, setBillNote] = React.useState<string | null>(null);
+  const wallet = walletCardState(preview.wallet);
+  const pendingBill = preview.wallet?.pending_bill ?? null;
+  const openPendingBill = () => {
+    if (!pendingBill || !preview.wallet) return;
+    setBill({ tx_id: pendingBill.tx_id, bill_paise: pendingBill.bill_paise, balance_paise: preview.wallet.balance_paise, preview: pendingBill.preview, clientName: pendingBill.client_name ?? clientName });
+  };
+  const walletBlocks = wallet.state === 'floor' || wallet.state === 'bill_pending';
   const [split, setSplit] = React.useState<SplitKey | null>(null);
   const [note, setNote] = React.useState('');
   const [result, setResult] = React.useState<AiPlanResult | null>(null);
@@ -50,7 +66,14 @@ export function AiPlanAssistant({ clientId, clientName, preview, onApply }: {
     trackEvent('AI Plan Generate Tapped', { client_id: clientId, split, has_note: !!note.trim() });
     try {
       // Sessions a week: the server takes the client's weekly slot count (owner, 16 Oct 2026: no picker).
-      const r = await draftM.mutateAsync({ clientId, split, note });
+      const a = await draftM.mutateAsync({ clientId, split, note });
+      if (a.kind === 'bill') {
+        setBillNote(null);
+        trackEvent('AI Plan Bill Shown', { client_id: clientId, split, bill_paise: a.bill.bill_paise, blocks: a.bill.blocks.length });
+        setBill({ tx_id: a.bill.tx_id, bill_paise: a.bill.bill_paise, balance_paise: a.bill.balance_paise, preview: a.preview, clientName });
+        return;
+      }
+      const r = a.result;
       setResult(r);
       trackEvent('AI Plan Generated', { client_id: clientId, split, model: r.model, exercises: draftExerciseCount(r.draft), not_in_db: draftNewExercises(r.draft).length, dropped: r.dropped.length });
       onApply(r, aiPromptLine(r.draft.split_label || splitOf(split)?.label || split, note));
@@ -60,6 +83,13 @@ export function AiPlanAssistant({ clientId, clientName, preview, onApply }: {
   };
 
   const src = sourcesLine(preview.sources);
+  const applyPaid = (r: AiPlanResult) => {
+    setBill(null);
+    setResult(r);
+    setBillNote(null);
+    trackEvent('AI Plan Generated', { client_id: clientId, split: r.draft.split, model: r.model, exercises: draftExerciseCount(r.draft), not_in_db: draftNewExercises(r.draft).length, dropped: r.dropped.length, paid: true });
+    onApply(r, aiPromptLine(r.draft.split_label || splitOf(r.draft.split)?.label || r.draft.split, note));
+  };
 
   return (
     <LinearGradient colors={['rgba(76,52,140,0.42)', 'rgba(18,14,22,0.6)']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
@@ -83,6 +113,25 @@ export function AiPlanAssistant({ clientId, clientName, preview, onApply }: {
               <Body style={{ flex: 1, fontSize: 11, color: C.ink3, lineHeight: 15 }}>Reads {src}</Body>
             </View>
           ) : null}
+
+          {wallet.state !== 'free' && wallet.state !== 'unknown' ? (
+            <View style={{ gap: 8, padding: 11, borderRadius: 12, backgroundColor: walletBlocks ? hexA(C.gold, 0.08) : 'rgba(0,0,0,0.25)', borderWidth: 1, borderColor: walletBlocks ? hexA(C.gold, 0.35) : 'rgba(255,255,255,0.06)' }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+                <Icon name="rupee" size={12} color={walletBlocks ? C.gold : C.muted} strokeWidth={2.2} />
+                <Body style={{ flex: 1, fontSize: 11.5, color: walletBlocks ? C.gold : C.ink3, lineHeight: 15 }}>{wallet.line}</Body>
+              </View>
+              {wallet.action === 'wallet' ? (
+                <Pressable onPress={() => go('wallet')} hitSlop={10} accessibilityRole="button" style={{ alignSelf: 'flex-start', paddingVertical: 7, paddingHorizontal: 12, borderRadius: 9, backgroundColor: hexA(C.orange, 0.16), borderWidth: 1, borderColor: hexA(C.orange, 0.5) }}>
+                  <Text style={{ fontFamily: F.bodyBold, fontSize: 12, color: C.orange }}>Add money in Wallet</Text>
+                </Pressable>
+              ) : wallet.action === 'bill' ? (
+                <Pressable onPress={openPendingBill} hitSlop={10} accessibilityRole="button" style={{ alignSelf: 'flex-start', paddingVertical: 7, paddingHorizontal: 12, borderRadius: 9, backgroundColor: hexA(AI, 0.18), borderWidth: 1, borderColor: hexA(AI, 0.55) }}>
+                  <Text style={{ fontFamily: F.bodyBold, fontSize: 12, color: AI }}>Open bill{pendingBill ? `, ${rupees(pendingBill.bill_paise)}` : ''}</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          ) : null}
+          {billNote ? <Body style={{ fontSize: 11.5, color: C.green }}>{billNote}</Body> : null}
 
           {/* 1 · split */}
           <View style={{ gap: 8 }}>
@@ -118,8 +167,8 @@ export function AiPlanAssistant({ clientId, clientName, preview, onApply }: {
               style={{ minHeight: 48, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.03)', color: '#fff', fontFamily: F.body, fontSize: 13, textAlignVertical: 'top' }} />
           </View>
 
-          <Pressable onPress={generate} disabled={!split || draftM.isPending} hitSlop={6} accessibilityRole="button" accessibilityState={{ disabled: !split || draftM.isPending }}
-            style={{ borderRadius: 14, overflow: 'hidden', opacity: !split ? 0.5 : 1 }}>
+          <Pressable onPress={generate} disabled={!split || draftM.isPending || walletBlocks} hitSlop={6} accessibilityRole="button" accessibilityState={{ disabled: !split || draftM.isPending || walletBlocks }}
+            style={{ borderRadius: 14, overflow: 'hidden', opacity: !split || walletBlocks ? 0.5 : 1 }}>
             <LinearGradient colors={['#8B5CF6', '#6D28D9']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14 }}>
               {draftM.isPending ? <ActivityIndicator size="small" color="#fff" /> : <Icon name="sparkle" size={15} color="#fff" strokeWidth={2.2} />}
               <Text style={{ fontFamily: F.bodyBold, fontSize: 14, color: '#fff' }}>
@@ -128,7 +177,8 @@ export function AiPlanAssistant({ clientId, clientName, preview, onApply }: {
             </LinearGradient>
           </Pressable>
           {draftM.isPending ? <Body style={{ fontSize: 11, color: AI, textAlign: 'center' }}>{STEPS[step]}…</Body> : null}
-          {draftM.error && !draftM.isPending ? <Body style={{ fontSize: 11.5, color: C.red }}>{(draftM.error as Error).message}</Body> : null}
+          {draftM.error && !draftM.isPending ? <Body style={{ fontSize: 11.5, color: C.red }}>{(draftM.error as Error).message.replace(/^WALLET_[A-Z_]+:\s*/, '')}</Body> : null}
+          {wallet.state === 'ok' && !result ? <Body style={{ fontSize: 10.5, color: C.muted3, textAlign: 'center' }}>Rs 30 to 50 a draft, shown after it is made. Deduct in one tap or discard it.</Body> : null}
 
           {result && !draftM.isPending ? (
             <View style={{ gap: 9, padding: 12, borderRadius: 14, backgroundColor: hexA(C.green, 0.07), borderWidth: 1, borderColor: hexA(C.green, 0.3) }}>
@@ -166,6 +216,8 @@ export function AiPlanAssistant({ clientId, clientName, preview, onApply }: {
           ) : null}
         </>
       ) : null}
+      <AiBillSheet bill={bill} onDeducted={applyPaid} onClose={() => setBill(null)}
+        onDiscarded={() => { setBill(null); setBillNote('Draft discarded. Nothing was charged.'); trackEvent('AI Plan Draft Discarded', { client_id: clientId }); }} />
     </LinearGradient>
   );
 }

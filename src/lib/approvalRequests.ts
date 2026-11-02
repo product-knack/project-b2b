@@ -111,10 +111,10 @@ export const sessionCodeStatusLine = (r: ApprovalRequest | null | undefined): { 
 /** The plain sentence of an approval / Session code / client location server error ("APPROVAL_OWN_REQUEST: You
     cannot review your own request."). Some of them carry the 42501 "not allowed" code, which friendlyError turns
     into its generic line; these screens show the server's own sentence first and fall back to friendlyError
-    otherwise. LOCATION_ added 2 Nov 2026 (set_client_brb_location). */
+    otherwise. LOCATION_ added 2 Nov 2026 (set_client_brb_location); WALLET_ the same day (Team Wallet). */
 export const codedSentence = (e: unknown): string | null => {
   const msg = String((e as { message?: unknown } | null)?.message ?? '').trim();
-  const m = msg.match(/^(?:OTP|APPROVAL|LOCATION)_[A-Z_]+:\s*(.+)$/s);
+  const m = msg.match(/^(?:OTP|APPROVAL|LOCATION|WALLET)_[A-Z_]+:\s*(.+)$/s);
   return m && m[1].trim() ? m[1].trim() : null;
 };
 

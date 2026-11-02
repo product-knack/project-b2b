@@ -85,6 +85,8 @@ export function PushTokenManager() {
     // page; "location added" lands the assessor on the QHP page (Start navigation), anyone else on home.
     if (t === 'qhp_location_missing') { go(dbRoleRef.current === 'ops' ? 'ops-leads' : 'qhp-manager'); return; }
     if (t === 'qhp_location_added') { go(dbRoleRef.current === 'trainer' ? 'qhp' : homeRouteFor(roleRef.current)); return; }
+    // Team Wallet (2 Nov 2026): the top-up receipt opens the Wallet screen.
+    if (t === 'wallet_topup' || data.route === 'wallet') { go('wallet'); return; }
     // 7 PM team-flags push → straight into the manager chat.
     if (t === 'manager_team_flags' || data.route === 'manager-chat') { go('manager-chat'); return; }
     // Anything else that names a route/session (unknown web routes included) → home.

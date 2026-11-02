@@ -5,6 +5,7 @@
    copy. No React, no network: tested in node. The server (hub-track ai-plan-draft) already checks every
    exercise against exercises_db; this file only shapes what it returns. */
 import type { PlanBodyPartInput, PlanSetInput } from './clientQueries';
+import type { WalletGate } from './teamWallet';
 
 export type SplitKey = 'ppl' | 'upper_lower' | 'bro';
 export type SplitOption = { key: SplitKey; label: string; sections: string[]; blurb: string };
@@ -43,7 +44,9 @@ export type AiPlanSources = {
   weekly_slots: { day: string | null; time: string | null; modality: string | null }[];
   suggested_sessions_per_week: number;
 };
-export type AiPlanPreview = { eligible: boolean; allowed: boolean; essentials: boolean; client_name: string; sources: AiPlanSources; model: string };
+/** wallet (Team Wallet, 2 Nov 2026): does the caller pay for drafts (trainers), the balance and a waiting bill;
+    null while the wallet is not on the server. */
+export type AiPlanPreview = { eligible: boolean; allowed: boolean; essentials: boolean; client_name: string; sources: AiPlanSources; model: string; wallet: WalletGate | null };
 export type AiPlanResult = { draft: AiPlanDraft; dropped: string[]; sources: AiPlanSources; model: string; generated_at: string };
 
 const str = (v: unknown) => (v == null ? '' : String(v));

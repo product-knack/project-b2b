@@ -19,6 +19,7 @@ import { useDragReorder } from '../lib/useDragReorder';
 import { AiPlanAssistant } from '../components/AiPlanAssistant';
 import { useAiPlanPreview } from '../lib/aiPlanQueries';
 import { draftToBodyParts, shouldFill, draftExerciseCount, aiChoice, planSource, type AiPlanResult, type PlanBuildMode } from '../lib/aiPlanDraft';
+import { walletCardState } from '../lib/teamWallet';
 import { trackEvent } from '../lib/amplitude';
 
 /* ============ CREATE WORKOUT PLAN ============
@@ -251,6 +252,8 @@ export function CreatePlan() {
   const aiAllowed = !isEdit && aiPreviewQ.data?.allowed === true;
   const [mode, setMode] = React.useState<PlanBuildMode | null>(isEdit ? 'manual' : null);
   const aiPick = aiChoice({ online: isOnline, clientId: selectedClientId, modality, allowed: isEdit ? false : aiPreviewQ.data ? aiPreviewQ.data.allowed : null });
+  // Team Wallet (2 Nov 2026): a trainer pays Rs 30 to 50 a draft; the card says what the wallet allows (the panel holds the buttons).
+  const walletCard = walletCardState(aiPreviewQ.data?.wallet ?? null);
   const chooseMode = (m: PlanBuildMode) => {
     setMode(m);
     // An AI draft is a Strength Training plan (it covers the Strength and Cardio days).
@@ -513,6 +516,7 @@ export function CreatePlan() {
               <Icon name="chevRight" size={16} color="#A78BFA" strokeWidth={2.4} />
             </View>
             {aiPick.reason ? <Body style={{ fontSize: 11, color: C.gold }}>{aiPick.reason}</Body> : null}
+            {!aiPick.reason && walletCard.line ? <Body style={{ fontSize: 11, color: walletCard.state === 'ok' ? C.muted2 : C.gold }}>{walletCard.line}</Body> : null}
           </Pressable>
           <Pressable onPress={() => chooseMode('manual')} hitSlop={6} accessibilityRole="button"
             style={{ padding: 16, borderRadius: 20, backgroundColor: 'rgba(50,30,19,0.45)', borderWidth: 1, borderColor: hexA(C.orange, 0.4), gap: 10 }}>
