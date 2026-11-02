@@ -10,7 +10,7 @@ Owner decisions: odds-app/docs/team-wallet-plan.md. Copy rule: no dashes in user
 
 ## 1. What the user sees
 
-Free drafts (owner, 2 Nov 2026 evening): a trainer's first 3 AI plans for non-Essentials clients are free, an Essentials client is always free. The Create Plan AI card and the panel say "3 free AI plans left. After that Rs 30 to 50 a plan from your wallet." (singular for 1) or "Free for Essentials clients."; a free Generate behaves exactly like today (the draft lands in the builder, no bill sheet) and the count drops; once the free ones are used the wallet rules below apply. The Wallet history shows a free draft as "Odds AI plan, <name>" with the amount text "Free", chip FREE, line "Free plan, not charged" (or "Free for Essentials clients"); the balance card says "N free AI plans left" while any remain. An admin or super admin may add exactly Rs 1 as a test top-up (the server allows it; the sheet needs no change: type 1).
+Free drafts (owner, 2 Nov 2026 evening): a trainer's first 3 AI plans for non-Essentials clients are free, an Essentials client is always free. The Create Plan AI card and the panel say "3 free AI plans left. After that Rs 30 to 50 a plan from your wallet." (singular for 1) or "Free for Essentials clients."; a free Generate behaves exactly like today (the draft lands in the builder, no bill sheet) and the count drops; once the free ones are used the wallet rules below apply. The Wallet history shows a free draft as "Odds AI plan, <name>" with the amount text "Free", chip FREE, line "Free plan, not charged" (or "Free for Essentials clients"); the balance card says "N free AI plans left" while any remain. Any account may add exactly Rs 1 as a test top-up while the wallet is being tested (type 1 in the box; the sheet passes it, hint "Rs 1 test top-up (testing only)."; the server accepts 100 paise and refuses Rs 2 to Rs 499). While the wallet read has no data yet, the sheet assumes the full day's room so Continue is never locked by a missing read.
 
 ### 1.1 Wallet (drawer item "Wallet", every role, route `wallet`)
 - Title "Wallet", sub "Add money, see your history".
@@ -282,6 +282,8 @@ Pure rules. Copy byte for byte; the test below must pass against it.
    shown after the draft, one tap Deduct from wallet. Plan: docs/team-wallet-plan.md. */
 
 export const MIN_TOPUP_PAISE = 50000;
+/** Exactly Rs 1 is accepted as a test top-up (owner, 2 Nov 2026, while the wallet is being tested). */
+export const TEST_TOPUP_PAISE = 100;
 export const DAILY_CAP_PAISE = 500000;
 export const AI_FLOOR_PAISE = 5000;
 export const TOPUP_PICKS = [50000, 100000, 200000, 500000] as const;
@@ -358,6 +360,7 @@ export const parseRupeeInput = (text: string): number | null => {
 export const topupProblem = (amountPaise: number | null, roomPaise: number): string | null => {
   if (roomPaise <= 0) return `You have added ${rupees(DAILY_CAP_PAISE)} today. Try again tomorrow.`;
   if (amountPaise == null) return null;
+  if (amountPaise === TEST_TOPUP_PAISE) return null;
   if (amountPaise < MIN_TOPUP_PAISE) return `The minimum is ${rupees(MIN_TOPUP_PAISE)}.`;
   if (amountPaise > roomPaise) return `You can add ${rupees(roomPaise)} more today.`;
   return null;
@@ -576,6 +579,8 @@ eq('parse 0', W.parseRupeeInput('0'), null);
 // 3. the sheet's hints
 eq('problem: below the minimum', W.topupProblem(40000, 300000), 'The minimum is Rs 500.');
 eq('problem: exactly the minimum', W.topupProblem(50000, 300000), null);
+eq('problem: Rs 1 test top-up passes', W.topupProblem(100, 300000), null);
+eq('problem: Rs 2 does not', W.topupProblem(200, 300000), 'The minimum is Rs 500.');
 eq('problem: over the room', W.topupProblem(350000, 300000), 'You can add Rs 3,000 more today.');
 eq('problem: no room at all', W.topupProblem(50000, 0), 'You have added Rs 5,000 today. Try again tomorrow.');
 eq('problem: nothing typed', W.topupProblem(null, 300000), null);
@@ -840,7 +845,7 @@ import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import { useIsOnline } from '../lib/offline';
 import { useTeamWallet, useTeamWalletPage, useCreateTopup, useVerifyTopup, useWalletRealtime, walletErrorText } from '../lib/teamWalletQueries';
 import {
-  TOPUP_PICKS, fmtWhen, freeLeftLine, groupByMonth, isPendingBill, isPendingTopup, methodLabel, parseRupeeInput, rowAmountText, rowChip, rowSecondLine, rowTitle, rupees,
+  DAILY_CAP_PAISE, TEST_TOPUP_PAISE, TOPUP_PICKS, fmtWhen, freeLeftLine, groupByMonth, isPendingBill, isPendingTopup, methodLabel, parseRupeeInput, rowAmountText, rowChip, rowSecondLine, rowTitle, rupees,
   signedRupees, topupExpired, topupProblem, topupRoomLine, type Tone, type WalletRow,
 } from '../lib/teamWallet';
 import { WalletCheckout, type CheckoutMessage } from '../components/WalletCheckout';
@@ -894,7 +899,7 @@ function AddMoneySheet({ visible, roomPaise, busy, error, onClose, onContinue }:
   const amount = parseRupeeInput(text);
   const problem = topupProblem(amount, roomPaise);
   const ready = amount != null && !problem && online && !busy;
-  const hint = problem ?? (amount == null ? topupRoomLine(roomPaise) : `Adds ${rupees(amount)} to your wallet.`);
+  const hint = problem ?? (amount == null ? topupRoomLine(roomPaise) : amount === TEST_TOPUP_PAISE ? 'Rs 1 test top-up (testing only).' : `Adds ${rupees(amount)} to your wallet.`);
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={{ flex: 1, justifyContent: 'flex-end' }}>
@@ -1167,7 +1172,9 @@ export function Wallet() {
       </View>
 
       {/* One Modal at a time: the sheets are siblings and only one is ever open. */}
-      <AddMoneySheet visible={addOpen && !checkout} roomPaise={data?.today_room_paise ?? 0} busy={createM.isPending} error={addErr}
+      {/* No wallet read yet (loading, offline cache empty, migration not run): the sheet assumes the full day's room and
+          lets the server decide; a room of 0 here used to lock Continue before the first read landed. */}
+      <AddMoneySheet visible={addOpen && !checkout} roomPaise={data?.today_room_paise ?? DAILY_CAP_PAISE} busy={createM.isPending} error={addErr}
         onClose={() => setAddOpen(false)} onContinue={(p) => openCheckout({ amount_inr: Math.round(p / 100) })} />
       <DetailSheet row={!addOpen && !checkout ? detail : null} now={now} onClose={() => setDetail(null)}
         onReopen={(r) => openCheckout({ reopen_tx_id: r.id })} onOpenBill={openBill} />
@@ -2406,7 +2413,7 @@ CREATE TABLE IF NOT EXISTS public.team_wallet (
     OR (kind = 'refund' AND amount_paise < 0)
     OR (kind = 'ai_plan' AND (amount_paise < 0 OR (amount_paise = 0 AND meta->>'free' = 'true')))   -- a free draft is a 0 row
     OR (kind = 'adjustment' AND amount_paise <> 0)),
-  -- Rs 500 to Rs 5,000; Rs 1 only as an admin's test top-up (owner, 2 Nov 2026), enforced per role in the function
+  -- Rs 500 to Rs 5,000; exactly Rs 1 as a test top-up (owner, 2 Nov 2026)
   CONSTRAINT team_wallet_topup_limits CHECK (kind <> 'topup' OR amount_paise = 100 OR amount_paise BETWEEN 50000 AND 500000),
   CONSTRAINT team_wallet_paid_has_balance CHECK (status <> 'paid' OR balance_after_paise IS NOT NULL),
   CONSTRAINT team_wallet_json_shapes CHECK ((razorpay IS NULL OR jsonb_typeof(razorpay) = 'object') AND jsonb_typeof(meta) = 'object')
@@ -2669,8 +2676,9 @@ BEGIN
   IF v_role IS NULL THEN RAISE EXCEPTION 'WALLET_FORBIDDEN: Only staff accounts have a wallet.' USING ERRCODE = '42501'; END IF;
   IF v_status <> 'active' THEN RAISE EXCEPTION 'WALLET_FORBIDDEN: This account is not active, so money cannot be added.' USING ERRCODE = '42501'; END IF;
   IF p_amount_paise IS NULL OR p_amount_paise % 100 <> 0 THEN RAISE EXCEPTION 'WALLET_MIN_AMOUNT: Enter whole rupees, at least Rs 500.'; END IF;
-  -- Rs 1 is allowed as a test top-up for admin and super_admin accounts only (owner, 2 Nov 2026)
-  IF p_amount_paise < public.team_wallet_min_topup_paise() AND NOT (p_amount_paise = 100 AND v_role IN ('admin', 'super_admin')) THEN
+  -- Exactly Rs 1 is allowed as a test top-up for every account while the wallet is being tested (owner, 2 Nov 2026);
+  -- tighten to admin / super_admin here when the testing is over.
+  IF p_amount_paise < public.team_wallet_min_topup_paise() AND p_amount_paise <> 100 THEN
     RAISE EXCEPTION 'WALLET_MIN_AMOUNT: The minimum top-up is Rs 500.';
   END IF;
   PERFORM public.team_wallet_lock(p_user);
@@ -3205,9 +3213,12 @@ BEGIN
     v_names := array_append(v_names, 'dashboard refund, once'); v_expected := array_append(v_expected, 'balance ' || ((v_bal - 200000) / 100) || ', 1 refund row');
     v_results := array_append(v_results, 'balance ' || (public.team_wallet_balance(v_user) / 100) || ', ' || (SELECT count(*) FROM public.team_wallet WHERE kind = 'refund' AND razorpay->>'refund_id' = 'rfnd_probe') || ' refund row');
 
-    -- 13. Rs 1 test top-up: admin yes, trainer no
-    BEGIN x := public.team_wallet_create_topup(v_user, 100); v_res := 'allowed'; EXCEPTION WHEN others THEN v_res := SQLERRM; END;
-    v_names := array_append(v_names, 'trainer adds Rs 1'); v_expected := array_append(v_expected, 'WALLET_MIN_AMOUNT: The minimum top-up is Rs 500.');
+    -- 13. Rs 1 test top-up: any account; Rs 2 still refused
+    BEGIN x := public.team_wallet_create_topup(v_user, 100); v_res := (x->>'status') || ', ' || (x->>'amount_paise'); EXCEPTION WHEN others THEN v_res := SQLERRM; END;
+    v_names := array_append(v_names, 'trainer adds Rs 1 (test top-up)'); v_expected := array_append(v_expected, 'pending, 100');
+    v_results := array_append(v_results, v_res);
+    BEGIN x := public.team_wallet_create_topup(v_user, 200); v_res := 'allowed'; EXCEPTION WHEN others THEN v_res := SQLERRM; END;
+    v_names := array_append(v_names, 'trainer adds Rs 2'); v_expected := array_append(v_expected, 'WALLET_MIN_AMOUNT: The minimum top-up is Rs 500.');
     v_results := array_append(v_results, v_res);
     IF v_admin IS NOT NULL THEN
       BEGIN x := public.team_wallet_create_topup(v_admin, 100); v_res := (x->>'status') || ', ' || (x->>'amount_paise'); EXCEPTION WHEN others THEN v_res := SQLERRM; END;

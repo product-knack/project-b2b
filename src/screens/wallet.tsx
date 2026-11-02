@@ -14,7 +14,7 @@ import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import { useIsOnline } from '../lib/offline';
 import { useTeamWallet, useTeamWalletPage, useCreateTopup, useVerifyTopup, useWalletRealtime, walletErrorText } from '../lib/teamWalletQueries';
 import {
-  TOPUP_PICKS, fmtWhen, freeLeftLine, groupByMonth, isPendingBill, isPendingTopup, methodLabel, parseRupeeInput, rowAmountText, rowChip, rowSecondLine, rowTitle, rupees,
+  DAILY_CAP_PAISE, TEST_TOPUP_PAISE, TOPUP_PICKS, fmtWhen, freeLeftLine, groupByMonth, isPendingBill, isPendingTopup, methodLabel, parseRupeeInput, rowAmountText, rowChip, rowSecondLine, rowTitle, rupees,
   signedRupees, topupExpired, topupProblem, topupRoomLine, type Tone, type WalletRow,
 } from '../lib/teamWallet';
 import { WalletCheckout, type CheckoutMessage } from '../components/WalletCheckout';
@@ -68,7 +68,7 @@ function AddMoneySheet({ visible, roomPaise, busy, error, onClose, onContinue }:
   const amount = parseRupeeInput(text);
   const problem = topupProblem(amount, roomPaise);
   const ready = amount != null && !problem && online && !busy;
-  const hint = problem ?? (amount == null ? topupRoomLine(roomPaise) : `Adds ${rupees(amount)} to your wallet.`);
+  const hint = problem ?? (amount == null ? topupRoomLine(roomPaise) : amount === TEST_TOPUP_PAISE ? 'Rs 1 test top-up (testing only).' : `Adds ${rupees(amount)} to your wallet.`);
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={{ flex: 1, justifyContent: 'flex-end' }}>
@@ -341,7 +341,9 @@ export function Wallet() {
       </View>
 
       {/* One Modal at a time: the sheets are siblings and only one is ever open. */}
-      <AddMoneySheet visible={addOpen && !checkout} roomPaise={data?.today_room_paise ?? 0} busy={createM.isPending} error={addErr}
+      {/* No wallet read yet (loading, offline cache empty, migration not run): the sheet assumes the full day's room and
+          lets the server decide; a room of 0 here used to lock Continue before the first read landed. */}
+      <AddMoneySheet visible={addOpen && !checkout} roomPaise={data?.today_room_paise ?? DAILY_CAP_PAISE} busy={createM.isPending} error={addErr}
         onClose={() => setAddOpen(false)} onContinue={(p) => openCheckout({ amount_inr: Math.round(p / 100) })} />
       <DetailSheet row={!addOpen && !checkout ? detail : null} now={now} onClose={() => setDetail(null)}
         onReopen={(r) => openCheckout({ reopen_tx_id: r.id })} onOpenBill={openBill} />
