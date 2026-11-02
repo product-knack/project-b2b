@@ -264,7 +264,7 @@ the code disagree, the code in section 5 wins.
 
 ## 5. Code as built (generated from the Android tree, 2 Nov 2026)
 
-Literal dashes inside copied code are written as — / – (restore them when pasting; they sit in old comments only). New files in full, then the diff hunks of the edited files (`git diff -U4` against the last commit). The server files are listed at the end for reference; iOS builds none of them.
+Literal dashes inside copied code are written as \u2014 / \u2013 (restore them when pasting; they sit in old comments only). New files in full, then the diff hunks of the edited files (`git diff -U4` against the last commit). The server files are listed at the end for reference; iOS builds none of them.
 
 ### `src/lib/teamWallet.ts` (new)
 Pure rules. Copy byte for byte; the test below must pass against it.
@@ -1386,7 +1386,7 @@ index d41c465..53af08b 100644
 @@ -281,8 +284,10 @@ const SENSITIVE_ROUTES = new Set([
    'academy-dashboard', 'academy-management', 'academy-qhp-analyser', 'academy-daily-goals', 'academy-weekly-summary', 'academy-senior-analyst',
    'academy-teacher', 'academy-student',
-   // Chats — client health details are routinely discussed in messages
+   // Chats \u2014 client health details are routinely discussed in messages
    'messenger', 'client-threads', 'manager-chat',
 +  // Team Wallet (2 Nov 2026): balances, payment ids and the Razorpay checkout
 +  'wallet',
