@@ -8,6 +8,7 @@ import { invokeWithTimeout, uploadWithTimeout, withTimeout, NET_MS } from './wit
 import { parseVoiceNotes, SessionVoiceNote } from './sessionVoiceTypes';
 import { serverNow, syncServerClock } from './managerChatQueries';
 import { ROSTER_FRESH_START_ISO } from './therapistQueries';
+import { competitionMonthLabels, competitionMonthRange, type MgrMonthFilter } from './managerMonths';
 
 /* ---------- IST helpers (mirror the web app's istDateTime) ---------- */
 const IST_OFFSET_MIN = 330;
@@ -95,7 +96,8 @@ export type LeaderboardEntry = {
   weightedScore: number;
   rank: number;
 };
-export type MgrMonthFilter = 'overall' | 'month1' | 'month2' | 'month3';
+// Month tabs follow the competition length since 2 Nov 2026 (src/lib/managerMonths.ts); re-exported for the screens.
+export type { MgrMonthFilter } from './managerMonths';
 export type ManagerEntry = {
   managerId: string;
   managerName: string;
@@ -117,7 +119,7 @@ export type ManagerLeaderboard = {
   periodStart: string;
   periodEnd: string | null;
   periodLabel: string;
-  monthLabels: [string, string, string];
+  monthLabels: string[]; // one per competition month (6 for Aug 2026 to Jan 2027), was a fixed three
 };
 
 /* ---------- Hooks ---------- */
@@ -1486,22 +1488,11 @@ export function useManagerTeamAppAdoption(members: { id: string; name: string; i
 // from the COMPETITION start (computeMonthRange) + get_manager_team_counts RPC + profiles.
 // Aggregates exclude manager-flagged members; totalSessions = sessions + QHPs (web "Sess" figure);
 // rank by weighted = combined*0.7 + referrals*0.3.
-const mgrFmtDay = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-function mgrMonthRange(periodStart: string, periodEnd: string | null, monthFilter: MgrMonthFilter): { start: string; end: string | null } {
-  if (monthFilter === 'overall') return { start: periodStart, end: periodEnd };
-  const startDate = new Date(periodStart + 'T00:00:00');
-  const monthOffset = monthFilter === 'month1' ? 0 : monthFilter === 'month2' ? 1 : 2;
-  const rangeStart = new Date(startDate.getFullYear(), startDate.getMonth() + monthOffset, 1);
-  const rangeEnd = new Date(rangeStart.getFullYear(), rangeStart.getMonth() + 1, 0); // last day of month
-  const startStr = mgrFmtDay(rangeStart);
-  let endStr = mgrFmtDay(rangeEnd);
-  if (periodEnd && endStr > periodEnd) endStr = periodEnd; // cap at period end
-  if (startStr < periodStart) return { start: periodStart, end: endStr }; // don't go before period start
-  return { start: startStr, end: endStr };
-}
+// The month maths live in managerMonths.ts (2 Nov 2026): one tab per competition month, not a fixed three.
+const mgrMonthRange = competitionMonthRange;
 export function useManagerLeaderboard(monthFilter: MgrMonthFilter = 'overall') {
   return useQuery({
-    queryKey: ['manager-leaderboard', 'v4', monthFilter], // v4: member status (18 Sep 2026); v3 rows in the persisted cache lack status / inactiveCount
+    queryKey: ['manager-leaderboard', 'v5', monthFilter], // v5: monthLabels is one per competition month (2 Nov 2026); v4: member status (18 Sep 2026)
     staleTime: 120_000,
     queryFn: async (): Promise<ManagerLeaderboard | null> => {
       const { data: allTeams, error } = await supabase.from('manager_score').select('*').order('created_at', { ascending: false });
@@ -1586,8 +1577,7 @@ export function useManagerLeaderboard(monthFilter: MgrMonthFilter = 'overall') {
       const entries = rows.map(({ weighted, ...r }, i) => ({ ...r, rank: i + 1 }));
 
       const fmtLbl = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-      const startD = new Date(periodStart + 'T00:00:00');
-      const monthLabels = [0, 1, 2].map((off) => new Date(startD.getFullYear(), startD.getMonth() + off, 1).toLocaleDateString('en-GB', { month: 'short' })) as [string, string, string];
+      const monthLabels = competitionMonthLabels(periodStart, periodEnd);
       return {
         entries,
         periodStart,

@@ -42,6 +42,7 @@ import { useAuth } from '../auth';
 import { supabase, DEV_TRAINER_ID } from '../lib/supabase';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { QhpAssessmentForm, CoachPresenceModal, fetchHasPriorCompletedQHP } from './qhpAssessmentForm';
+import { monthIndexOf, effectiveMonthFilter } from '../lib/managerMonths';
 import { useAddOwnSession, useTodayRoster, useTrainerStats, useTrainerProfile, useTrainerMonthSessions, useTrainerLeaderboard, useTrainerLeaderboardEssentials, useManagerLeaderboard, useManagerTeam, useManagerTeamLeaves, useManagerTeamIncidents, useManagerTeamRetention, useManagerTeamLateLogs, useManagerTeamRoster, useManagerTeamPlanOverview, useManagerTeamAcks, useManagerTeamAppAdoption, useTrainerSessionBreakdown, useTrainerReferralBreakdown, useFirstSessionAlert, istTimeParts, istDayLabel, istDate, useCancelScheduledSession, useRequestReschedule, useAddMissedRemark, lbMonthBounds, lbMonthLabel, LbBounds, RosterRow, ManagerTeamMember, MgrMonthFilter, usePlanExpiryMap, PlanExpiry, useTrainerAckSummary, useRequestRoster, useRosterDistance, SESSION_MODALITIES, useMyMonthSessionBreakdown, usePilatesRunRate } from '../lib/trainerQueries';
 import { PrevSet, useMyClients, useClientDetail, useClientSessions, useClientPlans, useClientGoals, useSaveWeeklyGoals, useDeleteWeeklyGoal, useZone2Week, useLogZone2Session, useWeeklyHealthSummary, PLAN_VALID_DAYS, useClientReports, useClientConsultAi, ClientConsultAi, useClientBioAge, useClientProgression, useCreateWorkoutSession, useModalityGate, useWorkoutTemplates, useSaveWorkoutTemplate, useDeleteWorkoutTemplate, useClientHealthCheck, useSaveHealthData, useExerciseDb, useSessionExercises, uuidv4, HealthDataInput, useWeeklyProgressionAll, ackWeeklyReport, WeeklyProgressionRow, useApprovedPlansForLogging, usePartnerInfo, usePreviousExerciseData, checkDuplicateWorkoutToday, PlanExerciseRow, useClientDailyStats, useClientWhoopRecovery, useSaveClientHomeLocation, PILATES_REFORMER_EXERCISES, usePlanEditValidation, normalizePlanModality, PLAN_EDIT_MAX_WORKOUTS } from '../lib/clientQueries';
 import * as Location from 'expo-location';
@@ -12762,16 +12763,18 @@ function initials(name: string) {
 export function MgrDash() {
   const { mgrDashTab, set, mgrRow } = useStore();
   const dashMgrCaps = useMyCapabilities();
-  // Month tabs are COMPETITION months carved from the period's team_start (web parity),
-  // not calendar months back from today.
-  const monthFilter: MgrMonthFilter = mgrDashTab === 'month1' || mgrDashTab === 'month2' || mgrDashTab === 'month3' ? mgrDashTab : 'overall';
-  const mgrLbQ = useManagerLeaderboard(monthFilter);
+  // Month tabs are COMPETITION months carved from the period's team_start (web parity), not calendar months back
+  // from today; one tab per month of the period since 2 Nov 2026 (six for Aug 2026 to Jan 2027). A stored tab the
+  // period does not have (an older three-month cache, or a shorter competition) falls back to Overall.
+  const storedFilter: MgrMonthFilter = monthIndexOf(mgrDashTab) != null ? (mgrDashTab as MgrMonthFilter) : 'overall';
+  const mgrLbQ = useManagerLeaderboard(storedFilter);
   const lb = mgrLbQ.data;
+  const monthLabels = lb?.monthLabels?.length ? lb.monthLabels : ['M1', 'M2', 'M3'];
+  const monthFilter = effectiveMonthFilter(mgrDashTab, monthLabels.length);
+  React.useEffect(() => { if (lb && monthFilter !== mgrDashTab) set({ mgrDashTab: monthFilter }); }, [lb, monthFilter, mgrDashTab]);
   const lbPeriods = [
     { id: 'overall', label: 'Overall' },
-    { id: 'month1', label: lb?.monthLabels?.[0] ?? 'M1' },
-    { id: 'month2', label: lb?.monthLabels?.[1] ?? 'M2' },
-    { id: 'month3', label: lb?.monthLabels?.[2] ?? 'M3' },
+    ...monthLabels.map((label, i) => ({ id: `month${i + 1}`, label })),
   ];
   const medalP = [ic.crown, ic.award, ic.award];
   const medalC = [C.gold, '#B8BCC4', '#C08A52'];
@@ -12827,8 +12830,8 @@ export function MgrDash() {
             <Mono style={{ fontSize: 11, color: C.mono2 }}>{lb?.periodLabel ?? 'Competition period'}</Mono>
           </View>
 
-          {/* Period segmented control */}
-          <View style={{ flexDirection: 'row', gap: 6, marginTop: 16, backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: 999, padding: 4 }}>
+          {/* Period segmented control: scrolls sideways once a competition has more than three months */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 16, flexGrow: 0 }} contentContainerStyle={{ flexDirection: 'row', gap: 6, backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: 999, padding: 4 }}>
             {lbPeriods.map((t) => {
               const active = mgrDashTab === t.id;
               return active ? (
@@ -12841,7 +12844,7 @@ export function MgrDash() {
                 </Pressable>
               );
             })}
-          </View>
+          </ScrollView>
 
           {/* Podium */}
           <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 10, marginTop: 20, width: '100%' }}>
