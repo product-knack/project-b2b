@@ -86,12 +86,22 @@ eq('read: empty', W.parseWalletRead(null).rows, []);
 // 7. the AI bill
 eq('bill lines', W.billLines(4000, 200000), { bill: 'Your bill is Rs 40.', after: 'Wallet Rs 2,000, after this Rs 1,960' });
 eq('preview line', W.billPreviewLine({ sections: ['Push', 'Pull', 'Legs', 'Conditioning'], exercise_count: 27 }), '4 sections, 27 exercises');
-eq('card: not charged', W.walletCardState({ charges: false, balance_paise: 0, floor_paise: 5000, pending_bill: null, ok: true, reason: null }).state, 'free');
-eq('card: ok', W.walletCardState({ charges: true, balance_paise: 200000, floor_paise: 5000, pending_bill: null, ok: true, reason: null }), { state: 'ok', line: 'Wallet Rs 2,000', action: null });
-eq('card: floor', W.walletCardState({ charges: true, balance_paise: 3000, floor_paise: 5000, pending_bill: null, ok: false, reason: 'WALLET_FLOOR' }), { state: 'floor', line: 'Wallet Rs 30. You need at least Rs 50 in your wallet to make an AI plan.', action: 'wallet' });
-eq('card: bill pending', W.walletCardState({ charges: true, balance_paise: 200000, floor_paise: 5000, pending_bill: read.pending_bill, ok: false, reason: 'WALLET_BILL_PENDING' }), { state: 'bill_pending', line: 'Settle or discard your last draft first.', action: 'bill' });
+const gate = (o) => W.parseWalletGate({ charges: true, balance_paise: 200000, floor_paise: 5000, free_total: 3, free_used: 3, free_left: 0, essentials: false, free_this: false, billed: true, pending_bill: null, ok: true, reason: null, ...o });
+eq('card: not charged', W.walletCardState(gate({ charges: false, free_this: true, billed: false })).state, 'free');
+eq('card: ok (free used up)', W.walletCardState(gate({})), { state: 'ok', line: 'Free AI plans used. Wallet Rs 2,000, Rs 30 to 50 a plan.', action: null });
+eq('card: 3 free left', W.walletCardState(gate({ free_used: 0, free_left: 3, free_this: true, billed: false })), { state: 'free_left', line: '3 free AI plans left. After that Rs 30 to 50 a plan from your wallet.', action: null });
+eq('card: 1 free left (singular)', W.walletCardState(gate({ free_used: 2, free_left: 1, free_this: true, billed: false })).line, '1 free AI plan left. After that Rs 30 to 50 a plan from your wallet.');
+eq('card: Essentials client is free even with 0 left', W.walletCardState(gate({ essentials: true, free_this: true, billed: false, balance_paise: 0 })), { state: 'essentials', line: 'Free for Essentials clients.', action: null });
+eq('card: floor', W.walletCardState(gate({ balance_paise: 3000, ok: false, reason: 'WALLET_FLOOR' })), { state: 'floor', line: 'Wallet Rs 30. You need at least Rs 50 in your wallet to make an AI plan.', action: 'wallet' });
+eq('card: bill pending', W.walletCardState(gate({ pending_bill: read.pending_bill, ok: false, reason: 'WALLET_BILL_PENDING' })), { state: 'bill_pending', line: 'Settle or discard your last draft first.', action: 'bill' });
 eq('card: unknown', W.walletCardState(null).state, 'unknown');
 eq('gate parse', W.parseWalletGate({ charges: true, balance_paise: 3000, floor_paise: 5000, pending_bill: null, ok: false, reason: 'WALLET_FLOOR' }).reason, 'WALLET_FLOOR');
+eq('gate parse: old server answer without free fields is billed', [gate({}).billed, W.parseWalletGate({ charges: true, balance_paise: 3000 }).free_this], [true, false]);
+eq('free left line', [W.freeLeftLine(3), W.freeLeftLine(1)], ['3 free AI plans left', '1 free AI plan left']);
+const freeRow = W.parseWalletRow({ id: 'h', seq: 10, kind: 'ai_plan', amount_paise: 0, status: 'paid', balance_after_paise: 50000, created_at: t0, paid_at: t0, razorpay: null, meta: { free: true, essentials: false, client_name: 'Riya S' } });
+eq('free row: amount, line, chip', [W.rowAmountText(freeRow), W.rowStatusLine(freeRow, now), W.rowChip(freeRow, now), W.rowTitle(freeRow)], ['Free', 'Free plan, not charged', { text: 'FREE', tone: 'green' }, 'Odds AI plan, Riya']);
+eq('free Essentials row line', W.rowStatusLine({ ...freeRow, meta: { free: true, essentials: true } }, now), 'Free for Essentials clients');
+eq('paid row amount text unchanged', W.rowAmountText(paid), '+ Rs 2,000');
 
 // 8. errors
 eq('coded sentence', W.codedWalletSentence(new Error('WALLET_DAILY_CAP: You can add Rs 3000 more today. The limit is Rs 5000 a day.')), 'You can add Rs 3000 more today. The limit is Rs 5000 a day.');

@@ -2,7 +2,7 @@
    client's latest QHP, medical history, blood markers and health context and drafts a plan from
    exercises_db; it writes nothing. The plan is saved by Create Plan exactly as before. The home alert
    list is the definer RPC get_my_essentials_plan_gaps (migration 20261016150000). */
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from './supabase';
 import { invokeWithTimeout, withTimeout, NET_MS } from './withTimeout';
 import type { AiPlanPreview, AiPlanResult, EssentialsPlanGap, SplitKey } from './aiPlanDraft';
@@ -66,7 +66,10 @@ export type AiPlanRequest = { clientId: string; split: SplitKey; sessionsPerWeek
 export type AiPlanAnswer = { kind: 'draft'; result: AiPlanResult } | { kind: 'bill'; bill: AiBill; preview: BillPreview | null };
 /** One draft (20 to 40 s). Throws the server's sentence on refusal. */
 export function useAiPlanDraft() {
+  const qc = useQueryClient();
   return useMutation({
+    // A free draft or a bill changes the preview's wallet line and the Wallet history.
+    onSettled: () => { qc.invalidateQueries({ queryKey: ['ai-plan-preview'] }); qc.invalidateQueries({ queryKey: ['my-team-wallet'] }); },
     mutationFn: async (r: AiPlanRequest): Promise<AiPlanAnswer> => {
       const d = await callPlanFn({ client_id: r.clientId, split: r.split, sessions_per_week: r.sessionsPerWeek ?? undefined, note: r.note?.trim() || undefined }, AI_PLAN_MS);
       if (d?.bill?.tx_id) {

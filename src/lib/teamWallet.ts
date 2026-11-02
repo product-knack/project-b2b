@@ -35,11 +35,21 @@ export type TeamWalletRead = {
   daily_cap_paise: number;
   ai_floor_paise: number;
   charges_ai: boolean;
+  free_total: number;
+  free_used: number;
+  free_left: number;
   pending_bill: PendingBill | null;
   rows: WalletRow[];
 };
-/** What ai-plan-draft's preview says about the caller's wallet (null while the wallet is not on the server). */
-export type WalletGate = { charges: boolean; balance_paise: number; floor_paise: number; pending_bill: PendingBill | null; ok: boolean; reason: 'WALLET_FLOOR' | 'WALLET_BILL_PENDING' | null };
+/** What ai-plan-draft's preview says about the caller's wallet (null while the wallet is not on the server).
+    Free drafts (owner, 2 Nov 2026): a trainer's first 3 AI plans for non-Essentials clients are free (free_left), an
+    Essentials client is always free; free_this = this draft costs nothing, billed = the bill sheet will follow. */
+export type WalletGate = {
+  charges: boolean; balance_paise: number; floor_paise: number;
+  free_total: number; free_used: number; free_left: number; essentials: boolean; free_this: boolean; billed: boolean;
+  pending_bill: PendingBill | null; ok: boolean; reason: 'WALLET_FLOOR' | 'WALLET_BILL_PENDING' | null;
+};
+export const FREE_DRAFTS = 3;
 export type AiBill = { tx_id: string; bill_paise: number; balance_paise: number; blocks: string[] };
 export type Tone = 'green' | 'amber' | 'red' | 'grey';
 
@@ -110,14 +120,27 @@ export const parseWalletRead = (d: any): TeamWalletRead => ({
   daily_cap_paise: num(d?.daily_cap_paise, DAILY_CAP_PAISE),
   ai_floor_paise: num(d?.ai_floor_paise, AI_FLOOR_PAISE),
   charges_ai: d?.charges_ai === true,
+  free_total: num(d?.free_total, FREE_DRAFTS),
+  free_used: num(d?.free_used),
+  free_left: num(d?.free_left),
   pending_bill: parsePendingBill(d?.pending_bill),
   rows: (Array.isArray(d?.rows) ? d.rows : []).map(parseWalletRow).filter(Boolean) as WalletRow[],
 });
 export const parseWalletGate = (w: any): WalletGate | null => {
   if (!w || typeof w !== 'object') return null;
   const reason = w.reason === 'WALLET_FLOOR' || w.reason === 'WALLET_BILL_PENDING' ? w.reason : null;
-  return { charges: w.charges === true, balance_paise: num(w.balance_paise), floor_paise: num(w.floor_paise, AI_FLOOR_PAISE), pending_bill: parsePendingBill(w.pending_bill), ok: w.ok !== false && !reason, reason };
+  const charges = w.charges === true;
+  const free_left = num(w.free_left);
+  const essentials = w.essentials === true;
+  const free_this = typeof w.free_this === 'boolean' ? w.free_this : !charges || essentials || free_left > 0;
+  return {
+    charges, balance_paise: num(w.balance_paise), floor_paise: num(w.floor_paise, AI_FLOOR_PAISE),
+    free_total: num(w.free_total, FREE_DRAFTS), free_used: num(w.free_used), free_left, essentials, free_this,
+    billed: typeof w.billed === 'boolean' ? w.billed : charges && !free_this,
+    pending_bill: parsePendingBill(w.pending_bill), ok: w.ok !== false && !reason, reason,
+  };
 };
+export const isFreeRow = (r: WalletRow): boolean => r.kind === 'ai_plan' && r.meta?.free === true;
 
 export const isPendingTopup = (r: WalletRow): boolean => r.kind === 'topup' && r.status === 'pending';
 export const isPendingBill = (r: WalletRow): boolean => r.kind === 'ai_plan' && r.status === 'pending';
@@ -174,7 +197,10 @@ export const rowTitle = (r: WalletRow): string => {
     default: return 'Wallet';
   }
 };
+/** "Free" for a free draft row (0 rupees), else the signed amount. */
+export const rowAmountText = (r: WalletRow): string => (isFreeRow(r) ? 'Free' : signedRupees(r.amount_paise));
 export const rowStatusLine = (r: WalletRow, nowMs: number = Date.now()): string => {
+  if (isFreeRow(r)) return r.meta?.essentials === true ? 'Free for Essentials clients' : 'Free plan, not charged';
   if (r.status === 'paid') return r.balance_after_paise == null ? 'Paid' : `Balance ${rupees(r.balance_after_paise)}`;
   if (r.status === 'pending') {
     if (r.kind === 'topup') return topupExpired(r, nowMs) ? 'Expired, not charged' : 'Waiting for payment';
@@ -193,6 +219,7 @@ export const rowSecondLine = (r: WalletRow, nowMs: number = Date.now()): string 
   return when && line ? `${when} · ${line}` : when || line;
 };
 export const rowChip = (r: WalletRow, nowMs: number = Date.now()): { text: string; tone: Tone } => {
+  if (isFreeRow(r)) return { text: 'FREE', tone: 'green' };
   if (r.status === 'paid') return { text: 'PAID', tone: 'green' };
   if (r.status === 'pending') return r.kind === 'topup' && topupExpired(r, nowMs) ? { text: 'EXPIRED', tone: 'grey' } : { text: 'WAITING', tone: 'amber' };
   if (r.status === 'failed') return { text: 'FAILED', tone: 'red' };
@@ -210,14 +237,18 @@ export const billPreviewLine = (p: BillPreview | null | undefined): string => {
   const n = p.sections.length;
   return `${n} section${n === 1 ? '' : 's'}, ${p.exercise_count} exercise${p.exercise_count === 1 ? '' : 's'}`;
 };
-export type WalletCardState = 'free' | 'ok' | 'floor' | 'bill_pending' | 'unknown';
+export type WalletCardState = 'free' | 'essentials' | 'free_left' | 'ok' | 'floor' | 'bill_pending' | 'unknown';
+/** "3 free AI plans left" / "1 free AI plan left" */
+export const freeLeftLine = (n: number): string => `${n} free AI plan${n === 1 ? '' : 's'} left`;
 /** The Create Plan AI card: what the wallet allows and the line to show. */
 export const walletCardState = (w: WalletGate | null | undefined): { state: WalletCardState; line: string | null; action: 'wallet' | 'bill' | null } => {
   if (!w) return { state: 'unknown', line: null, action: null };
   if (!w.charges) return { state: 'free', line: null, action: null };
+  if (w.essentials) return { state: 'essentials', line: 'Free for Essentials clients.', action: null };
+  if (w.free_left > 0) return { state: 'free_left', line: `${freeLeftLine(w.free_left)}. After that Rs 30 to 50 a plan from your wallet.`, action: null };
   if (w.pending_bill) return { state: 'bill_pending', line: 'Settle or discard your last draft first.', action: 'bill' };
   if (w.balance_paise < w.floor_paise) return { state: 'floor', line: `Wallet ${rupees(w.balance_paise)}. You need at least ${rupees(w.floor_paise)} in your wallet to make an AI plan.`, action: 'wallet' };
-  return { state: 'ok', line: `Wallet ${rupees(w.balance_paise)}`, action: null };
+  return { state: 'ok', line: `Free AI plans used. Wallet ${rupees(w.balance_paise)}, Rs 30 to 50 a plan.`, action: null };
 };
 
 /** The sentence after "WALLET_CODE:" of a server refusal, else null. */

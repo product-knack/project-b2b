@@ -14,7 +14,7 @@ import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import { useIsOnline } from '../lib/offline';
 import { useTeamWallet, useTeamWalletPage, useCreateTopup, useVerifyTopup, useWalletRealtime, walletErrorText } from '../lib/teamWalletQueries';
 import {
-  TOPUP_PICKS, fmtWhen, groupByMonth, isPendingBill, isPendingTopup, methodLabel, parseRupeeInput, rowChip, rowSecondLine, rowTitle, rupees,
+  TOPUP_PICKS, fmtWhen, freeLeftLine, groupByMonth, isPendingBill, isPendingTopup, methodLabel, parseRupeeInput, rowAmountText, rowChip, rowSecondLine, rowTitle, rupees,
   signedRupees, topupExpired, topupProblem, topupRoomLine, type Tone, type WalletRow,
 } from '../lib/teamWallet';
 import { WalletCheckout, type CheckoutMessage } from '../components/WalletCheckout';
@@ -40,16 +40,16 @@ function Chip({ text, tone }: { text: string; tone: Tone }) {
 
 function RowCard({ r, now, onPress }: { r: WalletRow; now: number; onPress: () => void }) {
   const chip = rowChip(r, now);
-  const credit = r.amount_paise > 0;
+  const credit = r.amount_paise >= 0;
   return (
-    <Pressable onPress={onPress} hitSlop={4} accessibilityRole="button" accessibilityLabel={`${rowTitle(r)}, ${signedRupees(r.amount_paise)}`}
+    <Pressable onPress={onPress} hitSlop={4} accessibilityRole="button" accessibilityLabel={`${rowTitle(r)}, ${rowAmountText(r)}`}
       style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 13, borderRadius: 15, backgroundColor: 'rgba(0,0,0,0.22)', borderWidth: 1, borderColor: hexA(TONE[chip.tone], 0.22) }}>
       <View style={{ flex: 1, gap: 3 }}>
         <Body numberOfLines={1} style={{ fontSize: 14.5, fontFamily: F.bodySemi, color: '#fff' }}>{rowTitle(r)}</Body>
         <Body numberOfLines={2} style={{ fontSize: 11.5, color: C.muted2, lineHeight: 15 }}>{rowSecondLine(r, now)}</Body>
       </View>
       <View style={{ alignItems: 'flex-end', gap: 5 }}>
-        <Text style={{ fontFamily: F.bodyBold, fontSize: 14.5, color: credit ? C.green : '#fff' }}>{signedRupees(r.amount_paise)}</Text>
+        <Text style={{ fontFamily: F.bodyBold, fontSize: 14.5, color: credit ? C.green : '#fff' }}>{rowAmountText(r)}</Text>
         <Chip text={chip.text} tone={chip.tone} />
       </View>
     </Pressable>
@@ -159,7 +159,7 @@ function DetailSheet({ row, now, onClose, onReopen, onOpenBill }: { row: WalletR
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
                 <View style={{ flex: 1 }}>
                   <Serif style={{ fontSize: 19 }}>{rowTitle(row)}</Serif>
-                  <Text style={{ fontFamily: F.bodyBold, fontSize: 20, color: row.amount_paise > 0 ? C.green : '#fff', marginTop: 4 }}>{signedRupees(row.amount_paise)}</Text>
+                  <Text style={{ fontFamily: F.bodyBold, fontSize: 20, color: row.amount_paise >= 0 ? C.green : '#fff', marginTop: 4 }}>{rowAmountText(row)}</Text>
                 </View>
                 {chip ? <Chip text={chip.text} tone={chip.tone} /> : null}
                 <Pressable onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel="Close"
@@ -305,7 +305,7 @@ export function Wallet() {
         <Body style={{ fontSize: 11.5, color: C.muted2 }}>
           {!online ? 'Offline, last known balance' : updatedAt ? `Updated ${fmtWhen(new Date(updatedAt).toISOString())}` : notSetUp ? 'The wallet is not set up on the server yet.' : q.isError ? walletErrorText(q.error, 'Could not load the wallet. Pull to refresh.') : ''}
         </Body>
-        {data?.charges_ai ? <Body style={{ fontSize: 11, color: C.muted3, marginTop: 2 }}>Odds AI plans cost Rs 30 to 50 each, deducted here.</Body> : null}
+        {data?.charges_ai ? <Body style={{ fontSize: 11, color: C.muted3, marginTop: 2 }}>{data.free_left > 0 ? `${freeLeftLine(data.free_left)}. After that Odds AI plans cost Rs 30 to 50 each, deducted here.` : 'Odds AI plans cost Rs 30 to 50 each, deducted here. Essentials clients stay free.'}</Body> : null}
       </Card>
 
       <Pressable onPress={() => { setAddErr(null); setAddOpen(true); }} disabled={!online || notSetUp} accessibilityRole="button" accessibilityLabel="Add money" style={{ borderRadius: 13, overflow: 'hidden', opacity: online && !notSetUp ? 1 : 0.5 }}>

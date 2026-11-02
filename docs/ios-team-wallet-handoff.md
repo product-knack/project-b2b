@@ -10,6 +10,8 @@ Owner decisions: odds-app/docs/team-wallet-plan.md. Copy rule: no dashes in user
 
 ## 1. What the user sees
 
+Free drafts (owner, 2 Nov 2026 evening): a trainer's first 3 AI plans for non-Essentials clients are free, an Essentials client is always free. The Create Plan AI card and the panel say "3 free AI plans left. After that Rs 30 to 50 a plan from your wallet." (singular for 1) or "Free for Essentials clients."; a free Generate behaves exactly like today (the draft lands in the builder, no bill sheet) and the count drops; once the free ones are used the wallet rules below apply. The Wallet history shows a free draft as "Odds AI plan, <name>" with the amount text "Free", chip FREE, line "Free plan, not charged" (or "Free for Essentials clients"); the balance card says "N free AI plans left" while any remain. An admin or super admin may add exactly Rs 1 as a test top-up (the server allows it; the sheet needs no change: type 1).
+
 ### 1.1 Wallet (drawer item "Wallet", every role, route `wallet`)
 - Title "Wallet", sub "Add money, see your history".
 - **Balance card:** big "Rs 2,500" (whole rupees with Indian grouping, from paise), under it "Updated 2 Nov, 3:10 PM"
@@ -130,6 +132,9 @@ RPC, authenticated, own rows only. Answer (jsonb):
   "ai_bill_min_paise": 3000,
   "ai_bill_max_paise": 5000,
   "charges_ai": true,
+  "free_total": 3,
+  "free_used": 1,
+  "free_left": 2,
   "rows": [
     { "id": "uuid", "seq": 12, "user_id": "uuid", "role": "trainer", "kind": "topup", "amount_paise": 200000, "status": "paid", "balance_after_paise": 250000,
       "created_at": "2026-11-02T09:38:00Z", "paid_at": "2026-11-02T09:40:11Z",
@@ -150,7 +155,7 @@ RPC, authenticated, own rows only. Answer (jsonb):
 | `wallet-verify-payment` | `{ "tx_id", "razorpay_order_id", "razorpay_payment_id", "razorpay_signature" }` | `{ "ok": true, "credited_now": true, "row": <row as in 2.2>, "balance_paise" }` (`credited_now false` when the webhook got there first) | `WALLET_SIGNATURE: The payment could not be verified. If money left your account it will be added within a few minutes.` / `WALLET_NOT_FOUND: This top-up was not found.` / `WALLET_NOT_CAPTURED: The payment is still processing. Your wallet updates when it completes.` |
 | `wallet-settle-ai-plan` | `{ "tx_id" }` | `{ "ok": true, "already": false, "result": <the whole ai-plan-draft answer: draft, dropped, sources, model, generated_at>, "balance_paise", "row" }` (a paid bill answers again with `already: true` and the same result)  | `WALLET_INSUFFICIENT: Your wallet has Rs 30. This needs Rs 40. Add money in Wallet.` / `WALLET_CANCELLED: This draft was discarded.` / `WALLET_NOT_FOUND: ...` |
 | `wallet-discard-ai-plan` | `{ "tx_id" }` | `{ "ok": true }` | `WALLET_DISCARD_LIMIT: You have discarded 3 drafts today. Try again tomorrow.` / `WALLET_NOT_FOUND: ...` |
-| `ai-plan-draft` (existing, changed) | as today; `preview: true` answer gains `{ "wallet": { "charges": true, "balance_paise", "pending_bill": { "tx_id", "bill_paise" } or null } }`; the draft call for a trainer answers `{ "bill": { "tx_id", "bill_paise", "balance_paise" }, "preview": { "sections": ["Chest", ...], "exercise_count": 27 } }` INSTEAD of the draft | as today | `WALLET_FLOOR: You need at least Rs 50 in your wallet to make an AI plan.` / `WALLET_BILL_PENDING: Settle or discard your last draft first.` |
+| `ai-plan-draft` (existing, changed) | as today; `preview: true` answer gains `{ "wallet": { "charges", "balance_paise", "floor_paise", "free_total", "free_used", "free_left", "essentials", "free_this", "billed", "pending_bill": {...} or null, "ok", "reason" } }`; a free draft (`free_this`) answers the draft as today plus `wallet: { free: true, essentials, free_left, free_total }`; a billed draft for a trainer answers `{ "bill": { "tx_id", "bill_paise", "balance_paise" }, "preview": { "sections": ["Chest", ...], "exercise_count": 27 } }` INSTEAD of the draft | as today | `WALLET_FLOOR: You need at least Rs 50 in your wallet to make an AI plan.` / `WALLET_BILL_PENDING: Settle or discard your last draft first.` |
 - Every refusal arrives as HTTP 400 (402 for `WALLET_INSUFFICIENT`, 403 for `WALLET_FORBIDDEN` / `WALLET_SIGN_IN`, 503 for `WALLET_NOT_SET_UP` while the migration is not run) with body
   `{ "error": "CODE: sentence" }`. The app shows the sentence after the colon (`codedSentence`, with `WALLET_` added to
   its pattern), then `friendlyError` for anything else.
@@ -264,7 +269,7 @@ the code disagree, the code in section 5 wins.
 
 ## 5. Code as built (generated from the Android tree, 2 Nov 2026)
 
-Literal dashes inside copied code are written as \u2014 / \u2013 (restore them when pasting; they sit in old comments only). New files in full, then the diff hunks of the edited files (`git diff -U4` against the last commit). The server files are listed at the end for reference; iOS builds none of them.
+New files in full, then the diff hunks of the edited files (`git diff -U4` against 755512e, the tree before any wallet work). The server files are listed at the end for reference; iOS builds none of them.
 
 ### `src/lib/teamWallet.ts` (new)
 Pure rules. Copy byte for byte; the test below must pass against it.
@@ -307,11 +312,21 @@ export type TeamWalletRead = {
   daily_cap_paise: number;
   ai_floor_paise: number;
   charges_ai: boolean;
+  free_total: number;
+  free_used: number;
+  free_left: number;
   pending_bill: PendingBill | null;
   rows: WalletRow[];
 };
-/** What ai-plan-draft's preview says about the caller's wallet (null while the wallet is not on the server). */
-export type WalletGate = { charges: boolean; balance_paise: number; floor_paise: number; pending_bill: PendingBill | null; ok: boolean; reason: 'WALLET_FLOOR' | 'WALLET_BILL_PENDING' | null };
+/** What ai-plan-draft's preview says about the caller's wallet (null while the wallet is not on the server).
+    Free drafts (owner, 2 Nov 2026): a trainer's first 3 AI plans for non-Essentials clients are free (free_left), an
+    Essentials client is always free; free_this = this draft costs nothing, billed = the bill sheet will follow. */
+export type WalletGate = {
+  charges: boolean; balance_paise: number; floor_paise: number;
+  free_total: number; free_used: number; free_left: number; essentials: boolean; free_this: boolean; billed: boolean;
+  pending_bill: PendingBill | null; ok: boolean; reason: 'WALLET_FLOOR' | 'WALLET_BILL_PENDING' | null;
+};
+export const FREE_DRAFTS = 3;
 export type AiBill = { tx_id: string; bill_paise: number; balance_paise: number; blocks: string[] };
 export type Tone = 'green' | 'amber' | 'red' | 'grey';
 
@@ -382,14 +397,27 @@ export const parseWalletRead = (d: any): TeamWalletRead => ({
   daily_cap_paise: num(d?.daily_cap_paise, DAILY_CAP_PAISE),
   ai_floor_paise: num(d?.ai_floor_paise, AI_FLOOR_PAISE),
   charges_ai: d?.charges_ai === true,
+  free_total: num(d?.free_total, FREE_DRAFTS),
+  free_used: num(d?.free_used),
+  free_left: num(d?.free_left),
   pending_bill: parsePendingBill(d?.pending_bill),
   rows: (Array.isArray(d?.rows) ? d.rows : []).map(parseWalletRow).filter(Boolean) as WalletRow[],
 });
 export const parseWalletGate = (w: any): WalletGate | null => {
   if (!w || typeof w !== 'object') return null;
   const reason = w.reason === 'WALLET_FLOOR' || w.reason === 'WALLET_BILL_PENDING' ? w.reason : null;
-  return { charges: w.charges === true, balance_paise: num(w.balance_paise), floor_paise: num(w.floor_paise, AI_FLOOR_PAISE), pending_bill: parsePendingBill(w.pending_bill), ok: w.ok !== false && !reason, reason };
+  const charges = w.charges === true;
+  const free_left = num(w.free_left);
+  const essentials = w.essentials === true;
+  const free_this = typeof w.free_this === 'boolean' ? w.free_this : !charges || essentials || free_left > 0;
+  return {
+    charges, balance_paise: num(w.balance_paise), floor_paise: num(w.floor_paise, AI_FLOOR_PAISE),
+    free_total: num(w.free_total, FREE_DRAFTS), free_used: num(w.free_used), free_left, essentials, free_this,
+    billed: typeof w.billed === 'boolean' ? w.billed : charges && !free_this,
+    pending_bill: parsePendingBill(w.pending_bill), ok: w.ok !== false && !reason, reason,
+  };
 };
+export const isFreeRow = (r: WalletRow): boolean => r.kind === 'ai_plan' && r.meta?.free === true;
 
 export const isPendingTopup = (r: WalletRow): boolean => r.kind === 'topup' && r.status === 'pending';
 export const isPendingBill = (r: WalletRow): boolean => r.kind === 'ai_plan' && r.status === 'pending';
@@ -446,7 +474,10 @@ export const rowTitle = (r: WalletRow): string => {
     default: return 'Wallet';
   }
 };
+/** "Free" for a free draft row (0 rupees), else the signed amount. */
+export const rowAmountText = (r: WalletRow): string => (isFreeRow(r) ? 'Free' : signedRupees(r.amount_paise));
 export const rowStatusLine = (r: WalletRow, nowMs: number = Date.now()): string => {
+  if (isFreeRow(r)) return r.meta?.essentials === true ? 'Free for Essentials clients' : 'Free plan, not charged';
   if (r.status === 'paid') return r.balance_after_paise == null ? 'Paid' : `Balance ${rupees(r.balance_after_paise)}`;
   if (r.status === 'pending') {
     if (r.kind === 'topup') return topupExpired(r, nowMs) ? 'Expired, not charged' : 'Waiting for payment';
@@ -465,6 +496,7 @@ export const rowSecondLine = (r: WalletRow, nowMs: number = Date.now()): string 
   return when && line ? `${when} · ${line}` : when || line;
 };
 export const rowChip = (r: WalletRow, nowMs: number = Date.now()): { text: string; tone: Tone } => {
+  if (isFreeRow(r)) return { text: 'FREE', tone: 'green' };
   if (r.status === 'paid') return { text: 'PAID', tone: 'green' };
   if (r.status === 'pending') return r.kind === 'topup' && topupExpired(r, nowMs) ? { text: 'EXPIRED', tone: 'grey' } : { text: 'WAITING', tone: 'amber' };
   if (r.status === 'failed') return { text: 'FAILED', tone: 'red' };
@@ -482,14 +514,18 @@ export const billPreviewLine = (p: BillPreview | null | undefined): string => {
   const n = p.sections.length;
   return `${n} section${n === 1 ? '' : 's'}, ${p.exercise_count} exercise${p.exercise_count === 1 ? '' : 's'}`;
 };
-export type WalletCardState = 'free' | 'ok' | 'floor' | 'bill_pending' | 'unknown';
+export type WalletCardState = 'free' | 'essentials' | 'free_left' | 'ok' | 'floor' | 'bill_pending' | 'unknown';
+/** "3 free AI plans left" / "1 free AI plan left" */
+export const freeLeftLine = (n: number): string => `${n} free AI plan${n === 1 ? '' : 's'} left`;
 /** The Create Plan AI card: what the wallet allows and the line to show. */
 export const walletCardState = (w: WalletGate | null | undefined): { state: WalletCardState; line: string | null; action: 'wallet' | 'bill' | null } => {
   if (!w) return { state: 'unknown', line: null, action: null };
   if (!w.charges) return { state: 'free', line: null, action: null };
+  if (w.essentials) return { state: 'essentials', line: 'Free for Essentials clients.', action: null };
+  if (w.free_left > 0) return { state: 'free_left', line: `${freeLeftLine(w.free_left)}. After that Rs 30 to 50 a plan from your wallet.`, action: null };
   if (w.pending_bill) return { state: 'bill_pending', line: 'Settle or discard your last draft first.', action: 'bill' };
   if (w.balance_paise < w.floor_paise) return { state: 'floor', line: `Wallet ${rupees(w.balance_paise)}. You need at least ${rupees(w.floor_paise)} in your wallet to make an AI plan.`, action: 'wallet' };
-  return { state: 'ok', line: `Wallet ${rupees(w.balance_paise)}`, action: null };
+  return { state: 'ok', line: `Free AI plans used. Wallet ${rupees(w.balance_paise)}, Rs 30 to 50 a plan.`, action: null };
 };
 
 /** The sentence after "WALLET_CODE:" of a server refusal, else null. */
@@ -593,12 +629,22 @@ eq('read: empty', W.parseWalletRead(null).rows, []);
 // 7. the AI bill
 eq('bill lines', W.billLines(4000, 200000), { bill: 'Your bill is Rs 40.', after: 'Wallet Rs 2,000, after this Rs 1,960' });
 eq('preview line', W.billPreviewLine({ sections: ['Push', 'Pull', 'Legs', 'Conditioning'], exercise_count: 27 }), '4 sections, 27 exercises');
-eq('card: not charged', W.walletCardState({ charges: false, balance_paise: 0, floor_paise: 5000, pending_bill: null, ok: true, reason: null }).state, 'free');
-eq('card: ok', W.walletCardState({ charges: true, balance_paise: 200000, floor_paise: 5000, pending_bill: null, ok: true, reason: null }), { state: 'ok', line: 'Wallet Rs 2,000', action: null });
-eq('card: floor', W.walletCardState({ charges: true, balance_paise: 3000, floor_paise: 5000, pending_bill: null, ok: false, reason: 'WALLET_FLOOR' }), { state: 'floor', line: 'Wallet Rs 30. You need at least Rs 50 in your wallet to make an AI plan.', action: 'wallet' });
-eq('card: bill pending', W.walletCardState({ charges: true, balance_paise: 200000, floor_paise: 5000, pending_bill: read.pending_bill, ok: false, reason: 'WALLET_BILL_PENDING' }), { state: 'bill_pending', line: 'Settle or discard your last draft first.', action: 'bill' });
+const gate = (o) => W.parseWalletGate({ charges: true, balance_paise: 200000, floor_paise: 5000, free_total: 3, free_used: 3, free_left: 0, essentials: false, free_this: false, billed: true, pending_bill: null, ok: true, reason: null, ...o });
+eq('card: not charged', W.walletCardState(gate({ charges: false, free_this: true, billed: false })).state, 'free');
+eq('card: ok (free used up)', W.walletCardState(gate({})), { state: 'ok', line: 'Free AI plans used. Wallet Rs 2,000, Rs 30 to 50 a plan.', action: null });
+eq('card: 3 free left', W.walletCardState(gate({ free_used: 0, free_left: 3, free_this: true, billed: false })), { state: 'free_left', line: '3 free AI plans left. After that Rs 30 to 50 a plan from your wallet.', action: null });
+eq('card: 1 free left (singular)', W.walletCardState(gate({ free_used: 2, free_left: 1, free_this: true, billed: false })).line, '1 free AI plan left. After that Rs 30 to 50 a plan from your wallet.');
+eq('card: Essentials client is free even with 0 left', W.walletCardState(gate({ essentials: true, free_this: true, billed: false, balance_paise: 0 })), { state: 'essentials', line: 'Free for Essentials clients.', action: null });
+eq('card: floor', W.walletCardState(gate({ balance_paise: 3000, ok: false, reason: 'WALLET_FLOOR' })), { state: 'floor', line: 'Wallet Rs 30. You need at least Rs 50 in your wallet to make an AI plan.', action: 'wallet' });
+eq('card: bill pending', W.walletCardState(gate({ pending_bill: read.pending_bill, ok: false, reason: 'WALLET_BILL_PENDING' })), { state: 'bill_pending', line: 'Settle or discard your last draft first.', action: 'bill' });
 eq('card: unknown', W.walletCardState(null).state, 'unknown');
 eq('gate parse', W.parseWalletGate({ charges: true, balance_paise: 3000, floor_paise: 5000, pending_bill: null, ok: false, reason: 'WALLET_FLOOR' }).reason, 'WALLET_FLOOR');
+eq('gate parse: old server answer without free fields is billed', [gate({}).billed, W.parseWalletGate({ charges: true, balance_paise: 3000 }).free_this], [true, false]);
+eq('free left line', [W.freeLeftLine(3), W.freeLeftLine(1)], ['3 free AI plans left', '1 free AI plan left']);
+const freeRow = W.parseWalletRow({ id: 'h', seq: 10, kind: 'ai_plan', amount_paise: 0, status: 'paid', balance_after_paise: 50000, created_at: t0, paid_at: t0, razorpay: null, meta: { free: true, essentials: false, client_name: 'Riya S' } });
+eq('free row: amount, line, chip', [W.rowAmountText(freeRow), W.rowStatusLine(freeRow, now), W.rowChip(freeRow, now), W.rowTitle(freeRow)], ['Free', 'Free plan, not charged', { text: 'FREE', tone: 'green' }, 'Odds AI plan, Riya']);
+eq('free Essentials row line', W.rowStatusLine({ ...freeRow, meta: { free: true, essentials: true } }, now), 'Free for Essentials clients');
+eq('paid row amount text unchanged', W.rowAmountText(paid), '+ Rs 2,000');
 
 // 8. errors
 eq('coded sentence', W.codedWalletSentence(new Error('WALLET_DAILY_CAP: You can add Rs 3000 more today. The limit is Rs 5000 a day.')), 'You can add Rs 3000 more today. The limit is Rs 5000 a day.');
@@ -794,7 +840,7 @@ import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import { useIsOnline } from '../lib/offline';
 import { useTeamWallet, useTeamWalletPage, useCreateTopup, useVerifyTopup, useWalletRealtime, walletErrorText } from '../lib/teamWalletQueries';
 import {
-  TOPUP_PICKS, fmtWhen, groupByMonth, isPendingBill, isPendingTopup, methodLabel, parseRupeeInput, rowChip, rowSecondLine, rowTitle, rupees,
+  TOPUP_PICKS, fmtWhen, freeLeftLine, groupByMonth, isPendingBill, isPendingTopup, methodLabel, parseRupeeInput, rowAmountText, rowChip, rowSecondLine, rowTitle, rupees,
   signedRupees, topupExpired, topupProblem, topupRoomLine, type Tone, type WalletRow,
 } from '../lib/teamWallet';
 import { WalletCheckout, type CheckoutMessage } from '../components/WalletCheckout';
@@ -820,16 +866,16 @@ function Chip({ text, tone }: { text: string; tone: Tone }) {
 
 function RowCard({ r, now, onPress }: { r: WalletRow; now: number; onPress: () => void }) {
   const chip = rowChip(r, now);
-  const credit = r.amount_paise > 0;
+  const credit = r.amount_paise >= 0;
   return (
-    <Pressable onPress={onPress} hitSlop={4} accessibilityRole="button" accessibilityLabel={`${rowTitle(r)}, ${signedRupees(r.amount_paise)}`}
+    <Pressable onPress={onPress} hitSlop={4} accessibilityRole="button" accessibilityLabel={`${rowTitle(r)}, ${rowAmountText(r)}`}
       style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 13, borderRadius: 15, backgroundColor: 'rgba(0,0,0,0.22)', borderWidth: 1, borderColor: hexA(TONE[chip.tone], 0.22) }}>
       <View style={{ flex: 1, gap: 3 }}>
         <Body numberOfLines={1} style={{ fontSize: 14.5, fontFamily: F.bodySemi, color: '#fff' }}>{rowTitle(r)}</Body>
         <Body numberOfLines={2} style={{ fontSize: 11.5, color: C.muted2, lineHeight: 15 }}>{rowSecondLine(r, now)}</Body>
       </View>
       <View style={{ alignItems: 'flex-end', gap: 5 }}>
-        <Text style={{ fontFamily: F.bodyBold, fontSize: 14.5, color: credit ? C.green : '#fff' }}>{signedRupees(r.amount_paise)}</Text>
+        <Text style={{ fontFamily: F.bodyBold, fontSize: 14.5, color: credit ? C.green : '#fff' }}>{rowAmountText(r)}</Text>
         <Chip text={chip.text} tone={chip.tone} />
       </View>
     </Pressable>
@@ -939,7 +985,7 @@ function DetailSheet({ row, now, onClose, onReopen, onOpenBill }: { row: WalletR
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
                 <View style={{ flex: 1 }}>
                   <Serif style={{ fontSize: 19 }}>{rowTitle(row)}</Serif>
-                  <Text style={{ fontFamily: F.bodyBold, fontSize: 20, color: row.amount_paise > 0 ? C.green : '#fff', marginTop: 4 }}>{signedRupees(row.amount_paise)}</Text>
+                  <Text style={{ fontFamily: F.bodyBold, fontSize: 20, color: row.amount_paise >= 0 ? C.green : '#fff', marginTop: 4 }}>{rowAmountText(row)}</Text>
                 </View>
                 {chip ? <Chip text={chip.text} tone={chip.tone} /> : null}
                 <Pressable onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel="Close"
@@ -1085,7 +1131,7 @@ export function Wallet() {
         <Body style={{ fontSize: 11.5, color: C.muted2 }}>
           {!online ? 'Offline, last known balance' : updatedAt ? `Updated ${fmtWhen(new Date(updatedAt).toISOString())}` : notSetUp ? 'The wallet is not set up on the server yet.' : q.isError ? walletErrorText(q.error, 'Could not load the wallet. Pull to refresh.') : ''}
         </Body>
-        {data?.charges_ai ? <Body style={{ fontSize: 11, color: C.muted3, marginTop: 2 }}>Odds AI plans cost Rs 30 to 50 each, deducted here.</Body> : null}
+        {data?.charges_ai ? <Body style={{ fontSize: 11, color: C.muted3, marginTop: 2 }}>{data.free_left > 0 ? `${freeLeftLine(data.free_left)}. After that Odds AI plans cost Rs 30 to 50 each, deducted here.` : 'Odds AI plans cost Rs 30 to 50 each, deducted here. Essentials clients stay free.'}</Body> : null}
       </Card>
 
       <Pressable onPress={() => { setAddErr(null); setAddOpen(true); }} disabled={!online || notSetUp} accessibilityRole="button" accessibilityLabel="Add money" style={{ borderRadius: 13, overflow: 'hidden', opacity: online && !notSetUp ? 1 : 0.5 }}>
@@ -1696,11 +1742,16 @@ index 290d543..ee61e9b 100644
  const str = (v: unknown) => (v == null ? '' : String(v));
  
 diff --git a/src/lib/aiPlanQueries.ts b/src/lib/aiPlanQueries.ts
-index 843c5f8..5c39bd4 100644
+index 843c5f8..57c4523 100644
 --- a/src/lib/aiPlanQueries.ts
 +++ b/src/lib/aiPlanQueries.ts
-@@ -5,8 +5,10 @@
- import { useMutation, useQuery } from '@tanstack/react-query';
+@@ -1,12 +1,14 @@
+ /* Odds AI plan assistant data (16 Oct 2026). The edge function ai-plan-draft (hub-track) reads the
+    client's latest QHP, medical history, blood markers and health context and drafts a plan from
+    exercises_db; it writes nothing. The plan is saved by Create Plan exactly as before. The home alert
+    list is the definer RPC get_my_essentials_plan_gaps (migration 20261016150000). */
+-import { useMutation, useQuery } from '@tanstack/react-query';
++import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
  import { supabase } from './supabase';
  import { invokeWithTimeout, withTimeout, NET_MS } from './withTimeout';
  import type { AiPlanPreview, AiPlanResult, EssentialsPlanGap, SplitKey } from './aiPlanDraft';
@@ -1710,7 +1761,7 @@ index 843c5f8..5c39bd4 100644
  /** Generating takes 20 to 40 seconds (Gemini reads the QHP and picks from about 230 exercises). */
  export const AI_PLAN_MS = 100_000;
  export const PLAN_GAPS_KEY = ['trainer-essentials-plan-gaps'] as const;
-@@ -50,28 +52,33 @@ export function useAiPlanPreview(clientId: string | null | undefined, enabled =
+@@ -50,28 +52,36 @@ export function useAiPlanPreview(clientId: string | null | undefined, enabled =
          essentials: d?.essentials === true,
          client_name: String(d?.client_name ?? ''),
          sources: d?.sources ?? null,
@@ -1728,8 +1779,11 @@ index 843c5f8..5c39bd4 100644
 +export type AiPlanAnswer = { kind: 'draft'; result: AiPlanResult } | { kind: 'bill'; bill: AiBill; preview: BillPreview | null };
  /** One draft (20 to 40 s). Throws the server's sentence on refusal. */
  export function useAiPlanDraft() {
++  const qc = useQueryClient();
    return useMutation({
 -    mutationFn: async (r: AiPlanRequest): Promise<AiPlanResult> => {
++    // A free draft or a bill changes the preview's wallet line and the Wallet history.
++    onSettled: () => { qc.invalidateQueries({ queryKey: ['ai-plan-preview'] }); qc.invalidateQueries({ queryKey: ['my-team-wallet'] }); },
 +    mutationFn: async (r: AiPlanRequest): Promise<AiPlanAnswer> => {
        const d = await callPlanFn({ client_id: r.clientId, split: r.split, sessions_per_week: r.sessionsPerWeek ?? undefined, note: r.note?.trim() || undefined }, AI_PLAN_MS);
 -      if (!d?.draft || !Array.isArray(d.draft.sections)) throw new Error('Odds AI returned no plan. Try Generate again.');
@@ -2339,7 +2393,7 @@ CREATE TABLE IF NOT EXISTS public.team_wallet (
   user_id             uuid NOT NULL REFERENCES public.profiles(id) ON DELETE RESTRICT,
   role                text NOT NULL,                                   -- profiles.role when the row was made
   kind                text NOT NULL CHECK (kind IN ('topup', 'ai_plan', 'reversal', 'refund', 'adjustment')),
-  amount_paise        bigint NOT NULL CHECK (amount_paise <> 0),        -- signed: credit > 0, debit < 0; always paise
+  amount_paise        bigint NOT NULL,                                  -- signed: credit > 0, debit < 0; 0 only for a free AI draft; always paise
   status              text NOT NULL DEFAULT 'pending'
                       CHECK (status IN ('pending', 'paid', 'failed', 'expired', 'cancelled')),
   balance_after_paise bigint,                                          -- set when the row becomes paid
@@ -2349,9 +2403,11 @@ CREATE TABLE IF NOT EXISTS public.team_wallet (
   paid_at             timestamptz,
   CONSTRAINT team_wallet_sign CHECK (
        (kind IN ('topup', 'reversal') AND amount_paise > 0)
-    OR (kind IN ('ai_plan', 'refund') AND amount_paise < 0)
-    OR  kind = 'adjustment'),
-  CONSTRAINT team_wallet_topup_limits CHECK (kind <> 'topup' OR amount_paise BETWEEN 50000 AND 500000),
+    OR (kind = 'refund' AND amount_paise < 0)
+    OR (kind = 'ai_plan' AND (amount_paise < 0 OR (amount_paise = 0 AND meta->>'free' = 'true')))   -- a free draft is a 0 row
+    OR (kind = 'adjustment' AND amount_paise <> 0)),
+  -- Rs 500 to Rs 5,000; Rs 1 only as an admin's test top-up (owner, 2 Nov 2026), enforced per role in the function
+  CONSTRAINT team_wallet_topup_limits CHECK (kind <> 'topup' OR amount_paise = 100 OR amount_paise BETWEEN 50000 AND 500000),
   CONSTRAINT team_wallet_paid_has_balance CHECK (status <> 'paid' OR balance_after_paise IS NOT NULL),
   CONSTRAINT team_wallet_json_shapes CHECK ((razorpay IS NULL OR jsonb_typeof(razorpay) = 'object') AND jsonb_typeof(meta) = 'object')
 );
@@ -2481,9 +2537,39 @@ AS $$ SELECT (public.team_wallet_ai_plan_bill(p_client)->>'bill_paise')::bigint 
 REVOKE ALL ON FUNCTION public.team_wallet_ai_plan_bill(uuid), public.team_wallet_ai_plan_bill_paise(uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.team_wallet_ai_plan_bill(uuid), public.team_wallet_ai_plan_bill_paise(uuid) TO service_role;
 
-/** Before Generate: does this user pay (trainers only), the balance, the waiting bill if any, and whether a new
-    draft may start (balance at least the floor and no bill waiting). The preview and the draft call both ask. */
-CREATE OR REPLACE FUNCTION public.team_wallet_ai_plan_gate(p_user uuid)
+-- Free AI drafts (owner, 2 Nov 2026 evening): a trainer's first 3 AI plans for NON-Essentials clients are free; from
+-- the 4th the bill applies. Essentials clients' plans are always free and never count. "Used" = the free 0-rows this
+-- ledger records from now on, plus the AI plans the trainer saved before the wallet existed (the registry's log:
+-- workout_plan_exercises.source = 'ai', one per plan_id, non-Essentials clients, made before the cutover day).
+CREATE OR REPLACE FUNCTION public.team_wallet_free_total()
+RETURNS integer LANGUAGE sql IMMUTABLE AS $$ SELECT 3 $$;
+CREATE OR REPLACE FUNCTION public.team_wallet_free_cutover()
+RETURNS timestamptz LANGUAGE sql IMMUTABLE AS $$ SELECT '2026-11-03 00:00:00+05:30'::timestamptz $$;
+CREATE OR REPLACE FUNCTION public.team_wallet_is_essentials(p_sub text)
+RETURNS boolean LANGUAGE sql IMMUTABLE AS $$ SELECT COALESCE(regexp_replace(btrim(p_sub), '\s+', ' ', 'g') ~* '^(odds )?essentials?( by odds)?$', false) $$;
+GRANT EXECUTE ON FUNCTION public.team_wallet_free_total(), public.team_wallet_free_cutover(), public.team_wallet_is_essentials(text) TO authenticated, service_role;
+
+CREATE OR REPLACE FUNCTION public.team_wallet_free_used(p_user uuid)
+RETURNS integer
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT (SELECT count(*)::integer FROM public.team_wallet w
+           WHERE w.user_id = p_user AND w.kind = 'ai_plan' AND w.status = 'paid' AND w.meta->>'free' = 'true' AND COALESCE(w.meta->>'essentials', 'false') <> 'true')
+       + (SELECT count(DISTINCT e.plan_id)::integer FROM public.workout_plan_exercises e
+           JOIN public.clients c ON c.id = e.client_id
+           WHERE e.trainer_id = p_user AND e.source = 'ai' AND e.plan_id IS NOT NULL
+             AND e.created_at < public.team_wallet_free_cutover() AND NOT public.team_wallet_is_essentials(c.subscription_type));
+$$;
+REVOKE ALL ON FUNCTION public.team_wallet_free_used(uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.team_wallet_free_used(uuid) TO service_role;
+
+/** Before Generate: does this user pay (trainers only), the free drafts left, the balance, the waiting bill if any,
+    whether THIS draft is free (Essentials client, or a free one left) and whether it may start. The preview and the
+    draft call both ask. */
+CREATE OR REPLACE FUNCTION public.team_wallet_ai_plan_gate(p_user uuid, p_essentials boolean DEFAULT false)
 RETURNS jsonb
 LANGUAGE plpgsql
 STABLE
@@ -2494,6 +2580,9 @@ DECLARE
   v_role text;
   v_charges boolean;
   v_bal bigint;
+  v_used integer := 0;
+  v_left integer := 0;
+  v_free_this boolean;
   v_pending public.team_wallet;
   v_pending_json jsonb := NULL;
   v_reason text := NULL;
@@ -2501,6 +2590,11 @@ BEGIN
   SELECT p.role::text INTO v_role FROM public.profiles p WHERE p.id = p_user;
   v_charges := (v_role = 'trainer');
   v_bal := public.team_wallet_balance(p_user);
+  IF v_charges THEN
+    v_used := public.team_wallet_free_used(p_user);
+    v_left := GREATEST(public.team_wallet_free_total() - v_used, 0);
+  END IF;
+  v_free_this := NOT v_charges OR COALESCE(p_essentials, false) OR v_left > 0;
   SELECT * INTO v_pending FROM public.team_wallet w
    WHERE w.user_id = p_user AND w.kind = 'ai_plan' AND w.status = 'pending' ORDER BY w.seq DESC LIMIT 1;
   IF v_pending.id IS NOT NULL THEN
@@ -2508,17 +2602,48 @@ BEGIN
       'client_id', v_pending.meta->>'client_id', 'client_name', v_pending.meta->>'client_name',
       'created_at', v_pending.created_at, 'preview', v_pending.meta->'preview');
   END IF;
-  IF v_charges THEN
+  IF v_charges AND NOT v_free_this THEN
     IF v_pending.id IS NOT NULL THEN v_reason := 'WALLET_BILL_PENDING';
     ELSIF v_bal < public.team_wallet_ai_floor_paise() THEN v_reason := 'WALLET_FLOOR';
     END IF;
   END IF;
   RETURN jsonb_build_object('charges', v_charges, 'balance_paise', v_bal, 'floor_paise', public.team_wallet_ai_floor_paise(),
+    'free_total', public.team_wallet_free_total(), 'free_used', v_used, 'free_left', v_left,
+    'essentials', COALESCE(p_essentials, false), 'free_this', v_free_this, 'billed', v_charges AND NOT v_free_this,
     'pending_bill', v_pending_json, 'ok', v_reason IS NULL, 'reason', v_reason);
 END;
 $$;
-REVOKE ALL ON FUNCTION public.team_wallet_ai_plan_gate(uuid) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.team_wallet_ai_plan_gate(uuid) TO service_role;
+REVOKE ALL ON FUNCTION public.team_wallet_ai_plan_gate(uuid, boolean) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.team_wallet_ai_plan_gate(uuid, boolean) TO service_role;
+
+/** ai-plan-draft, after a free draft for a trainer: one paid 0-row so the count and the history show it. An Essentials
+    draft is recorded too (meta.essentials true) but never counts. Answers the counts after it. */
+CREATE OR REPLACE FUNCTION public.team_wallet_record_free_draft(p_user uuid, p_client uuid, p_client_name text, p_essentials boolean, p_draft_ref text, p_preview jsonb)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_role text;
+  v_row public.team_wallet;
+  v_used integer;
+BEGIN
+  SELECT p.role::text INTO v_role FROM public.profiles p WHERE p.id = p_user;
+  IF v_role IS DISTINCT FROM 'trainer' THEN RETURN jsonb_build_object('recorded', false, 'free_left', NULL); END IF;
+  PERFORM public.team_wallet_lock(p_user);
+  INSERT INTO public.team_wallet (user_id, role, kind, amount_paise, status, balance_after_paise, paid_at, meta)
+  VALUES (p_user, v_role, 'ai_plan', 0, 'paid', public.team_wallet_balance(p_user), now(),
+          jsonb_build_object('free', true, 'essentials', COALESCE(p_essentials, false), 'note', CASE WHEN COALESCE(p_essentials, false) THEN 'Odds AI plan, free for Essentials' ELSE 'Odds AI plan, free' END,
+                             'created_by', p_user, 'draft_ref', p_draft_ref, 'client_id', p_client, 'client_name', p_client_name, 'preview', COALESCE(p_preview, '{}'::jsonb)))
+  RETURNING * INTO v_row;
+  v_used := public.team_wallet_free_used(p_user);
+  RETURN jsonb_build_object('recorded', true, 'free_total', public.team_wallet_free_total(), 'free_used', v_used,
+                            'free_left', GREATEST(public.team_wallet_free_total() - v_used, 0), 'row', public.team_wallet_public(v_row));
+END;
+$$;
+REVOKE ALL ON FUNCTION public.team_wallet_record_free_draft(uuid, uuid, text, boolean, text, jsonb) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.team_wallet_record_free_draft(uuid, uuid, text, boolean, text, jsonb) TO service_role;
 
 -- ---------------------------------------------------------------------------
 -- 5. Top-ups (service role: the edge functions)
@@ -2544,7 +2669,10 @@ BEGIN
   IF v_role IS NULL THEN RAISE EXCEPTION 'WALLET_FORBIDDEN: Only staff accounts have a wallet.' USING ERRCODE = '42501'; END IF;
   IF v_status <> 'active' THEN RAISE EXCEPTION 'WALLET_FORBIDDEN: This account is not active, so money cannot be added.' USING ERRCODE = '42501'; END IF;
   IF p_amount_paise IS NULL OR p_amount_paise % 100 <> 0 THEN RAISE EXCEPTION 'WALLET_MIN_AMOUNT: Enter whole rupees, at least Rs 500.'; END IF;
-  IF p_amount_paise < public.team_wallet_min_topup_paise() THEN RAISE EXCEPTION 'WALLET_MIN_AMOUNT: The minimum top-up is Rs 500.'; END IF;
+  -- Rs 1 is allowed as a test top-up for admin and super_admin accounts only (owner, 2 Nov 2026)
+  IF p_amount_paise < public.team_wallet_min_topup_paise() AND NOT (p_amount_paise = 100 AND v_role IN ('admin', 'super_admin')) THEN
+    RAISE EXCEPTION 'WALLET_MIN_AMOUNT: The minimum top-up is Rs 500.';
+  END IF;
   PERFORM public.team_wallet_lock(p_user);
   -- older pending top-ups that ran out make room
   UPDATE public.team_wallet SET status = 'expired', meta = meta || jsonb_build_object('failure_reason', 'Payment was not completed in 30 minutes', 'failed_at', now())
@@ -2761,7 +2889,8 @@ BEGIN
   IF v_role IS DISTINCT FROM 'trainer' THEN RAISE EXCEPTION 'WALLET_FORBIDDEN: Only trainers are billed for AI plans.' USING ERRCODE = '42501'; END IF;
   IF p_draft IS NULL OR jsonb_typeof(p_draft) <> 'object' THEN RAISE EXCEPTION 'WALLET_NOT_FOUND: The draft is missing.'; END IF;
   PERFORM public.team_wallet_lock(p_user);
-  v_gate := public.team_wallet_ai_plan_gate(p_user);
+  v_gate := public.team_wallet_ai_plan_gate(p_user, (SELECT public.team_wallet_is_essentials(c.subscription_type) FROM public.clients c WHERE c.id = p_client));
+  IF (v_gate->>'free_this')::boolean THEN RAISE EXCEPTION 'WALLET_FREE: This draft is free, nothing to bill.'; END IF;
   IF v_gate->>'reason' = 'WALLET_BILL_PENDING' THEN RAISE EXCEPTION 'WALLET_BILL_PENDING: Settle or discard your last draft first.'; END IF;
   IF v_gate->>'reason' = 'WALLET_FLOOR' THEN RAISE EXCEPTION 'WALLET_FLOOR: You need at least Rs 50 in your wallet to make an AI plan.'; END IF;
   v_bill := public.team_wallet_ai_plan_bill(p_client);
@@ -2901,6 +3030,9 @@ BEGIN
     'ai_bill_max_paise', 5000,
     'ai_floor_paise', public.team_wallet_ai_floor_paise(),
     'charges_ai', v_gate->'charges',
+    'free_total', v_gate->'free_total',
+    'free_used', v_gate->'free_used',
+    'free_left', v_gate->'free_left',
     'pending_bill', v_gate->'pending_bill',
     'rows', COALESCE((SELECT jsonb_agg(public.team_wallet_public(w) ORDER BY w.seq DESC)
       FROM (SELECT * FROM public.team_wallet w2 WHERE w2.user_id = v_uid AND (p_before IS NULL OR w2.created_at < p_before)
@@ -2922,7 +3054,7 @@ DO $probe$
 DECLARE
   v_user uuid; v_admin uuid; v_client uuid; v_client_name text;
   t1 jsonb; t2 jsonb; t3 jsonb; x jsonb; b1 jsonb; b2 jsonb; s1 jsonb; g jsonb;
-  v_res text; v_j jsonb; v_bill bigint; v_blocks int; v_bal bigint;
+  v_res text; v_j jsonb; v_bill bigint; v_blocks int; v_bal bigint; v_free0 int; v_n int;
   v_names text[] := '{}'; v_expected text[] := '{}'; v_results text[] := '{}';
 BEGIN
   SELECT p.id INTO v_user FROM public.profiles p WHERE p.role::text = 'trainer' AND p.email = 'sagaroddsfitness@gmail.com' LIMIT 1;
@@ -2988,8 +3120,24 @@ BEGIN
     v_names := array_append(v_names, 'reuse a payment id'); v_expected := array_append(v_expected, 'WALLET_PAYMENT_REUSED: This payment is already on another wallet row.');
     v_results := array_append(v_results, v_res);
 
-    -- 8. the AI plan gate and bill
-    g := public.team_wallet_ai_plan_gate(v_user);
+    -- 8. the free drafts: 3 per trainer for non-Essentials clients (the registry's old AI plans count), Essentials never counts
+    g := public.team_wallet_ai_plan_gate(v_user, false);
+    v_free0 := (g->>'free_used')::int;
+    v_names := array_append(v_names, 'gate: free drafts read from the ledger + the plan registry'); v_expected := array_append(v_expected, 'charges true, left = 3 - used, free_this when any left');
+    v_results := array_append(v_results, CASE WHEN (g->>'charges')::boolean AND (g->>'free_left')::int = GREATEST(3 - v_free0, 0) AND (g->>'free_this')::boolean = ((g->>'free_left')::int > 0) THEN 'charges true, left = 3 - used, free_this when any left' ELSE 'got ' || g::text END);
+    x := public.team_wallet_record_free_draft(v_user, v_client, v_client_name, true, 'probe-ess', NULL);
+    v_names := array_append(v_names, 'an Essentials draft is recorded but never counts'); v_expected := array_append(v_expected, 'recorded, used unchanged, balance unchanged');
+    v_results := array_append(v_results, CASE WHEN (x->>'recorded')::boolean AND (x->>'free_used')::int = v_free0 AND public.team_wallet_balance(v_user) = 350000 THEN 'recorded, used unchanged, balance unchanged' ELSE 'got ' || x::text END);
+    v_n := 0;
+    WHILE (public.team_wallet_ai_plan_gate(v_user, false)->>'free_left')::int > 0 AND v_n < 5 LOOP
+      x := public.team_wallet_record_free_draft(v_user, v_client, v_client_name, false, 'probe-free-' || v_n, NULL); v_n := v_n + 1;
+    END LOOP;
+    g := public.team_wallet_ai_plan_gate(v_user, false);
+    v_names := array_append(v_names, 'free drafts used up one by one, then billed'); v_expected := array_append(v_expected, 'used ' || GREATEST(3 - v_free0, 0) || ', left 0, billed true, ok true (Rs 3500)');
+    v_results := array_append(v_results, 'used ' || v_n || ', left ' || (g->>'free_left') || ', billed ' || (g->>'billed') || ', ok ' || (g->>'ok') || ' (Rs ' || ((g->>'balance_paise')::bigint / 100) || ')');
+    g := public.team_wallet_ai_plan_gate(v_user, true);
+    v_names := array_append(v_names, 'an Essentials client stays free after the 3'); v_expected := array_append(v_expected, 'free_this true, billed false');
+    v_results := array_append(v_results, 'free_this ' || (g->>'free_this') || ', billed ' || (g->>'billed'));
     v_names := array_append(v_names, 'gate: trainer with Rs 3,500 may generate'); v_expected := array_append(v_expected, 'charges true, ok true');
     v_results := array_append(v_results, 'charges ' || (g->>'charges') || ', ok ' || (g->>'ok'));
     v_j := public.team_wallet_ai_plan_bill(v_client);
@@ -3057,7 +3205,17 @@ BEGIN
     v_names := array_append(v_names, 'dashboard refund, once'); v_expected := array_append(v_expected, 'balance ' || ((v_bal - 200000) / 100) || ', 1 refund row');
     v_results := array_append(v_results, 'balance ' || (public.team_wallet_balance(v_user) / 100) || ', ' || (SELECT count(*) FROM public.team_wallet WHERE kind = 'refund' AND razorpay->>'refund_id' = 'rfnd_probe') || ' refund row');
 
-    -- 13. anon cannot read
+    -- 13. Rs 1 test top-up: admin yes, trainer no
+    BEGIN x := public.team_wallet_create_topup(v_user, 100); v_res := 'allowed'; EXCEPTION WHEN others THEN v_res := SQLERRM; END;
+    v_names := array_append(v_names, 'trainer adds Rs 1'); v_expected := array_append(v_expected, 'WALLET_MIN_AMOUNT: The minimum top-up is Rs 500.');
+    v_results := array_append(v_results, v_res);
+    IF v_admin IS NOT NULL THEN
+      BEGIN x := public.team_wallet_create_topup(v_admin, 100); v_res := (x->>'status') || ', ' || (x->>'amount_paise'); EXCEPTION WHEN others THEN v_res := SQLERRM; END;
+      v_names := array_append(v_names, 'admin adds Rs 1 (test top-up)'); v_expected := array_append(v_expected, 'pending, 100');
+      v_results := array_append(v_results, v_res);
+    END IF;
+
+    -- 14. anon cannot read
     PERFORM set_config('request.jwt.claim.sub', '', true);
     BEGIN v_j := public.get_my_team_wallet(5, NULL); v_res := 'allowed'; EXCEPTION WHEN others THEN v_res := SQLERRM; END;
     v_names := array_append(v_names, 'get_my_team_wallet without a user'); v_expected := array_append(v_expected, 'WALLET_SIGN_IN: Sign in to see your wallet.');
@@ -3079,7 +3237,7 @@ SELECT 30, 'cron team-wallet-expire every 15 minutes', 'yes', CASE WHEN EXISTS (
 UNION ALL
 SELECT 31, 'team_wallet in the realtime publication', 'yes', CASE WHEN EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'team_wallet') THEN 'yes' ELSE 'NO' END
 UNION ALL
-SELECT 32, 'probe rows left behind', '0', (SELECT count(*)::text FROM public.team_wallet WHERE razorpay->>'order_id' LIKE 'order_probe_%' OR meta->>'draft_ref' LIKE 'probe-%');
+SELECT 32, 'probe rows left behind', '0', (SELECT count(*)::text FROM public.team_wallet WHERE razorpay->>'order_id' LIKE 'order_probe_%' OR meta->>'draft_ref' LIKE 'probe-%' OR amount_paise = 100);
 
 SELECT step, check_name, expected, result FROM team_wallet_probe ORDER BY step;
 ```

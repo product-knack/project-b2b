@@ -255,6 +255,7 @@ row (-amount) with razorpay.refund_id; an adjustment is whatever the admin wrote
 5. iOS handoff generated from the finished files.
 
 ## 9. Decided, nothing open
+- 2 Nov 2026 (evening, owner): the first 3 AI plans per trainer are free (non-Essentials clients; Essentials always free, never counted); the count comes from the logs we have (the ledger's free rows from now on plus the AI plans already saved in the plan registry); "3 free left / 2 free left" shows in the plan creator; an admin may add Rs 1 for testing.
 Rs 30 to 50 per AI plan by the client's data blocks, trainers only, shown after the draft, one-tap deduct, draft held
 until paid; receipt push after a top-up; Rs 500 minimum and Rs 5,000 a day; checkout in the app; own history only;
 one 12-column ledger table. Build starts on the owner's go, in the order of section 8.
