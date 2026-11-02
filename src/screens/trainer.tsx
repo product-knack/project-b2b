@@ -10690,7 +10690,7 @@ export function QhpManager() {
   const { session } = useAuth();
   const { set, go } = useStore();
   const [tab, setTab] = React.useState<'task' | 'manager' | 'tracker' | 'requests' | 'linked' | 'review' | 'cancellations'>('task');
-  // Client location (2 Nov 2026): the pin chip on every Task Pending card and the Add / Update location sheet. The
+  // Client location (2 Nov 2026): the pin chip on every Task Pending card and the Add location sheet. The
   // saved pin is clients.brb_location, the one QHP navigation and the roster distance read.
   const pinIds = React.useMemo(() => [...(q.data?.taskNotScheduled ?? []), ...(q.data?.taskScheduled ?? []), ...(q.data?.taskOnHold ?? [])].map((c) => c.clientId), [q.data]);
   const pinsQ = useClientPins(pinIds, isMgr);
@@ -10829,8 +10829,9 @@ export function QhpManager() {
 
   const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' }) : '—');
   const fmtT = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: 'numeric', minute: '2-digit', hour12: true }).toUpperCase() : '');
-  // The pin line under a Task Pending card's actions: "Pin saved" (opens Google Maps) or "No pin yet", and the
-  // Add / Update location button that opens the paste sheet.
+  // The pin line under a Task Pending card's actions: "Pin saved" (opens Google Maps), or "No pin yet" with the
+  // Add location button that opens the paste sheet. The button shows only while the client card has no pin
+  // (owner, 2 Nov 2026); a saved pin is changed from the Leads page.
   const pinRow = (c: import('../lib/qhpManagerQueries').PendingClient) => {
     const pin = pins[c.clientId];
     return (
@@ -10841,11 +10842,13 @@ export function QhpManager() {
           <Text numberOfLines={1} style={{ flex: 1, fontFamily: F.bodySemi, fontSize: 11.5, color: pin ? C.green : C.gold }}>{pin ? 'Pin saved' : 'No pin yet'}</Text>
           {pin ? <Icon name="chevRight" size={11} color={C.green} strokeWidth={2.4} /> : null}
         </Pressable>
-        <Pressable onPress={() => setLocFor({ clientId: c.clientId, name: c.name })} hitSlop={10} accessibilityRole="button" accessibilityLabel={`${pin ? 'Update' : 'Add'} location for ${c.name}`}
-          style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 7, paddingHorizontal: 12, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)' }}>
-          <Icon name="map" size={12} color={C.ink3} strokeWidth={2.1} />
-          <Text style={{ fontFamily: F.bodyBold, fontSize: 11.5, color: C.ink }}>{pin ? 'Update location' : 'Add location'}</Text>
-        </Pressable>
+        {!pin ? (
+          <Pressable onPress={() => setLocFor({ clientId: c.clientId, name: c.name })} hitSlop={10} accessibilityRole="button" accessibilityLabel={`Add location for ${c.name}`}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 7, paddingHorizontal: 12, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)' }}>
+            <Icon name="map" size={12} color={C.ink3} strokeWidth={2.1} />
+            <Text style={{ fontFamily: F.bodyBold, fontSize: 11.5, color: C.ink }}>Add location</Text>
+          </Pressable>
+        ) : null}
       </View>
     );
   };

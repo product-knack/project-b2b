@@ -13,12 +13,14 @@ written as `\u2014`; it is only in comments, nothing the user reads.
   buttons:
   - left, a chip: **Pin saved** (green; tapping it opens the pin in Google Maps) or **No pin yet** (amber, not
     tappable);
-  - right, a button: **Add location**, or **Update location** once a pin exists. It opens the sheet.
+  - right, only while the client has no pin, a button **Add location** that opens the sheet. A saved pin shows the
+    chip alone (owner, 2 Nov 2026: the option only when the value is null); a pin is changed from the Leads page.
 - The sheet (`ClientLocationSheet`):
   1. Title "Add location for <name>", line under it "The pin the assessor navigates to. Saved to the client card,
      like the Leads page."
-  2. When a pin exists, an amber line: "Already has a pin (<method label>, <d Mon yyyy>). Saving replaces it." with a
-     **View** link (opens Google Maps). Method labels: "WhatsApp paste (Ops)", "Trainer device capture".
+  2. The sheet can show an amber line "Already has a pin (<method label>, <d Mon yyyy>). Saving replaces it." with a
+     **View** link; from this page it never does, because the button only opens for a client with no pin. Keep the
+     code: it is the same sheet as the web dialog and costs nothing.
   3. The box, labelled LOCATION SHARED ON WHATSAPP, with a **Paste** chip (reads the clipboard) and the placeholder
      "Paste the location message or Google Maps link". Multiline, no autocorrect.
   4. The live result as the text changes:
@@ -611,7 +613,7 @@ On Hold Schedule button); (e) the sheet mounted next to the other QHP Manager sh
    const { session } = useAuth();
    const { set, go } = useStore();
    const [tab, setTab] = React.useState<'task' | 'manager' | 'tracker' | 'requests' | 'linked' | 'review' | 'cancellations'>('task');
-+  // Client location (2 Nov 2026): the pin chip on every Task Pending card and the Add / Update location sheet. The
++  // Client location (2 Nov 2026): the pin chip on every Task Pending card and the Add location sheet. The
 +  // saved pin is clients.brb_location, the one QHP navigation and the roster distance read.
 +  const pinIds = React.useMemo(() => [...(q.data?.taskNotScheduled ?? []), ...(q.data?.taskScheduled ?? []), ...(q.data?.taskOnHold ?? [])].map((c) => c.clientId), [q.data]);
 +  const pinsQ = useClientPins(pinIds, isMgr);
@@ -621,13 +623,14 @@ On Hold Schedule button); (e) the sheet mounted next to the other QHP Manager sh
    const [cancelSeg, setCancelSeg] = React.useState<'pending' | 'decided'>('pending');
    const [decideFor, setDecideFor] = React.useState<DecideTarget>(null);
    const cancelPendingQ = useQhpCancellationRequests('pending', isMgr);
-@@ -10819,8 +10828,28 @@ export function QhpManager() {
+@@ -10819,8 +10828,31 @@ export function QhpManager() {
    };
  
    const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' }) : '\u2014');
    const fmtT = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: 'numeric', minute: '2-digit', hour12: true }).toUpperCase() : '');
-+  // The pin line under a Task Pending card's actions: "Pin saved" (opens Google Maps) or "No pin yet", and the
-+  // Add / Update location button that opens the paste sheet.
++  // The pin line under a Task Pending card's actions: "Pin saved" (opens Google Maps), or "No pin yet" with the
++  // Add location button that opens the paste sheet. The button shows only while the client card has no pin
++  // (owner, 2 Nov 2026); a saved pin is changed from the Leads page.
 +  const pinRow = (c: import('../lib/qhpManagerQueries').PendingClient) => {
 +    const pin = pins[c.clientId];
 +    return (
@@ -638,11 +641,13 @@ On Hold Schedule button); (e) the sheet mounted next to the other QHP Manager sh
 +          <Text numberOfLines={1} style={{ flex: 1, fontFamily: F.bodySemi, fontSize: 11.5, color: pin ? C.green : C.gold }}>{pin ? 'Pin saved' : 'No pin yet'}</Text>
 +          {pin ? <Icon name="chevRight" size={11} color={C.green} strokeWidth={2.4} /> : null}
 +        </Pressable>
-+        <Pressable onPress={() => setLocFor({ clientId: c.clientId, name: c.name })} hitSlop={10} accessibilityRole="button" accessibilityLabel={`${pin ? 'Update' : 'Add'} location for ${c.name}`}
-+          style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 7, paddingHorizontal: 12, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)' }}>
-+          <Icon name="map" size={12} color={C.ink3} strokeWidth={2.1} />
-+          <Text style={{ fontFamily: F.bodyBold, fontSize: 11.5, color: C.ink }}>{pin ? 'Update location' : 'Add location'}</Text>
-+        </Pressable>
++        {!pin ? (
++          <Pressable onPress={() => setLocFor({ clientId: c.clientId, name: c.name })} hitSlop={10} accessibilityRole="button" accessibilityLabel={`Add location for ${c.name}`}
++            style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 7, paddingHorizontal: 12, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)' }}>
++            <Icon name="map" size={12} color={C.ink3} strokeWidth={2.1} />
++            <Text style={{ fontFamily: F.bodyBold, fontSize: 11.5, color: C.ink }}>Add location</Text>
++          </Pressable>
++        ) : null}
 +      </View>
 +    );
 +  };
@@ -650,7 +655,7 @@ On Hold Schedule button); (e) the sheet mounted next to the other QHP Manager sh
    // Unknown (loading / paused offline / errored) is not "denied".
    if (caps.isPending || caps.isError) return <AccessPending paused={caps.isPaused} error={caps.isError} onRetry={caps.refetch} />;
    if (!isMgr) {
-@@ -10989,8 +11018,9 @@ export function QhpManager() {
+@@ -10989,8 +11021,9 @@ export function QhpManager() {
                            </LinearGradient>
                          </Pressable>
                          <Pressable onPress={() => setHoldFor(c)} style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 9, borderRadius: 11, backgroundColor: hexA(C.purple, 0.12), borderWidth: 1, borderColor: hexA(C.purple, 0.4) }}><Text style={{ fontFamily: F.bodyBold, fontSize: 12, color: C.purple }}>Hold</Text></Pressable>
@@ -660,7 +665,7 @@ On Hold Schedule button); (e) the sheet mounted next to the other QHP Manager sh
                    );
                  })
                ) : sub === 'sched' ? (
-@@ -11024,8 +11054,9 @@ export function QhpManager() {
+@@ -11024,8 +11057,9 @@ export function QhpManager() {
                          <Pressable onPress={() => { setCredsCopied(false); setCredsFor(c); }} style={{ width: 40, alignItems: 'center', justifyContent: 'center', paddingVertical: 9, borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)' }}>
                            <Icon name="copy" size={14} color={C.ink3} strokeWidth={2} />
                          </Pressable>
@@ -670,7 +675,7 @@ On Hold Schedule button); (e) the sheet mounted next to the other QHP Manager sh
                    );
                  })
                ) : sub === 'hold' ? (
-@@ -11047,8 +11078,9 @@ export function QhpManager() {
+@@ -11047,8 +11081,9 @@ export function QhpManager() {
                          <Icon name="calendar" size={13} color="#fff" strokeWidth={2.4} />
                          <Text style={{ fontFamily: F.bodyBold, fontSize: 12, color: '#fff' }}>Schedule QHP</Text>
                        </LinearGradient>
@@ -680,7 +685,7 @@ On Hold Schedule button); (e) the sheet mounted next to the other QHP Manager sh
                  ))
                ) : (
                  d.reschedules.length === 0 ? <Body style={{ fontSize: 12.5, color: C.muted3, textAlign: 'center', paddingVertical: 18 }}>No reschedule requests.</Body> :
-@@ -11802,8 +11834,11 @@ export function QhpManager() {
+@@ -11802,8 +11837,11 @@ export function QhpManager() {
  
        {/* Manager calendar "Add QHP" \u2014 blank sheet with its own client picker */}
        <ScheduleQhpSheet visible={mgrAddOpen} onClose={() => setMgrAddOpen(false)} scheduledBy={session?.user?.id ?? ''} />
@@ -711,9 +716,8 @@ On Hold Schedule button); (e) the sheet mounted next to the other QHP Manager sh
 3. Replace it with `https://maps.google.com/?q=28.530761,77.106838`: the green box reads "Lat 28.530761 · Lng
    77.106838", "Read from Google Maps link"; Open in Google Maps opens the map at that point.
 4. Tap Save location: the alert "Location saved" shows "28.530761, 77.106838", the sheet closes, the card's chip reads
-   "Pin saved" (green) and the button reads **Update location**. Tapping the chip opens Google Maps there.
-5. Tap Update location: the amber line "Already has a pin (WhatsApp paste (Ops), <today>). Saving replaces it." with
-   View shows above the box.
+   "Pin saved" (green) and the Add location button is gone. Tapping the chip opens Google Maps there.
+5. A card whose client already had a pin shows "Pin saved" alone, no button.
 6. Type `I have 12, 44 sessions left`: the red unreadable line shows (whole numbers in a sentence are not a pin).
 7. Airplane mode: the sheet shows "No connection. The location can only be saved online." and Save is off.
 8. As the assigned assessor: that client's QHP card offers Start navigation to the pin.
