@@ -171,3 +171,15 @@ session code on Roster Management, the paid cancellation code on Session Logs (c
    opens, Confirm saves; the Session Logs badge turns green VERIFIED. Cancel > Cancel Session needs no code. A member
    with the flag off still sees the old "Paid Cancellation?" confirm.
 5. `node tests/rules/session_otp_test.js`: 53 checks, ALL PASS.
+
+## Update 2 Nov 2026: a queued code is judged when it was typed (server only)
+Hub-track `20261102120000_session_otp_typed_time.sql`. Nothing to change in the iOS flow: it already sends the code
+with `p_entered_at` (the time typed) and `p_source: 'offline_sync'` from the offline queue.
+- Server rules now: a code typed offline counts when it was the code in force at that moment (the current code or a
+  code from its history inside its own 2-hour window), even if it syncs hours later or a reschedule replaced it.
+  Guards against the session the code belonged to: the same IST day (`expired`), not more than 30 minutes before its
+  start (`typed_before_session`), the typed time not more than 2 minutes after the sync (`typed_in_future`).
+- A code verified before a reschedule within the same IST day stays verified: no new code, no push to the member.
+- Two new refusal reasons. Copy `src/lib/sessionOtp.ts` byte for byte (new `OTP_TYPED_IN_FUTURE_MESSAGE`,
+  `OTP_TYPED_BEFORE_SESSION_MESSAGE`, both handled in `otpReasonText` and `workoutOtpErrorText`) and
+  `tests/rules/session_otp_test.js`. Until then an iOS build shows "The code could not be verified. Then Retry."

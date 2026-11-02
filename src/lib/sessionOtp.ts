@@ -16,7 +16,7 @@
 
 export type OtpStatus = 'pending' | 'verified' | 'cancelled';
 export type OtpSlotStatus = { status: OtpStatus | string; verified_at: string | null; couple: boolean; coupleGroupId?: string | null };
-export type VerifyReason = 'not_authenticated' | 'no_otp' | 'not_your_session' | 'cancelled' | 'invalid' | 'expired' | 'code_expired' | string;
+export type VerifyReason = 'not_authenticated' | 'no_otp' | 'not_your_session' | 'cancelled' | 'invalid' | 'expired' | 'code_expired' | 'typed_in_future' | 'typed_before_session' | string;
 export type VerifyAnswer =
   | { ok: true; already_verified?: boolean; verified_at?: string | null; verified_count?: number }
   | { ok: false; reason?: VerifyReason };
@@ -38,6 +38,9 @@ export const OTP_EXPIRED_AT_SYNC_MESSAGE = 'The code was typed on a different da
 /** The 2-hour validity (22 Oct 2026): the code ran out; the server sent the member a new one. */
 export const OTP_CODE_EXPIRED_MESSAGE = 'This code has expired. A code works until 2 hours after the session, and the member has been sent a new one. Ask them for it.';
 export const OTP_CODE_EXPIRED_AT_SYNC_MESSAGE = 'The code had already expired when it was typed. The member has been sent a new code. Verify it now, then Retry.';
+/** A queued code is judged at the moment it was typed (hub-track 20261102120000, 2 Nov 2026): these two reasons are new. */
+export const OTP_TYPED_IN_FUTURE_MESSAGE = "The time saved with the code is later than now, so this phone's clock looks wrong. Set the phone's time to automatic, verify the code again, then Retry.";
+export const OTP_TYPED_BEFORE_SESSION_MESSAGE = 'The code was typed more than 30 minutes before the session started, so it could not be used. Verify the code again now, then Retry.';
 
 /** True for the server's refusal (raw) and for the app's friendly copy of it. */
 export const isOtpGateError = (e: unknown): boolean => {
@@ -74,6 +77,8 @@ export const otpReasonText = (reason: VerifyReason | undefined | null): string =
     case 'not_authenticated': return 'You are signed out. Sign in again and retry.';
     case 'expired': return 'The code was typed on a different day than the session, so it cannot be used.';
     case 'code_expired': return OTP_CODE_EXPIRED_MESSAGE;
+    case 'typed_in_future': return OTP_TYPED_IN_FUTURE_MESSAGE;
+    case 'typed_before_session': return OTP_TYPED_BEFORE_SESSION_MESSAGE;
     default: return 'The code could not be verified.';
   }
 };
@@ -83,6 +88,8 @@ export const workoutOtpErrorText = (failedVerifyReason: VerifyReason | null | un
   if (failedVerifyReason === 'invalid') return OTP_WRONG_AT_SYNC_MESSAGE;
   if (failedVerifyReason === 'expired') return OTP_EXPIRED_AT_SYNC_MESSAGE;
   if (failedVerifyReason === 'code_expired') return OTP_CODE_EXPIRED_AT_SYNC_MESSAGE;
+  if (failedVerifyReason === 'typed_in_future') return OTP_TYPED_IN_FUTURE_MESSAGE;
+  if (failedVerifyReason === 'typed_before_session') return OTP_TYPED_BEFORE_SESSION_MESSAGE;
   if (failedVerifyReason) return `${otpReasonText(failedVerifyReason)} Then Retry.`;
   return OTP_GATE_MESSAGE;
 };

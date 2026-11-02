@@ -30,6 +30,10 @@ eq('a single saved code never covers through a null group', O.savedOtpCovers([{ 
 eq('nothing saved', O.savedOtpCovers([], 'A', undefined, '2026-10-21'), false);
 
 eq('reason invalid', O.otpReasonText('invalid'), 'Session code not valid. Ask the member for the code again.');
+// 2 Nov 2026: the two reasons of the typed-time check
+eq('reason typed_in_future', [O.otpReasonText('typed_in_future'), O.workoutOtpErrorText('typed_in_future')], [O.OTP_TYPED_IN_FUTURE_MESSAGE, O.OTP_TYPED_IN_FUTURE_MESSAGE]);
+eq('reason typed_before_session', [O.otpReasonText('typed_before_session'), O.workoutOtpErrorText('typed_before_session')], [O.OTP_TYPED_BEFORE_SESSION_MESSAGE, O.OTP_TYPED_BEFORE_SESSION_MESSAGE]);
+eq('new texts have no dashes', /[–—]|s-s/.test(O.OTP_TYPED_IN_FUTURE_MESSAGE + O.OTP_TYPED_BEFORE_SESSION_MESSAGE), false);
 eq('reason cancelled', O.otpReasonText('cancelled'), 'This session is cancelled, so its code cannot be used.');
 eq('reason no_otp', O.otpReasonText('no_otp'), "No code exists for this session yet. Ask CRM to check the member's Session code setting.");
 eq('reason not_your_session', O.otpReasonText('not_your_session'), 'This session belongs to another trainer.');
