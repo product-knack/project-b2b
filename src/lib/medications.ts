@@ -98,7 +98,7 @@ export type ConsultMedRow = {
   prescription_status: string | null; prescription_date: string | null; medicines: unknown; ai_medications: unknown; ai_medication_points: unknown;
 };
 
-const FREQ: Record<string, string> = { OD: 'once a day', BD: 'twice a day', TDS: 'three times a day', QID: 'four times a day', HS: 'at bedtime', SOS: 'when needed' };
+const FREQ: Record<string, string> = { OD: 'once a day', BD: 'twice a day', TDS: 'three times a day', QID: 'four times a day', HS: 'at bedtime', SOS: 'when needed', WEEKLY: 'once a week', BIW: 'twice a week', MONTHLY: 'once a month', 'ALTERNATE DAYS': 'on alternate days' };
 
 /** "120mg · 1 tab twice a day · After food · 5 days" from a prescription medicine line. */
 export function rxDetail(m: Record<string, unknown>): string {

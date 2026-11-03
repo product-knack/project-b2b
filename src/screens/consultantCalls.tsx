@@ -38,7 +38,8 @@ const validYmd = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s) && !isNaN(dateFrom
 interface ClientSummary { id: string; name: string; total: number; scheduled: number; completed: number; finalizedRx: number; lastDate: string | null; nextDate: string | null }
 
 /* ---------- prescription editor (port of PrescriptionPanel in amend mode) ---------- */
-const FREQUENCIES = ['OD', 'BD', 'TDS', 'QID', 'HS', 'SOS'];
+// Same list as the web PrescriptionPanel (Weekly / Monthly / Alternate days 30 Oct, BIW = twice a week 3 Nov 2026).
+const FREQUENCIES = ['OD', 'BD', 'TDS', 'QID', 'HS', 'Weekly', 'BIW', 'Monthly', 'Alternate days', 'SOS'];
 const TIMINGS = ['After food', 'Before food', 'With food', 'Empty stomach', 'Early morning', 'Before bed', 'Any time'];
 const DURATION_UNITS = ['days', 'weeks', 'months'];
 const newLine = (order: number): RxMedicineLine => ({
