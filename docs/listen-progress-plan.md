@@ -1,6 +1,6 @@
 # Listen progress in percent, and "heard" only at 100 percent: end-to-end plan (3 Nov 2026, offline added the same day)
 
-Status: PLAN ONLY, nothing built. Owner's ask (3 Nov 2026): "on My Crew, on the summaries (weekly and the long one),
+Status: BUILT 3 Nov 2026 (odds-app e739025, hub-track 9c43b4667); the migration ran live the same day (13 of 14 probe checks equal, check 7 explained in the handoff). Originally a plan only. Owner's ask (3 Nov 2026): "on My Crew, on the summaries (weekly and the long one),
 show everyone in percent how much they listened, and show an alert that they need to listen 100 percent, so that
 when they log the session they do not need to listen again."
 

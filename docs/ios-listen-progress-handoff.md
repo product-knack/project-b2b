@@ -1,6 +1,6 @@
 # iOS handoff: listen progress in percent, heard from 95 percent, everyone's percent on My Crew, offline like online (3 Nov 2026)
 
-Plan with every decision: docs/listen-progress-plan.md. Both apps share the server (migration 20261103100000, below).
+Plan with every decision: docs/listen-progress-plan.md. Both apps share the server (migration 20261103100000, below, LIVE since 3 Nov 2026).
 
 ## 1. What the user sees
 - Under every Play row (client page card, Today's Roster strip, Essentials cards, Log Health Data popup, the Add
@@ -1782,5 +1782,5 @@ SELECT step, check_name, expected, result FROM listen_probe ORDER BY step;
    the real heard time, the manager's My Crew lists Sagar at 100 percent, the "saved on this phone" line is gone.
 4. My Crew (manager): tap a client's chip: the Who listened block lists every crew member's percents.
 
-Not confirmed: nothing was opened on a phone after the change (tsc, the rule tests and the Metro bundle pass; the
-migration passed its 16-check probe locally and is not run live yet).
+Migration 20261103100000 ran LIVE on 3 Nov 2026: 13 of 14 probe checks equal; check 7 answered "3 listeners" instead of 2 because the live client already had a third real listener on that build (the probe adds two; the count is right).
+Not confirmed: nothing was opened on a phone after the change (tsc, the rule tests and the Metro bundle pass).
