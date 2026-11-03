@@ -1,6 +1,6 @@
 # Create Plan entry: Manual or AI, free count, automatic deduction, negative wallet: end-to-end plan (3 Nov 2026, revised the same day)
 
-Status: BUILT 3 Nov 2026 (migration 20261103110000 written and PGlite-tested 11 of 11, the owner runs it; ai-plan-draft redeployed; Android built; iOS handoff docs/ios-create-plan-entry-handoff.md). Originally a plan only. Owner's ask (3 Nov 2026): "client detail page > Plan tab > Create Plan: show two
+Status: BUILT 3 Nov 2026 (migration 20261103110000 written and PGlite-tested 11 of 11, LIVE 3 Nov 2026, 11 of 11; ai-plan-draft redeployed; Android built; end-to-end test as Sagar passed; iOS handoff docs/ios-create-plan-entry-handoff.md). Originally a plan only. Owner's ask (3 Nov 2026): "client detail page > Plan tab > Create Plan: show two
 options, Manual plan and AI generated (with the free count, e.g. 2 free plans left), open accordingly; after the 3
 free plans every trainer pays." Revised the same day by the owner: deduct automatically after the draft, no Deduct
 tap, the draft always lands, the balance may go negative (capped at one plan's price), only a negative balance blocks

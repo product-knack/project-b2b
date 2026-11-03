@@ -1,6 +1,6 @@
 # iOS handoff: Create Plan entry (AI generated / Manual plan), automatic charge after the draft, negative wallet (3 Nov 2026)
 
-Plan with every decision: docs/create-plan-entry-plan.md. The server part (migration 20261103110000) is shared; iOS
+Plan with every decision: docs/create-plan-entry-plan.md. The server part (migration 20261103110000, LIVE since 3 Nov 2026) is shared; iOS
 builds nothing on the server. Replaces the "bill sheet with Deduct" rule of the 2 Nov Team Wallet handoff (card 10):
 the AiBillSheet now serves only a bill from before this change.
 
@@ -725,5 +725,5 @@ SELECT step, check_name, expected, result FROM charge_probe ORDER BY step;
 4. Create Plan again: tapping AI generated shows the popup "Add funds"; Build manually opens the manual builder; Add money opens the Wallet.
 5. Add Rs 500: the Wallet shows Rs 467; Create Plan: the card reads "RS 33 · balance Rs 467" and Generate works.
 
-Not confirmed: the screens were not opened on a phone after the change (tsc, rule tests and the Metro bundle pass; the
-migration passed its 11-check probe locally and is not run live yet).
+Live 3 Nov 2026: migration 20261103110000 ran (11 of 11 probe checks; the first attempt stopped on the first run's CHECK amount_paise <> 0, the migration now re-applies the table checks first). End-to-end as Sagar through the same calls the screens make: preview chip 1 FREE LEFT; draft 1 free (free_left 0); draft 2 charged Rs 45 (qhp + blood + context blocks), wallet Rs -45 with the owner's sentence; preview again WALLET_NEGATIVE (the popup); an admin adjustment of +Rs 45 restored his balance to Rs 0.
+Not confirmed: the screens were not opened on a phone after the change (tsc, rule tests and the Metro bundle pass).
