@@ -1,7 +1,7 @@
 # Odds AI plan: one fixed charge per plan, when Create Plan succeeds; generating is free: end-to-end plan (3 Nov 2026)
 
-Status: BUILT 3 Nov 2026 (owner: "Go, with one change: the price is FIXED per plan"). Migration 20261103120000 written and
-PGlite-tested 16 of 16, the owner runs it; ai-plan-draft, wallet-verify-payment and razorpay-webhook redeployed; Android
+Status: BUILT 3 Nov 2026 (owner: "Go, with one change: the price is FIXED per plan"). Migration 20261103120000 PGlite-tested
+16 of 16 and LIVE 3 Nov 2026 (13 of 13; end-to-end as Sagar passed, see the team-wallet docs); ai-plan-draft, wallet-verify-payment and razorpay-webhook redeployed; Android
 built (tsc, rule tests 101, bundle); docs updated; iOS handoff docs/ios-wallet-end-to-end-handoff.md regenerated (card 14).
 
 Owner's rule (3 Nov 2026): "money is deducted only once per plan, when the trainer clicks the Create Plan button;

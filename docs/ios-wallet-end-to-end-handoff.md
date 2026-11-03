@@ -4666,5 +4666,5 @@ ${list}`;
    (Build manually / Add money) at the card, and again at the button if a draft is already in the form; Add Rs 500:
    Wallet Rs 450, the card reads "RS 50 · balance Rs 450"; Save & Resubmit of the plan: no new row; a manual plan: no row.
 4. As an admin: Create Plan shows no chip, drafts free, no wallet line, plain "Create Plan".
-Server: migrations 20261102160000 and 20261103110000 live since 2 and 3 Nov 2026; 20261103120000 (this rule) PGlite-tested
-16 of 16 and handed to the owner to run; ai-plan-draft, wallet-verify-payment and razorpay-webhook redeployed 3 Nov 2026.
+Server: migrations 20261102160000 and 20261103110000 live since 2 and 3 Nov 2026; 20261103120000 (this rule) LIVE 3 Nov 2026
+(13 of 13; end-to-end tested as Sagar through the same calls); ai-plan-draft, wallet-verify-payment and razorpay-webhook redeployed 3 Nov 2026.
