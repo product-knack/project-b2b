@@ -308,7 +308,7 @@ export function Wallet() {
         <Body style={{ fontSize: 11.5, color: C.muted2 }}>
           {!online ? 'Offline, last known balance' : updatedAt ? `Updated ${fmtWhen(new Date(updatedAt).toISOString())}` : notSetUp ? 'The wallet is not set up on the server yet.' : q.isError ? walletErrorText(q.error, 'Could not load the wallet. Pull to refresh.') : ''}
         </Body>
-        {data?.charges_ai && !negative ? <Body style={{ fontSize: 11, color: C.muted3, marginTop: 2 }}>{data.free_left > 0 ? `${freeLeftLine(data.free_left)}. After that Odds AI plans cost Rs 30 to 50 each, deducted here after the draft.` : 'Odds AI plans cost Rs 30 to 50 each, deducted here after the draft. Essentials clients stay free.'}</Body> : null}
+        {data?.charges_ai && !negative ? <Body style={{ fontSize: 11, color: C.muted3, marginTop: 2 }}>{data.free_left > 0 ? `${freeLeftLine(data.free_left)}. After that an Odds AI plan costs ${rupees(data.ai_plan_price_paise)}, deducted here when you create the plan. Generating is free.` : `An Odds AI plan costs ${rupees(data.ai_plan_price_paise)}, deducted here when you create the plan. Generating is free. Essentials clients stay free.`}</Body> : null}
       </Card>
 
       <Pressable onPress={() => { setAddErr(null); setAddOpen(true); }} disabled={!online || notSetUp} accessibilityRole="button" accessibilityLabel={negative ? 'Add funds' : 'Add money'} style={{ borderRadius: 13, overflow: 'hidden', opacity: online && !notSetUp ? 1 : 0.5 }}>

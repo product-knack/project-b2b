@@ -47,8 +47,10 @@ export type AiPlanSources = {
 /** wallet (Team Wallet, 2 Nov 2026): does the caller pay for drafts (trainers), the balance and a waiting bill;
     null while the wallet is not on the server. */
 export type AiPlanPreview = { eligible: boolean; allowed: boolean; essentials: boolean; client_name: string; sources: AiPlanSources; model: string; wallet: WalletGate | null };
-/** wallet (3 Nov 2026): what the server charged for this draft (trainers after their free plans); the draft always lands. */
-export type AiDraftCharge = { charged: boolean; charged_paise: number; balance_paise: number; negative: boolean; free_left: number | null; error: string | null };
+/** wallet (3 Nov 2026, final rule): the standing that travels with a trainer's draft. Nothing is charged for a draft
+    (charge_at 'plan_create': the fixed price moves once, when Create Plan succeeds; free_this = that plan is free). The
+    older fields (charged, charged_paise, error) stay for a server still charging at the draft. */
+export type AiDraftCharge = { charged: boolean; charged_paise: number; charge_at: 'plan_create' | 'draft'; price_paise: number | null; balance_paise: number; negative: boolean; essentials: boolean; free_this: boolean; free_left: number | null; error: string | null };
 export type AiPlanResult = { draft: AiPlanDraft; dropped: string[]; sources: AiPlanSources; model: string; generated_at: string; wallet?: AiDraftCharge | null };
 
 const str = (v: unknown) => (v == null ? '' : String(v));

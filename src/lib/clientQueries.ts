@@ -2026,6 +2026,9 @@ export function useCreateWorkoutPlan() {
       qc.invalidateQueries({ queryKey: ['trainer-essentials-plan-gaps'] });
       // The My Crew roster gate shows "waiting for approval" instead of the Create plan button (27 Oct 2026).
       qc.invalidateQueries({ queryKey: ['plan-cover'] });
+      // Team Wallet (3 Nov 2026): an AI plan is charged (or uses a free plan) by the server when its rows land, so the
+      // Wallet and the chooser's standing move at once.
+      if (vars.source === 'ai') { qc.invalidateQueries({ queryKey: ['my-team-wallet'] }); qc.invalidateQueries({ queryKey: ['ai-plan-preview'] }); }
     },
   });
 }

@@ -1,9 +1,10 @@
-# iOS handoff, END TO END: Team Wallet and the Odds AI plan charging, as live on 3 Nov 2026
+# iOS handoff, END TO END: Team Wallet and the Odds AI plan charging, final rules of 3 Nov 2026
 
-Supersedes cards 10 (Team Wallet) and 13 (Create Plan entry). Everything below is the state of the Android app and the
-server after the 3 Nov 2026 rule change (automatic charge, negative wallet). Build iOS from this file alone; section 4
-is generated from the finished Android files. Copy rule: no dashes in user-facing text (the few literal dashes inside
-copied code are written as \u2014 / \u2013 text; restore them when pasting).
+Supersedes cards 10 (Team Wallet) and 13 (Create Plan entry), and the earlier version of this card. Everything below is
+the state of the Android app and the server after the owner's FINAL charging rule of 3 Nov 2026 (one fixed charge per
+plan at Create Plan, generating free). Build iOS from this file alone; section 4 is generated from the finished Android
+files. Copy rule: no dashes in user-facing text (the few literal dashes inside copied code are written as
+\u2014 / \u2013 text; restore them when pasting).
 
 ## 1. The rules (owner decisions, final)
 1. **Wallet in every staff account.** Add money through Razorpay (whole rupees, minimum Rs 500, up to Rs 5,000 per
@@ -11,22 +12,29 @@ copied code are written as \u2014 / \u2013 text; restore them when pasting).
    as a test top-up while the wallet is being tested. Everyone sees only their own history. A receipt push after a paid
    top-up ("Rs 2,000 added to your wallet", data `{type: wallet_topup, route: wallet}`) opens the Wallet screen.
 2. **The wallet pays for one thing: the Odds AI workout plan.** Trainers only (admins, super admins and coaches draft
-   free). Bill = Rs 30 + Rs 5 per data block the draft read (QHP, medical history, blood report, health context), cap
-   Rs 50, fixed at generation time.
+   free). The price is FIXED per plan: one server constant, Rs 50 for now (`price_paise` in every answer; the app's
+   `AI_PLAN_PRICE_PAISE` is only the fallback). No per-client data blocks, the price never moves.
 3. **3 free AI plans per trainer** (lifetime) for non-Essentials clients; an Essentials client is always free and never
    counts. The count = the ledger's free rows plus the AI plans the trainer saved before 3 Nov 2026 (server side).
-4. **Charged automatically after the draft, no Deduct tap, the draft always lands.** A draft the model could not make
-   charges nothing.
-5. **The balance may go negative** (Rs 28 wallet, Rs 33 plan: the wallet shows Rs -5), never below minus one plan's
-   price (server constraint at -5000 paise). **Only a negative balance blocks the next AI plan**; a balance below the
-   price never does. The next top-up clears the negative first (Rs 500 at Rs -5 shows Rs 495).
-6. **Create Plan from the Plan tab opens two options, AI generated and Manual plan.** The AI card shows the standing
+4. **Generating is free, any number of times.** Generate and Generate again never touch the wallet or the free count.
+5. **Charged ONCE per plan, when Create Plan succeeds.** The SERVER does it: a trigger on the plan rows writes one
+   wallet row per plan id (a free 0-row while free plans last or for an Essentials client, else the Rs 50 charge) the
+   moment the plan is inserted, online, from the offline outbox when it syncs, or from iOS alike. iOS inserts the plan
+   exactly as Android does (`source: 'ai'` on the rows when a draft was applied) and nothing else. Never twice for the
+   same plan (Save & Resubmit, a retried sync, a double tap). Manual plans never charge; a draft applied and then
+   rebuilt by hand is still an AI plan and is charged. The plan always lands: a wallet problem is a server warning.
+6. **The balance may go negative** (Rs 28 wallet, Rs 50 plan: the wallet shows Rs -22), never below minus one plan's
+   price (server constraint at -5000 paise). **Only a negative balance blocks**: at the chooser's AI card and again at
+   the Create Plan button (popup; nothing saved). A balance below the price never blocks. The next top-up clears the
+   negative first (Rs 500 at Rs -22 shows Rs 478).
+7. **Create Plan from the Plan tab opens two options, AI generated and Manual plan.** The AI card shows the standing
    for this client before anything is generated (chip + line). With a negative balance, tapping it shows the popup
-   "Your wallet is at Rs -5. Add funds to make the next plan with Odds AI." with Build manually / Add money.
-7. Refunds: none from the app; a refund made in the Razorpay dashboard is recorded by the webhook. Admin adjustments
-   (note mandatory) exist on the server, no screen.
-8. Offline: the Wallet screen shows the cached balance and history read-only; money moves online only. Create Plan's
-   AI option needs a connection (the manual builder works offline as before).
+   "Your wallet is at Rs -22. Add funds to make the next plan with Odds AI." with Build manually / Add money.
+8. Refunds: none from the app; a refund made in the Razorpay dashboard is recorded by the webhook. Admin adjustments
+   (note mandatory) exist on the server, no screen. No refund on a rejected or deleted plan.
+9. Offline: the Wallet screen shows the cached balance and history read-only; money moves online only. Create Plan's
+   AI option needs a connection to generate; an AI plan saved offline is queued and charged by the server when it syncs
+   (the footer says so). The negative check at the button uses the last known balance.
 
 ## 2. What the user sees (exact texts)
 
@@ -34,8 +42,9 @@ copied code are written as \u2014 / \u2013 text; restore them when pasting).
 - Title "Wallet", sub "Add money, see your history".
 - Balance card: big "Rs 2,500" (Indian grouping). Negative: "Rs -5" in red and under it "Your wallet is at Rs -5. Add
   funds to make the next plan with Odds AI." Below: "Updated 2 Nov, 3:10 PM" / "Offline, last known balance". Trainers
-  (not negative): "N free AI plans left. After that Odds AI plans cost Rs 30 to 50 each, deducted here after the draft."
-  or "Odds AI plans cost Rs 30 to 50 each, deducted here after the draft. Essentials clients stay free."
+  (not negative): "N free AI plans left. After that an Odds AI plan costs Rs 50, deducted here when you create the plan.
+  Generating is free." or "An Odds AI plan costs Rs 50, deducted here when you create the plan. Generating is free.
+  Essentials clients stay free." (Rs 50 = `ai_plan_price_paise` from the read.)
 - Button **Add money** (red **Add funds** while negative); off offline with "No connection. Money can only be added
   online." (one sheet for both).
 - History grouped by IST month ("NOVEMBER 2026"), newest first: title ("Added money" / "Odds AI plan, <first name>" /
@@ -66,20 +75,29 @@ copied code are written as \u2014 / \u2013 text; restore them when pasting).
 ### 2.4 Create Plan chooser (client page > Plan tab > Create Plan; new plans only)
 - Card **AI generated** (purple): title + chip, sub "Drafts a Strength Training plan from the QHP, medical and blood
   reports. You edit everything before it goes for review.", then the line.
-  - chip **"2 FREE LEFT"** (green) + "2 free AI plans left. After that Rs 30 to 50 a plan from your wallet."
+  - chip **"2 FREE LEFT"** (green) + "2 free AI plans left, then Rs 50 a plan from your wallet when you create it."
   - chip **"FREE FOR ESSENTIALS"** (green) + "Free for Essentials clients."
-  - chip **"RS 33"** (gold) + "Rs 33 from your wallet · balance Rs 28" (the exact bill for this client)
-  - chip **"ADD FUNDS"** (red, red border) + "Your wallet is at Rs -5. Add funds to make the next plan with Odds AI."
+  - chip **"RS 50"** (gold) + "Rs 50 from your wallet when you create the plan · balance Rs 467"
+  - chip **"ADD FUNDS"** (red, red border) + "Your wallet is at Rs -22. Add funds to make the next plan with Odds AI."
   - chip **"BILL WAITING"** (gold) + "Settle or discard your last draft first." (legacy bill only)
   Tap: the AI builder; with a negative balance the popup "Add funds" with that sentence and **Build manually** / **Add money**.
 - Card **Manual plan** (orange): "The plan builder as it is today: modality, sections, exercises and sets."
 - Footer "Either way the plan goes to the CRM for review before it reaches the client."
 
-### 2.5 The Odds AI panel (inside Create Plan, AI mode)
+### 2.5 The Odds AI panel (inside Create Plan, AI mode) and the Create Plan button
 - The standing box (same texts as the card; "Add money in Wallet" button when negative, "Open bill, Rs 40" for a
-  legacy bill). Generate button: "Generate workout plan for Rs 33" when billed, "Generate workout plan" when free;
-  hint "Deducted from your wallet after the draft is made. The draft always lands." After the draft: "Rs 33 deducted.
-  Wallet Rs -5." (red when negative, green otherwise) and the draft applied to the builder exactly as a free one.
+  legacy bill). Generate button: "Generate workout plan" / "Generate again" (never a price). Hint under it
+  (`generateHint`): "Generating is free. Rs 50 is deducted once, when you tap Create Plan." (billed) / "Generating is
+  free. This plan uses 1 of your 2 free AI plans." / "Generating is free. Essentials plans are free."; nothing for
+  roles that are not charged. After the draft: the green "Draft added below" box as before, no charge line.
+- The sticky **Create Plan** button (`createButtonLabel`): "Create Plan · Rs 50" once a draft is applied and the plan
+  is billed, "Create Plan · free" for a free or Essentials plan, plain "Create Plan" for manual plans and uncharged
+  roles. Pressing it with a negative balance (the preview's latest wallet): popup "Add funds" with the owner's
+  sentence, buttons **Keep editing** / **Add money**, nothing saved. After the save the footer line (`createDoneLine`)
+  reads "Rs 50 deducted. Wallet Rs 417." (red when the result is negative, green otherwise) / "Rs 50 will be deducted
+  when it syncs." (queued offline) / "Free AI plan used. 1 free AI plan left." / "Free for Essentials clients. Nothing
+  deducted."; the screen waits 2.2 s (0.9 s when there is no line) before going back. The save then refreshes
+  `['my-team-wallet']` and `['ai-plan-preview']` (also after a queued plan syncs).
 
 ## 3. Server contract (live)
 Edge functions (bearer = the session token; refusals `{error: 'WALLET_CODE: sentence'}`, 400 / 402 WALLET_INSUFFICIENT /
@@ -90,13 +108,17 @@ Edge functions (bearer = the session token; refusals `{error: 'WALLET_CODE: sent
 | `wallet-create-order` | `{amount_inr}` or `{reopen_tx_id}` | `{tx_id, order_id, amount_paise, currency, key_id, checkout_url (unused), prefill{name,email,contact}, row}`; WALLET_MIN_AMOUNT / WALLET_DAILY_CAP / WALLET_PENDING_LIMIT / WALLET_PROVIDER |
 | `wallet-verify-payment` | `{tx_id, razorpay_order_id, razorpay_payment_id, razorpay_signature}` | `{ok, credited_now, row, balance_paise}`; WALLET_SIGNATURE / WALLET_NOT_CAPTURED / WALLET_AMOUNT / WALLET_NOT_FOUND |
 | `wallet-settle-ai-plan`, `wallet-discard-ai-plan` | `{tx_id}` | legacy bills only |
-| `ai-plan-draft` preview | `{client_id, preview: true}` | `wallet: {charges, balance_paise, negative, bill_paise, free_total, free_used, free_left, essentials, free_this, billed, pending_bill, ok, reason, line}` |
-| `ai-plan-draft` draft | `{client_id, split, note?}` | the draft plus `wallet: {free: true, essentials, free_left, free_total}` (free) or `{charged: true, charged_paise, balance_paise, negative, tx_id}` (billed) or `{charged: false, charged_paise: 0, balance_paise, negative, error}` (refused, the draft still lands); WALLET_NEGATIVE / WALLET_BILL_PENDING refuse before the model runs |
+| `ai-plan-draft` preview | `{client_id, preview: true}` | `wallet: {charges, balance_paise, negative, bill_paise (= the price when billed, else null), blocks null, price_paise 5000, charge_at 'plan_create', free_total, free_used, free_left, essentials, free_this, billed, pending_bill, ok, reason, line}` (null while the wallet is not on the server) |
+| `ai-plan-draft` draft | `{client_id, split, note?}` | the draft plus `wallet: {charged: false, charged_paise: 0, charge_at: 'plan_create', price_paise, balance_paise, negative, essentials, free_this, free_left, free_total, free}` (informational: nothing is charged for a draft; no wallet refusal before the model runs) |
 RPCs (authenticated): `get_my_team_wallet(p_limit, p_before)` → `{balance_paise, negative, negative_line, today_topup_paise,
-today_room_paise, min_topup_paise 50000, daily_cap_paise 500000, ai_bill_min_paise 3000, ai_bill_max_paise 5000, ai_floor_paise 0,
-charges_ai, free_total, free_used, free_left, pending_bill, rows[]}`; rows `{id, seq, user_id, role, kind, amount_paise, status,
-balance_after_paise, created_at, paid_at, razorpay{order_id, payment_id, method, refund_id}, meta}` (never the signature or
-the payment entity). Realtime: `postgres_changes` UPDATE on `public.team_wallet` filtered by `user_id`.
+today_room_paise, min_topup_paise 50000, daily_cap_paise 500000, ai_plan_price_paise 5000, ai_bill_min_paise 5000, ai_bill_max_paise 5000,
+ai_floor_paise 0, charges_ai, free_total, free_used, free_left, pending_bill, rows[]}`; rows `{id, seq, user_id, role, kind, amount_paise,
+status, balance_after_paise, created_at, paid_at, razorpay{order_id, payment_id, method, refund_id}, meta}` (never the signature or
+the payment entity; an AI plan row's meta carries `plan_id`, `charge_at`, `client_name`, `preview`, `free` / `essentials`).
+The charge itself: trigger `trg_team_wallet_plan_created` on `workout_plan_exercises` (statement level) writes ONE row per new
+AI plan id of a trainer (`team_wallet_record_free_draft` or `team_wallet_charge_ai_plan`, both keyed by the plan id, unique
+index on `meta.plan_id`); plans that existed before the rule (`team_wallet_legacy_plans`) are never charged. iOS just inserts
+the plan rows as Android does. Realtime: `postgres_changes` UPDATE on `public.team_wallet` filtered by `user_id`.
 Cache keys: `['my-team-wallet']` (persisted), `['team-wallet-page', before]`, `['ai-plan-preview', clientId]`.
 
 ## 4. Code (generated from the Android tree)
@@ -108,16 +130,20 @@ Pure rules (money text, the sheet hints, row copy, chips, the AI card standing, 
 
 ```ts
 /* Team Wallet rules (2 Nov 2026). Pure: no React, no network; tested in node (tests/rules/team_wallet_test.js) and
-   copied byte for byte to iOS. The server (hub-track migration 20261102160000) holds every limit; these are the
-   same numbers for the sheet's live hints and the copy of every row, chip and bill line.
-   Owner: Rs 500 minimum, Rs 5,000 per person per IST day, the Odds AI plan costs Rs 30 to 50 (trainers only),
-   shown after the draft, one tap Deduct from wallet. Plan: docs/team-wallet-plan.md. */
+   copied byte for byte to iOS. The server (hub-track migrations 20261102160000 to 20261103120000) holds every limit;
+   these are the same numbers for the sheet's live hints and the copy of every row, chip and line.
+   Owner: Rs 500 minimum, Rs 5,000 per person per IST day. The Odds AI plan (trainers only), final rule 3 Nov 2026:
+   generating is free any number of times; ONE fixed charge (Rs 50, the server constant wins) when the plan is
+   created, the first 3 plans free, Essentials free, manual plans free; only a negative balance blocks.
+   Plans: docs/team-wallet-plan.md, docs/ai-plan-charge-on-create-plan.md. */
 
 export const MIN_TOPUP_PAISE = 50000;
 /** Exactly Rs 1 is accepted as a test top-up (owner, 2 Nov 2026, while the wallet is being tested). */
 export const TEST_TOPUP_PAISE = 100;
 export const DAILY_CAP_PAISE = 500000;
 export const AI_FLOOR_PAISE = 5000;
+/** The fixed price of an Odds AI plan (3 Nov 2026); the server's price_paise replaces it when present. */
+export const AI_PLAN_PRICE_PAISE = 5000;
 export const TOPUP_PICKS = [50000, 100000, 200000, 500000] as const;
 export const TOPUP_EXPIRY_MS = 30 * 60_000;
 export const BILL_EXPIRY_MS = 24 * 60 * 60_000;
@@ -148,6 +174,8 @@ export type TeamWalletRead = {
   /** 3 Nov 2026: the balance is below zero (an AI plan took it there); the owner's sentence for the screen. */
   negative: boolean;
   negative_line: string | null;
+  /** The fixed price of an Odds AI plan, charged once when the plan is created (3 Nov 2026). */
+  ai_plan_price_paise: number;
   charges_ai: boolean;
   free_total: number;
   free_used: number;
@@ -156,12 +184,14 @@ export type TeamWalletRead = {
   rows: WalletRow[];
 };
 /** What ai-plan-draft's preview says about the caller's wallet (null while the wallet is not on the server).
-    Free drafts (owner, 2 Nov 2026): a trainer's first 3 AI plans for non-Essentials clients are free (free_left), an
-    Essentials client is always free; free_this = this draft costs nothing, billed = the bill sheet will follow. */
+    Free plans (owner, 2 Nov 2026): a trainer's first 3 AI plans for non-Essentials clients are free (free_left), an
+    Essentials client is always free; free_this = this plan costs nothing, billed = the plan will be charged. */
 export type WalletGate = {
   charges: boolean; balance_paise: number; floor_paise: number;
-  /** 3 Nov 2026: the balance is below zero (only this blocks a paid draft), and the exact bill for the client asked about. */
+  /** 3 Nov 2026: the balance is below zero (only this blocks), the price (bill_paise = the same fixed figure). */
   negative: boolean; bill_paise: number | null; line: string | null;
+  /** 3 Nov 2026 (final): the fixed price and when the money moves ('plan_create' = once, when Create Plan succeeds). */
+  price_paise: number; charge_at: 'plan_create' | 'draft';
   free_total: number; free_used: number; free_left: number; essentials: boolean; free_this: boolean; billed: boolean;
   pending_bill: PendingBill | null; ok: boolean; reason: 'WALLET_FLOOR' | 'WALLET_BILL_PENDING' | 'WALLET_NEGATIVE' | null;
 };
@@ -238,6 +268,7 @@ export const parseWalletRead = (d: any): TeamWalletRead => ({
   ai_floor_paise: num(d?.ai_floor_paise, 0),
   negative: d?.negative === true || num(d?.balance_paise) < 0,
   negative_line: d?.negative_line ? String(d.negative_line) : num(d?.balance_paise) < 0 ? negativeBalanceLine(num(d?.balance_paise)) : null,
+  ai_plan_price_paise: num(d?.ai_plan_price_paise, AI_PLAN_PRICE_PAISE) || AI_PLAN_PRICE_PAISE,
   charges_ai: d?.charges_ai === true,
   free_total: num(d?.free_total, FREE_DRAFTS),
   free_used: num(d?.free_used),
@@ -253,9 +284,11 @@ export const parseWalletGate = (w: any): WalletGate | null => {
   const essentials = w.essentials === true;
   const free_this = typeof w.free_this === 'boolean' ? w.free_this : !charges || essentials || free_left > 0;
   const balance_paise = num(w.balance_paise);
+  const price_paise = num(w.price_paise, 0) > 0 ? num(w.price_paise) : num(w.bill_paise, 0) > 0 ? num(w.bill_paise) : AI_PLAN_PRICE_PAISE;
   return {
     charges, balance_paise, floor_paise: num(w.floor_paise, 0),
     negative: w.negative === true || balance_paise < 0, bill_paise: w.bill_paise == null ? null : num(w.bill_paise), line: w.line == null ? null : String(w.line),
+    price_paise, charge_at: w.charge_at === 'draft' ? 'draft' : 'plan_create',
     free_total: num(w.free_total, FREE_DRAFTS), free_used: num(w.free_used), free_left, essentials, free_this,
     billed: typeof w.billed === 'boolean' ? w.billed : charges && !free_this,
     pending_bill: parsePendingBill(w.pending_bill), ok: w.ok !== false && !reason, reason,
@@ -365,30 +398,53 @@ export const freeLeftLine = (n: number): string => `${n} free AI plan${n === 1 ?
 export const balanceText = (paise: number): string => (num(paise) < 0 ? `Rs -${rupees(-num(paise)).slice(3)}` : rupees(paise));
 /** The owner's sentence for a wallet below zero (3 Nov 2026). */
 export const negativeBalanceLine = (balancePaise: number): string => `Your wallet is at ${balanceText(balancePaise)}. Add funds to make the next plan with Odds AI.`;
-/** The Create Plan AI card: what the wallet allows and the line to show. Since 3 Nov 2026 only a negative balance
-    blocks; a balance below the price does not (the plan is charged after the draft and may take the wallet negative). */
+/** The price the gate names (the server's constant; the local figure only while the server does not say). */
+export const planPrice = (w: WalletGate | null | undefined): number => (w && w.price_paise > 0 ? w.price_paise : AI_PLAN_PRICE_PAISE);
+/** The Create Plan AI card: what the wallet allows and the line to show. Only a negative balance blocks (3 Nov 2026);
+    a balance below the price does not. The money moves once, when the plan is created (rule final 3 Nov 2026). */
 export const walletCardState = (w: WalletGate | null | undefined): { state: WalletCardState; line: string | null; action: 'wallet' | 'bill' | null } => {
   if (!w) return { state: 'unknown', line: null, action: null };
   if (!w.charges) return { state: 'free', line: null, action: null };
   if (w.essentials) return { state: 'essentials', line: 'Free for Essentials clients.', action: null };
-  if (w.free_left > 0) return { state: 'free_left', line: `${freeLeftLine(w.free_left)}. After that Rs 30 to 50 a plan from your wallet.`, action: null };
+  if (w.free_left > 0) return { state: 'free_left', line: `${freeLeftLine(w.free_left)}, then ${rupees(planPrice(w))} a plan from your wallet when you create it.`, action: null };
   if (w.pending_bill) return { state: 'bill_pending', line: 'Settle or discard your last draft first.', action: 'bill' };
   if (w.negative) return { state: 'negative', line: w.line ?? negativeBalanceLine(w.balance_paise), action: 'wallet' };
-  const price = w.bill_paise != null ? rupees(w.bill_paise) : 'Rs 30 to 50';
-  return { state: 'ok', line: `${price} from your wallet · balance ${balanceText(w.balance_paise)}`, action: null };
+  return { state: 'ok', line: `${rupees(planPrice(w))} from your wallet when you create the plan · balance ${balanceText(w.balance_paise)}`, action: null };
 };
-/** The chooser card's chip (3 Nov 2026): "2 FREE LEFT" / "FREE FOR ESSENTIALS" / "RS 33" / "ADD FUNDS". */
+/** The chooser card's chip (3 Nov 2026): "2 FREE LEFT" / "FREE FOR ESSENTIALS" / "RS 50" / "ADD FUNDS". */
 export const aiOptionChip = (w: WalletGate | null | undefined): { text: string; tone: Tone } | null => {
   if (!w || !w.charges) return null;
   if (w.essentials) return { text: 'FREE FOR ESSENTIALS', tone: 'green' };
   if (w.free_left > 0) return { text: `${w.free_left} FREE LEFT`, tone: 'green' };
   if (w.pending_bill) return { text: 'BILL WAITING', tone: 'amber' };
   if (w.negative) return { text: 'ADD FUNDS', tone: 'red' };
-  return { text: w.bill_paise != null ? rupees(w.bill_paise).toUpperCase() : 'RS 30 TO 50', tone: 'amber' };
+  return { text: rupees(planPrice(w)).toUpperCase(), tone: 'amber' };
 };
-/** After a charged draft: "Rs 33 deducted. Wallet Rs -5." (red when negative). */
+/** "Rs 50 deducted. Wallet Rs 417." (red when negative). */
 export const afterChargeLine = (chargedPaise: number, balancePaise: number): { text: string; tone: 'red' | 'green' } =>
   chargedPaise > 0 ? { text: `${rupees(chargedPaise)} deducted. Wallet ${balanceText(balancePaise)}.`, tone: balancePaise < 0 ? 'red' : 'green' } : { text: `Wallet ${balanceText(balancePaise)}.`, tone: balancePaise < 0 ? 'red' : 'green' };
+/** The assistant panel's hint under Generate (generating is free; what Create Plan will do). Null when nothing is charged. */
+export const generateHint = (w: WalletGate | null | undefined): string | null => {
+  if (!w || !w.charges) return null;
+  if (w.essentials) return 'Generating is free. Essentials plans are free.';
+  if (w.free_left > 0) return `Generating is free. This plan uses 1 of your ${w.free_left} free AI plan${w.free_left === 1 ? '' : 's'}.`;
+  return `Generating is free. ${rupees(planPrice(w))} is deducted once, when you tap Create Plan.`;
+};
+/** The Create Plan button for an AI plan: "Create Plan · Rs 50" / "Create Plan · free"; plain for manual plans and free roles. */
+export const createButtonLabel = (w: WalletGate | null | undefined, aiPlan: boolean): string => {
+  if (!aiPlan || !w || !w.charges) return 'Create Plan';
+  if (w.essentials || w.free_left > 0) return 'Create Plan · free';
+  return `Create Plan · ${rupees(planPrice(w))}`;
+};
+/** The line after an AI plan is saved: what the wallet did (the server charged inside the save; the phone knows the
+    price and the last balance). queued = saved on the device, the charge lands with the sync. */
+export const createDoneLine = (w: WalletGate | null | undefined, aiPlan: boolean, queued: boolean): { text: string; tone: 'red' | 'green' | 'grey' } | null => {
+  if (!aiPlan || !w || !w.charges) return null;
+  if (w.essentials) return { text: 'Free for Essentials clients. Nothing deducted.', tone: 'green' };
+  if (w.free_left > 0) return { text: `Free AI plan used. ${freeLeftLine(w.free_left - 1)}.`, tone: 'green' };
+  if (queued) return { text: `${rupees(planPrice(w))} will be deducted when it syncs.`, tone: 'grey' };
+  return afterChargeLine(planPrice(w), w.balance_paise - planPrice(w));
+};
 
 /** The sentence after "WALLET_CODE:" of a server refusal, else null. */
 export const codedWalletSentence = (e: unknown): string | null => {
@@ -493,13 +549,33 @@ eq('read: empty', W.parseWalletRead(null).rows, []);
 // 7. the AI bill
 eq('bill lines', W.billLines(4000, 200000), { bill: 'Your bill is Rs 40.', after: 'Wallet Rs 2,000, after this Rs 1,960' });
 eq('preview line', W.billPreviewLine({ sections: ['Push', 'Pull', 'Legs', 'Conditioning'], exercise_count: 27 }), '4 sections, 27 exercises');
-const gate = (o) => W.parseWalletGate({ charges: true, balance_paise: 200000, floor_paise: 0, bill_paise: 3300, negative: false, free_total: 3, free_used: 3, free_left: 0, essentials: false, free_this: false, billed: true, pending_bill: null, ok: true, reason: null, ...o });
+// The gate since 3 Nov 2026 (final): a fixed price (price_paise, bill_paise the same figure), charge_at plan_create.
+const gate = (o) => W.parseWalletGate({ charges: true, balance_paise: 200000, floor_paise: 0, bill_paise: 5000, price_paise: 5000, charge_at: 'plan_create', negative: false, free_total: 3, free_used: 3, free_left: 0, essentials: false, free_this: false, billed: true, pending_bill: null, ok: true, reason: null, ...o });
 eq('card: not charged', W.walletCardState(gate({ charges: false, free_this: true, billed: false })).state, 'free');
-eq('card: ok (free used up): the exact price and the balance', W.walletCardState(gate({})), { state: 'ok', line: 'Rs 33 from your wallet · balance Rs 2,000', action: null });
-eq('card: ok without a bill yet', W.walletCardState(gate({ bill_paise: null })).line, 'Rs 30 to 50 from your wallet · balance Rs 2,000');
-eq('card: balance below the price is NOT a block (3 Nov 2026)', W.walletCardState(gate({ balance_paise: 2800 })), { state: 'ok', line: 'Rs 33 from your wallet · balance Rs 28', action: null });
-eq('card: 3 free left', W.walletCardState(gate({ free_used: 0, free_left: 3, free_this: true, billed: false })), { state: 'free_left', line: '3 free AI plans left. After that Rs 30 to 50 a plan from your wallet.', action: null });
-eq('card: 1 free left (singular)', W.walletCardState(gate({ free_used: 2, free_left: 1, free_this: true, billed: false })).line, '1 free AI plan left. After that Rs 30 to 50 a plan from your wallet.');
+eq('card: ok (free used up): the fixed price, charged when the plan is created', W.walletCardState(gate({})), { state: 'ok', line: 'Rs 50 from your wallet when you create the plan · balance Rs 2,000', action: null });
+eq('card: an old server answer without the price falls back to Rs 50', W.walletCardState(gate({ bill_paise: null, price_paise: null })).line, 'Rs 50 from your wallet when you create the plan · balance Rs 2,000');
+eq('card: the server price wins', W.walletCardState(gate({ price_paise: 6000, bill_paise: 6000 })).line, 'Rs 60 from your wallet when you create the plan · balance Rs 2,000');
+eq('card: balance below the price is NOT a block (3 Nov 2026)', W.walletCardState(gate({ balance_paise: 2800 })), { state: 'ok', line: 'Rs 50 from your wallet when you create the plan · balance Rs 28', action: null });
+eq('card: 3 free left', W.walletCardState(gate({ free_used: 0, free_left: 3, free_this: true, billed: false })), { state: 'free_left', line: '3 free AI plans left, then Rs 50 a plan from your wallet when you create it.', action: null });
+eq('card: 1 free left (singular)', W.walletCardState(gate({ free_used: 2, free_left: 1, free_this: true, billed: false })).line, '1 free AI plan left, then Rs 50 a plan from your wallet when you create it.');
+eq('gate parse: price and charge_at', [gate({}).price_paise, gate({}).charge_at, W.parseWalletGate({ charges: true, balance_paise: 0 }).charge_at], [5000, 'plan_create', 'plan_create']);
+// the hint under Generate, the Create Plan button, the line after the save (3 Nov 2026 final rule)
+eq('hint: billed', W.generateHint(gate({})), 'Generating is free. Rs 50 is deducted once, when you tap Create Plan.');
+eq('hint: free left', W.generateHint(gate({ free_left: 2, free_this: true, billed: false })), 'Generating is free. This plan uses 1 of your 2 free AI plans.');
+eq('hint: 1 free left (singular)', W.generateHint(gate({ free_left: 1, free_this: true, billed: false })), 'Generating is free. This plan uses 1 of your 1 free AI plan.');
+eq('hint: essentials', W.generateHint(gate({ essentials: true, free_this: true, billed: false })), 'Generating is free. Essentials plans are free.');
+eq('hint: not charged', [W.generateHint(gate({ charges: false })), W.generateHint(null)], [null, null]);
+eq('button: billed AI plan', W.createButtonLabel(gate({}), true), 'Create Plan · Rs 50');
+eq('button: free AI plan', [W.createButtonLabel(gate({ free_left: 2, free_this: true }), true), W.createButtonLabel(gate({ essentials: true }), true)], ['Create Plan · free', 'Create Plan · free']);
+eq('button: manual plan, free role, no wallet', [W.createButtonLabel(gate({}), false), W.createButtonLabel(gate({ charges: false }), true), W.createButtonLabel(null, true)], ['Create Plan', 'Create Plan', 'Create Plan']);
+eq('done: charged online', W.createDoneLine(gate({ balance_paise: 46700 }), true, false), { text: 'Rs 50 deducted. Wallet Rs 417.', tone: 'green' });
+eq('done: charged into the negative', W.createDoneLine(gate({ balance_paise: 2800 }), true, false), { text: 'Rs 50 deducted. Wallet Rs -22.', tone: 'red' });
+eq('done: queued offline', W.createDoneLine(gate({}), true, true), { text: 'Rs 50 will be deducted when it syncs.', tone: 'grey' });
+eq('done: free plan used', W.createDoneLine(gate({ free_left: 2, free_this: true }), true, false), { text: 'Free AI plan used. 1 free AI plan left.', tone: 'green' });
+eq('done: last free plan used', W.createDoneLine(gate({ free_left: 1, free_this: true }), true, false).text, 'Free AI plan used. 0 free AI plans left.');
+eq('done: essentials', W.createDoneLine(gate({ essentials: true }), true, true), { text: 'Free for Essentials clients. Nothing deducted.', tone: 'green' });
+eq('done: manual or free role', [W.createDoneLine(gate({}), false, false), W.createDoneLine(gate({ charges: false }), true, false)], [null, null]);
+eq('read: the price', [W.parseWalletRead({ ai_plan_price_paise: 5000 }).ai_plan_price_paise, W.parseWalletRead({}).ai_plan_price_paise], [5000, 5000]);
 eq('card: Essentials client is free even with 0 left', W.walletCardState(gate({ essentials: true, free_this: true, billed: false, balance_paise: 0 })), { state: 'essentials', line: 'Free for Essentials clients.', action: null });
 eq('card: negative balance blocks with the owner sentence', W.walletCardState(gate({ balance_paise: -500, negative: true, ok: false, reason: 'WALLET_NEGATIVE', line: 'Your wallet is at Rs -5. Add funds to make the next plan with Odds AI.' })), { state: 'negative', line: 'Your wallet is at Rs -5. Add funds to make the next plan with Odds AI.', action: 'wallet' });
 eq('card: negative without a server line builds it', W.walletCardState(gate({ balance_paise: -500, negative: true, ok: false, reason: 'WALLET_NEGATIVE' })).line, 'Your wallet is at Rs -5. Add funds to make the next plan with Odds AI.');
@@ -511,11 +587,11 @@ eq('balance text', [W.balanceText(-500), W.balanceText(46700), W.balanceText(0)]
 eq('negative line', W.negativeBalanceLine(-500), 'Your wallet is at Rs -5. Add funds to make the next plan with Odds AI.');
 eq('option chip: free left', W.aiOptionChip(gate({ free_left: 2, free_this: true, billed: false })), { text: '2 FREE LEFT', tone: 'green' });
 eq('option chip: essentials', W.aiOptionChip(gate({ essentials: true, free_this: true, billed: false })), { text: 'FREE FOR ESSENTIALS', tone: 'green' });
-eq('option chip: price', W.aiOptionChip(gate({})), { text: 'RS 33', tone: 'amber' });
+eq('option chip: price', W.aiOptionChip(gate({})), { text: 'RS 50', tone: 'amber' });
 eq('option chip: negative', W.aiOptionChip(gate({ negative: true, balance_paise: -500 })), { text: 'ADD FUNDS', tone: 'red' });
 eq('option chip: not charged', W.aiOptionChip(gate({ charges: false })), null);
-eq('after charge: negative is red', W.afterChargeLine(3300, -500), { text: 'Rs 33 deducted. Wallet Rs -5.', tone: 'red' });
-eq('after charge: positive is green', W.afterChargeLine(3300, 46700), { text: 'Rs 33 deducted. Wallet Rs 467.', tone: 'green' });
+eq('after charge: negative is red', W.afterChargeLine(5000, -500), { text: 'Rs 50 deducted. Wallet Rs -5.', tone: 'red' });
+eq('after charge: positive is green', W.afterChargeLine(5000, 46700), { text: 'Rs 50 deducted. Wallet Rs 467.', tone: 'green' });
 eq('read: negative flag and line', [W.parseWalletRead({ balance_paise: -700 }).negative, W.parseWalletRead({ balance_paise: -700 }).negative_line], [true, 'Your wallet is at Rs -7. Add funds to make the next plan with Odds AI.']);
 eq('gate parse: old server answer without free fields is billed', [gate({}).billed, W.parseWalletGate({ charges: true, balance_paise: 3000 }).free_this], [true, false]);
 eq('free left line', [W.freeLeftLine(3), W.freeLeftLine(1)], ['3 free AI plans left', '1 free AI plan left']);
@@ -776,8 +852,13 @@ export const parseAiPlanResult = (d: any): AiPlanResult => {
     sources: d.sources ?? null,
     model: String(d.model ?? ''),
     generated_at: String(d.generated_at ?? new Date().toISOString()),
-    // 3 Nov 2026: the charge made for this draft (free drafts answer charged false with the free count left)
-    wallet: w ? { charged: w.charged === true, charged_paise: Number(w.charged_paise) || 0, balance_paise: Number(w.balance_paise) || 0, negative: w.negative === true, free_left: w.free_left == null ? null : Number(w.free_left), error: w.error ? String(w.error) : null } : null,
+    // 3 Nov 2026 (final rule): the standing for this plan; charge_at 'plan_create' = nothing charged for the draft
+    wallet: w ? {
+      charged: w.charged === true, charged_paise: Number(w.charged_paise) || 0,
+      charge_at: w.charge_at === 'draft' ? 'draft' : 'plan_create', price_paise: w.price_paise == null ? null : Number(w.price_paise),
+      balance_paise: Number(w.balance_paise) || 0, negative: w.negative === true, essentials: w.essentials === true,
+      free_this: w.free_this === true || w.free === true, free_left: w.free_left == null ? null : Number(w.free_left), error: w.error ? String(w.error) : null,
+    } : null,
   };
 };
 /** Deduct from wallet: the bill becomes paid and the held draft comes back. */
@@ -1139,7 +1220,7 @@ export function Wallet() {
         <Body style={{ fontSize: 11.5, color: C.muted2 }}>
           {!online ? 'Offline, last known balance' : updatedAt ? `Updated ${fmtWhen(new Date(updatedAt).toISOString())}` : notSetUp ? 'The wallet is not set up on the server yet.' : q.isError ? walletErrorText(q.error, 'Could not load the wallet. Pull to refresh.') : ''}
         </Body>
-        {data?.charges_ai && !negative ? <Body style={{ fontSize: 11, color: C.muted3, marginTop: 2 }}>{data.free_left > 0 ? `${freeLeftLine(data.free_left)}. After that Odds AI plans cost Rs 30 to 50 each, deducted here after the draft.` : 'Odds AI plans cost Rs 30 to 50 each, deducted here after the draft. Essentials clients stay free.'}</Body> : null}
+        {data?.charges_ai && !negative ? <Body style={{ fontSize: 11, color: C.muted3, marginTop: 2 }}>{data.free_left > 0 ? `${freeLeftLine(data.free_left)}. After that an Odds AI plan costs ${rupees(data.ai_plan_price_paise)}, deducted here when you create the plan. Generating is free.` : `An Odds AI plan costs ${rupees(data.ai_plan_price_paise)}, deducted here when you create the plan. Generating is free. Essentials clients stay free.`}</Body> : null}
       </Card>
 
       <Pressable onPress={() => { setAddErr(null); setAddOpen(true); }} disabled={!online || notSetUp} accessibilityRole="button" accessibilityLabel={negative ? 'Add funds' : 'Add money'} style={{ borderRadius: 13, overflow: 'hidden', opacity: online && !notSetUp ? 1 : 0.5 }}>
@@ -1420,7 +1501,7 @@ export function AiBillSheet({ bill, onDeducted, onDiscarded, onClose }: {
 ```
 
 #### `src/components/AiPlanAssistant.tsx`
-The Odds AI panel: the standing box, "Generate workout plan for Rs 33", the after-charge line.
+The Odds AI panel: the standing box, "Generate workout plan" (free, any number of times), the hint under it saying what Create Plan will do.
 
 ```tsx
 /* Odds AI plan assistant panel (16 Oct 2026), shown at the top of Create Plan for an Essentials client
@@ -1439,7 +1520,7 @@ import { trackEvent } from '../lib/amplitude';
 import { useAiPlanDraft } from '../lib/aiPlanQueries';
 import { SPLITS, splitOf, aiPromptLine, sourcesLine, draftExerciseCount, draftNewExercises, type AiPlanPreview, type AiPlanResult, type SplitKey } from '../lib/aiPlanDraft';
 import { useStore } from '../store';
-import { walletCardState, rupees, afterChargeLine } from '../lib/teamWallet';
+import { walletCardState, rupees, generateHint } from '../lib/teamWallet';
 import { AiBillSheet, type AiBillTarget } from './AiBillSheet';
 
 const AI = '#A78BFA';
@@ -1456,14 +1537,13 @@ export function AiPlanAssistant({ clientId, clientName, preview, onApply }: {
   const draftM = useAiPlanDraft();
   const { go } = useStore();
   const [open, setOpen] = React.useState(true);
-  /* Team Wallet (2 Nov 2026, charge rule revised 3 Nov 2026): after the 3 free plans a trainer's draft is charged
-     automatically the moment it is made (Rs 30 + Rs 5 per data block, cap Rs 50); the balance may go negative, and
-     only a negative balance blocks the next one. The panel shows the standing line, the Generate button names the
-     price, and after the draft a line says what was deducted. The bill sheet survives only for a bill from before
-     the rule change (the server still reports it as pending). */
+  /* Team Wallet (2 Nov 2026; rule final 3 Nov 2026): generating is FREE, any number of times. After the 3 free plans a
+     trainer's AI plan is charged ONCE, a fixed price (Rs 50), when Create Plan succeeds (the server does it as the
+     plan's rows land); the balance may go negative, and only a negative balance blocks. The panel shows the standing
+     line and a hint under Generate saying what Create Plan will do. The bill sheet survives only for a bill from
+     before the rule change (the server still reports it as pending). */
   const [bill, setBill] = React.useState<AiBillTarget>(null);
   const [billNote, setBillNote] = React.useState<string | null>(null);
-  const [charged, setCharged] = React.useState<{ text: string; tone: 'red' | 'green' } | null>(null);
   const wallet = walletCardState(preview.wallet);
   const pendingBill = preview.wallet?.pending_bill ?? null;
   const openPendingBill = () => {
@@ -1471,7 +1551,7 @@ export function AiPlanAssistant({ clientId, clientName, preview, onApply }: {
     setBill({ tx_id: pendingBill.tx_id, bill_paise: pendingBill.bill_paise, balance_paise: preview.wallet.balance_paise, preview: pendingBill.preview, clientName: pendingBill.client_name ?? clientName });
   };
   const walletBlocks = wallet.state === 'negative' || wallet.state === 'bill_pending';
-  const priceLabel = preview.wallet?.billed && preview.wallet.bill_paise != null ? ` for ${rupees(preview.wallet.bill_paise)}` : '';
+  const hint = generateHint(preview.wallet);
   const [split, setSplit] = React.useState<SplitKey | null>(null);
   const [note, setNote] = React.useState('');
   const [result, setResult] = React.useState<AiPlanResult | null>(null);
@@ -1504,11 +1584,7 @@ export function AiPlanAssistant({ clientId, clientName, preview, onApply }: {
       }
       const r = a.result;
       setResult(r);
-      // 3 Nov 2026: what the wallet did for this draft (charged after the draft; the draft lands either way).
-      if (r.wallet?.charged) setCharged(afterChargeLine(r.wallet.charged_paise, r.wallet.balance_paise));
-      else if (r.wallet?.error) setCharged({ text: `Not charged: ${r.wallet.error}`, tone: 'red' });
-      else setCharged(null);
-      trackEvent('AI Plan Generated', { client_id: clientId, split, model: r.model, exercises: draftExerciseCount(r.draft), not_in_db: draftNewExercises(r.draft).length, dropped: r.dropped.length, charged_paise: r.wallet?.charged_paise ?? 0 });
+      trackEvent('AI Plan Generated', { client_id: clientId, split, model: r.model, exercises: draftExerciseCount(r.draft), not_in_db: draftNewExercises(r.draft).length, dropped: r.dropped.length, free_this: r.wallet?.free_this ?? null, price_paise: r.wallet?.price_paise ?? null });
       onApply(r, aiPromptLine(r.draft.split_label || splitOf(split)?.label || split, note));
     } catch (e: any) {
       trackEvent('AI Plan Generate Failed', { client_id: clientId, split, error: String(e?.message ?? e).slice(0, 120) });
@@ -1605,14 +1681,13 @@ export function AiPlanAssistant({ clientId, clientName, preview, onApply }: {
             <LinearGradient colors={['#8B5CF6', '#6D28D9']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14 }}>
               {draftM.isPending ? <ActivityIndicator size="small" color="#fff" /> : <Icon name="sparkle" size={15} color="#fff" strokeWidth={2.2} />}
               <Text style={{ fontFamily: F.bodyBold, fontSize: 14, color: '#fff' }}>
-                {draftM.isPending ? `Drafting… ${secs}s` : !split ? 'Choose a split first' : result ? `Generate again${priceLabel}` : `Generate workout plan${priceLabel}`}
+                {draftM.isPending ? `Drafting… ${secs}s` : !split ? 'Choose a split first' : result ? 'Generate again' : 'Generate workout plan'}
               </Text>
             </LinearGradient>
           </Pressable>
           {draftM.isPending ? <Body style={{ fontSize: 11, color: AI, textAlign: 'center' }}>{STEPS[step]}…</Body> : null}
           {draftM.error && !draftM.isPending ? <Body style={{ fontSize: 11.5, color: C.red }}>{(draftM.error as Error).message.replace(/^WALLET_[A-Z_]+:\s*/, '')}</Body> : null}
-          {wallet.state === 'ok' && !result ? <Body style={{ fontSize: 10.5, color: C.muted3, textAlign: 'center' }}>Deducted from your wallet after the draft is made. The draft always lands.</Body> : null}
-          {charged ? <Body style={{ fontSize: 11.5, color: charged.tone === 'red' ? '#FF9B8F' : C.green, textAlign: 'center' }}>{charged.text}</Body> : null}
+          {hint && !walletBlocks && !draftM.isPending ? <Body style={{ fontSize: 10.5, color: C.muted3, textAlign: 'center' }}>{hint}</Body> : null}
 
           {result && !draftM.isPending ? (
             <View style={{ gap: 9, padding: 12, borderRadius: 14, backgroundColor: hexA(C.green, 0.07), borderWidth: 1, borderColor: hexA(C.green, 0.3) }}>
@@ -1836,7 +1911,7 @@ index b0a71a4..16d9d49 100644
      { label: 'Odds Nucleus', icon: 'nucleus', route: 'nucleus' },
    ] },
 diff --git a/src/lib/aiPlanDraft.ts b/src/lib/aiPlanDraft.ts
-index 290d543..f4bc235 100644
+index 290d543..7d5defd 100644
 --- a/src/lib/aiPlanDraft.ts
 +++ b/src/lib/aiPlanDraft.ts
 @@ -4,8 +4,9 @@
@@ -1849,7 +1924,7 @@ index 290d543..f4bc235 100644
  export type SplitKey = 'ppl' | 'upper_lower' | 'bro';
  export type SplitOption = { key: SplitKey; label: string; sections: string[]; blurb: string };
  
-@@ -42,10 +43,14 @@ export type AiPlanSources = {
+@@ -42,10 +43,16 @@ export type AiPlanSources = {
    sessions_last_30_days: number;
    weekly_slots: { day: string | null; time: string | null; modality: string | null }[];
    suggested_sessions_per_week: number;
@@ -1859,8 +1934,10 @@ index 290d543..f4bc235 100644
 +/** wallet (Team Wallet, 2 Nov 2026): does the caller pay for drafts (trainers), the balance and a waiting bill;
 +    null while the wallet is not on the server. */
 +export type AiPlanPreview = { eligible: boolean; allowed: boolean; essentials: boolean; client_name: string; sources: AiPlanSources; model: string; wallet: WalletGate | null };
-+/** wallet (3 Nov 2026): what the server charged for this draft (trainers after their free plans); the draft always lands. */
-+export type AiDraftCharge = { charged: boolean; charged_paise: number; balance_paise: number; negative: boolean; free_left: number | null; error: string | null };
++/** wallet (3 Nov 2026, final rule): the standing that travels with a trainer's draft. Nothing is charged for a draft
++    (charge_at 'plan_create': the fixed price moves once, when Create Plan succeeds; free_this = that plan is free). The
++    older fields (charged, charged_paise, error) stay for a server still charging at the draft. */
++export type AiDraftCharge = { charged: boolean; charged_paise: number; charge_at: 'plan_create' | 'draft'; price_paise: number | null; balance_paise: number; negative: boolean; essentials: boolean; free_this: boolean; free_left: number | null; error: string | null };
 +export type AiPlanResult = { draft: AiPlanDraft; dropped: string[]; sources: AiPlanSources; model: string; generated_at: string; wallet?: AiDraftCharge | null };
  
  const str = (v: unknown) => (v == null ? '' : String(v));
@@ -1952,7 +2029,7 @@ index ad4945b..c6758f9 100644
  
  /** Reason / note checks the server also makes (so the button can say why it is not ready). */
 diff --git a/src/screens/createPlan.tsx b/src/screens/createPlan.tsx
-index fafb0e5..3a9d523 100644
+index fafb0e5..3b5e9e5 100644
 --- a/src/screens/createPlan.tsx
 +++ b/src/screens/createPlan.tsx
 @@ -18,8 +18,9 @@ import { enqueueOutbox, getIsOnline, useIsOnline, getOutbox, updateOutboxItem }
@@ -1960,19 +2037,33 @@ index fafb0e5..3a9d523 100644
  import { AiPlanAssistant } from '../components/AiPlanAssistant';
  import { useAiPlanPreview } from '../lib/aiPlanQueries';
  import { draftToBodyParts, shouldFill, draftExerciseCount, aiChoice, planSource, type AiPlanResult, type PlanBuildMode } from '../lib/aiPlanDraft';
-+import { walletCardState, aiOptionChip, negativeBalanceLine } from '../lib/teamWallet';
++import { walletCardState, aiOptionChip, negativeBalanceLine, createButtonLabel, createDoneLine } from '../lib/teamWallet';
  import { trackEvent } from '../lib/amplitude';
  
  /* ============ CREATE WORKOUT PLAN ============
     Mirrors the web app's Create Workout Plan form end-to-end (client, plan meta,
-@@ -250,8 +251,26 @@ export function CreatePlan() {
+@@ -222,9 +223,11 @@ export function CreatePlan() {
+   // Post-save "Saved ✓" navigation timer: kept in a ref so leaving early (back
+   // tap inside the 900 ms window) or unmounting cancels it \u2014 an orphaned
+   // goBack() used to pop a SECOND screen.
+   const navTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+-  const scheduleGoBack = () => { if (navTimer.current) clearTimeout(navTimer.current); navTimer.current = setTimeout(() => goBack(), 900); };
++  const scheduleGoBack = (ms = 900) => { if (navTimer.current) clearTimeout(navTimer.current); navTimer.current = setTimeout(() => goBack(), ms); };
++  // Team Wallet (3 Nov 2026): what the wallet did when an AI plan was saved (shown in the footer before leaving).
++  const [walletDone, setWalletDone] = React.useState<{ text: string; tone: 'red' | 'green' | 'grey' } | null>(null);
+   React.useEffect(() => () => { if (navTimer.current) clearTimeout(navTimer.current); }, []);
+   const goBack = () => {
+     if (navTimer.current) { clearTimeout(navTimer.current); navTimer.current = null; }
+     canGoBack ? back() : go('client');
+@@ -250,8 +253,27 @@ export function CreatePlan() {
    const aiPreviewQ = useAiPlanPreview(selectedClientId, !isEdit && isOnline);
    const aiAllowed = !isEdit && aiPreviewQ.data?.allowed === true;
    const [mode, setMode] = React.useState<PlanBuildMode | null>(isEdit ? 'manual' : null);
    const aiPick = aiChoice({ online: isOnline, clientId: selectedClientId, modality, allowed: isEdit ? false : aiPreviewQ.data ? aiPreviewQ.data.allowed : null });
-+  // Team Wallet (2 Nov 2026, rule revised 3 Nov 2026): after the 3 free plans a draft is charged automatically once it is
-+  // made; the card shows the standing (free count, the exact price and balance, or ADD FUNDS); only a NEGATIVE balance
-+  // blocks, with the owner's popup and a button to the Wallet. A balance below the price never blocks.
++  // Team Wallet (2 Nov 2026, rule final 3 Nov 2026): generating is free; after the 3 free plans an AI plan is charged
++  // once, a fixed price (Rs 50), when Create Plan succeeds (the server does it as the rows land). The card shows the
++  // standing (free count, the price and balance, or ADD FUNDS); only a NEGATIVE balance blocks, with the owner's popup
++  // and a button to the Wallet, here and again at the Create Plan button. A balance below the price never blocks.
 +  const walletCard = walletCardState(aiPreviewQ.data?.wallet ?? null);
 +  const aiChip = aiOptionChip(aiPreviewQ.data?.wallet ?? null);
 +  const aiChipColor = aiChip?.tone === 'red' ? C.red : aiChip?.tone === 'amber' ? C.gold : C.green;
@@ -1992,7 +2083,53 @@ index fafb0e5..3a9d523 100644
      setMode(m);
      // An AI draft is a Strength Training plan (it covers the Strength and Cardio days).
      if (m === 'ai' && !modality) setModality('Strength Training');
-@@ -499,30 +518,38 @@ export function CreatePlan() {
+@@ -359,8 +381,24 @@ export function CreatePlan() {
+         /* server rejections (incl. "Plan locked") surface below */
+       }
+       return;
+     }
++    // Team Wallet (3 Nov 2026): an AI plan is charged once, a fixed price, by the server when its rows land. Only a
++    // negative balance blocks (the owner's popup); a balance below the price does not.
++    const aiPlan = !!lastAi.current;
++    if (aiPlan && walletCard.state === 'negative') {
++      trackEvent('AI Plan Blocked Negative Wallet', { client_id: selectedClientId, balance_paise: aiPreviewQ.data?.wallet?.balance_paise ?? null, at: 'create' });
++      Alert.alert('Add funds', walletCard.line ?? negativeBalanceLine(aiPreviewQ.data?.wallet?.balance_paise ?? 0), [
++        { text: 'Keep editing', style: 'cancel' },
++        { text: 'Add money', onPress: () => go('wallet') },
++      ]);
++      return;
++    }
++    const finishWallet = (queued: boolean) => {
++      const line = createDoneLine(aiPreviewQ.data?.wallet ?? null, aiPlan, queued);
++      setWalletDone(line);
++      scheduleGoBack(line ? 2200 : 900);
++    };
+     // planId is generated on-device so an offline retry can never duplicate the plan.
+     const input: WorkoutPlanCreateInput = {
+       trainerId,
+       clientId: selectedClientId as string,
+@@ -383,18 +421,18 @@ export function CreatePlan() {
+     const finishOffline = async () => {
+       await enqueueOutbox('create-plan', `${planName.trim()} · ${clientName}`, input);
+       setSavedOffline(true);
+       setDone(true);
+-      scheduleGoBack();
++      finishWallet(true);
+     };
+     if (!getIsOnline()) {
+       await finishOffline();
+       return;
+     }
+     try {
+       await createM.mutateAsync(input);
+       setDone(true);
+-      scheduleGoBack();
++      finishWallet(false);
+     } catch (e: any) {
+       if (/network request failed|network error|failed to fetch|fetch failed|timeout/i.test(String(e?.message))) {
+         await finishOffline();
+       }
+@@ -499,30 +537,38 @@ export function CreatePlan() {
                <Serif style={{ fontSize: 24 }}>Create Plan</Serif>
                <Body style={{ fontSize: 12.5, color: C.muted, marginTop: 1 }}>How do you want to build {first}'s plan?</Body>
              </View>
@@ -2035,6 +2172,33 @@ index fafb0e5..3a9d523 100644
                </View>
                <Icon name="chevRight" size={16} color={C.orange} strokeWidth={2.4} />
              </View>
+@@ -909,9 +955,14 @@ export function CreatePlan() {
+       </Page>
+ 
+       {/* Sticky footer */}
+       <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 18, paddingTop: 12, paddingBottom: insets.bottom + 14, backgroundColor: 'rgba(8,6,6,0.96)', borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)' }}>
+-        {missingHint ? (
++        {done && walletDone ? (
++          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 9 }}>
++            <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: walletDone.tone === 'red' ? C.red : walletDone.tone === 'green' ? C.green : C.gold }} />
++            <Body style={{ flex: 1, fontSize: 11.5, color: walletDone.tone === 'red' ? '#FF9B8F' : walletDone.tone === 'green' ? C.green : C.muted2 }}>{walletDone.text}</Body>
++          </View>
++        ) : missingHint ? (
+           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 9 }}>
+             <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: C.gold }} />
+             <Body style={{ flex: 1, fontSize: 11.5, color: C.muted2 }}>{missingHint}</Body>
+           </View>
+@@ -934,9 +985,9 @@ export function CreatePlan() {
+               <Icon name="checks" path={done ? 'M20 6 9 17l-5-5' : undefined} size={16} color="#fff" strokeWidth={2.6} />
+               <Text style={{ fontFamily: F.bodyBold, fontSize: 14.5, color: '#fff' }}>
+                 {busy ? (isEdit ? 'Saving…' : 'Creating…')
+                   : done ? (savedOffline ? 'Saved on device ✓' : isEdit ? 'Resubmitted for review!' : 'Sent for review!')
+-                  : isEdit ? 'Save & Resubmit' : 'Create Plan'}
++                  : isEdit ? 'Save & Resubmit' : createButtonLabel(aiPreviewQ.data?.wallet ?? null, aiApplied)}
+               </Text>
+             </LinearGradient>
+           </Pressable>
+         </View>
 ```
 
 ## 5. Server files for reference (nothing to build on iOS)
@@ -3233,6 +3397,454 @@ SELECT 21, 'probe rows left behind', '0', (SELECT count(*)::text FROM public.tea
 SELECT step, check_name, expected, result FROM charge_probe ORDER BY step;
 ```
 
+#### `supabase/migrations/20261103120000_ai_plan_charge_on_create.sql`
+
+```sql
+-- ============================================================================
+-- Team Wallet: the Odds AI plan is charged ONCE, at a FIXED price, when the plan is created (3 Nov 2026)
+-- Owner (3 Nov 2026, replacing the morning's "charged after every draft"): "money is deducted only once per plan,
+-- when the trainer clicks the Create Plan button; before that generating is free, any time. The price is fixed per
+-- plan, not computed from the client's data blocks: one server constant, Rs 50 for now." Free plans first (3 per
+-- trainer, non-Essentials), Essentials free, manual plans free; a draft applied and then rebuilt by hand is still an
+-- AI plan and is charged. Plan: odds-app/docs/ai-plan-charge-on-create-plan.md.
+--
+-- 1. team_wallet_ai_plan_price_paise() = 5000: the ONE price constant. The gate's bill_paise is this figure.
+-- 2. One ledger row per plan: ai_plan rows carry meta.plan_id (unique partial index team_wallet_plan_uidx).
+-- 3. team_wallet_charge_ai_plan(user, client, name, plan_id, preview) and team_wallet_record_free_draft(user, client,
+--    name, essentials, plan_id, preview) take the plan id and answer the existing row (already true) on a repeat.
+-- 4. Trigger trg_team_wallet_plan_created AFTER INSERT ON workout_plan_exercises (statement level): for each NEW AI
+--    plan of a trainer, one free row or one charge. A wallet problem is a WARNING: the plan always lands.
+--    Plans that already existed when this ran (team_wallet_legacy_plans) are never charged, so Save & Resubmit
+--    (which re-inserts the rows) of an older plan costs nothing.
+-- 5. ai-plan-draft stops charging and stops recording free rows (redeployed); generating is free.
+-- 6. get_my_team_wallet adds ai_plan_price_paise. A rolled-back probe (12 checks) at the end.
+-- ============================================================================
+
+BEGIN;
+
+-- ---------------------------------------------------------------------------
+-- 1. The price
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.team_wallet_ai_plan_price_paise()
+RETURNS bigint LANGUAGE sql IMMUTABLE AS $$ SELECT 5000::bigint $$;
+GRANT EXECUTE ON FUNCTION public.team_wallet_ai_plan_price_paise() TO authenticated, service_role;
+
+-- The floor stays minus one plan's price.
+ALTER TABLE public.team_wallet DROP CONSTRAINT IF EXISTS team_wallet_ai_floor;
+ALTER TABLE public.team_wallet ADD CONSTRAINT team_wallet_ai_floor
+  CHECK (kind <> 'ai_plan' OR balance_after_paise IS NULL OR balance_after_paise >= -5000);
+
+-- ---------------------------------------------------------------------------
+-- 2. One row per plan
+-- ---------------------------------------------------------------------------
+CREATE UNIQUE INDEX IF NOT EXISTS team_wallet_plan_uidx ON public.team_wallet ((meta->>'plan_id'))
+  WHERE kind = 'ai_plan' AND meta->>'plan_id' IS NOT NULL;
+
+/** The ai_plan row already written for a plan, if any. */
+CREATE OR REPLACE FUNCTION public.team_wallet_plan_row(p_plan_id uuid)
+RETURNS public.team_wallet LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  SELECT w.* FROM public.team_wallet w WHERE w.kind = 'ai_plan' AND w.meta->>'plan_id' = p_plan_id::text ORDER BY w.seq DESC LIMIT 1
+$$;
+REVOKE ALL ON FUNCTION public.team_wallet_plan_row(uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.team_wallet_plan_row(uuid) TO service_role;
+
+-- Plans that exist before this change are never charged by the trigger (their drafts were charged, or free, at
+-- Generate time under the earlier rule; an edit re-inserts their rows and must cost nothing).
+-- The snapshot also freezes the free count's history: an edit re-inserts a plan's rows with a new created_at, which
+-- used to drop the plan out of "AI plans saved before the cutover" and hand the trainer a free plan back.
+CREATE TABLE IF NOT EXISTS public.team_wallet_legacy_plans (
+  plan_id uuid PRIMARY KEY,
+  trainer_id uuid,
+  client_id uuid,
+  essentials boolean NOT NULL DEFAULT false,
+  created_at timestamptz,
+  noted_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.team_wallet_legacy_plans ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.team_wallet_legacy_plans FROM PUBLIC, anon, authenticated;
+INSERT INTO public.team_wallet_legacy_plans (plan_id, trainer_id, client_id, essentials, created_at)
+SELECT e.plan_id, MIN(e.trainer_id::text)::uuid, MIN(e.client_id::text)::uuid,
+       COALESCE(bool_or(public.team_wallet_is_essentials(c.subscription_type)), false), MIN(e.created_at)
+  FROM public.workout_plan_exercises e
+  LEFT JOIN public.clients c ON c.id = e.client_id
+ WHERE e.plan_id IS NOT NULL AND e.source = 'ai'
+ GROUP BY e.plan_id
+ON CONFLICT (plan_id) DO NOTHING;
+
+/** Free plans used: the free 0-rows this ledger holds (non-Essentials) plus the AI plans saved before the cutover
+    (from the snapshot, so a later edit never changes the count). */
+CREATE OR REPLACE FUNCTION public.team_wallet_free_used(p_user uuid)
+RETURNS integer
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT (SELECT count(*)::integer FROM public.team_wallet w
+           WHERE w.user_id = p_user AND w.kind = 'ai_plan' AND w.status = 'paid' AND w.meta->>'free' = 'true' AND COALESCE(w.meta->>'essentials', 'false') <> 'true')
+       + (SELECT count(*)::integer FROM public.team_wallet_legacy_plans l
+           WHERE l.trainer_id = p_user AND NOT l.essentials AND l.created_at < public.team_wallet_free_cutover());
+$$;
+REVOKE ALL ON FUNCTION public.team_wallet_free_used(uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.team_wallet_free_used(uuid) TO service_role;
+
+-- ---------------------------------------------------------------------------
+-- 3. The free row and the charge, keyed by the plan
+-- ---------------------------------------------------------------------------
+DROP FUNCTION IF EXISTS public.team_wallet_record_free_draft(uuid, uuid, text, boolean, text, jsonb);
+CREATE OR REPLACE FUNCTION public.team_wallet_record_free_draft(p_user uuid, p_client uuid, p_client_name text, p_essentials boolean, p_plan_id uuid, p_preview jsonb)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_role text;
+  v_row public.team_wallet;
+  v_used integer;
+BEGIN
+  SELECT p.role::text INTO v_role FROM public.profiles p WHERE p.id = p_user;
+  IF v_role IS DISTINCT FROM 'trainer' THEN RETURN jsonb_build_object('recorded', false, 'already', false, 'free_left', NULL); END IF;
+  PERFORM public.team_wallet_lock(p_user);
+  v_row := public.team_wallet_plan_row(p_plan_id);
+  IF v_row.id IS NOT NULL THEN
+    v_used := public.team_wallet_free_used(p_user);
+    RETURN jsonb_build_object('recorded', false, 'already', true, 'free_total', public.team_wallet_free_total(), 'free_used', v_used,
+                              'free_left', GREATEST(public.team_wallet_free_total() - v_used, 0), 'row', public.team_wallet_public(v_row));
+  END IF;
+  INSERT INTO public.team_wallet (user_id, role, kind, amount_paise, status, balance_after_paise, paid_at, meta)
+  VALUES (p_user, v_role, 'ai_plan', 0, 'paid', public.team_wallet_balance(p_user), now(),
+          jsonb_build_object('free', true, 'essentials', COALESCE(p_essentials, false), 'note', CASE WHEN COALESCE(p_essentials, false) THEN 'Odds AI plan, free for Essentials' ELSE 'Odds AI plan, free' END,
+                             'created_by', p_user, 'plan_id', p_plan_id, 'client_id', p_client, 'client_name', p_client_name, 'preview', COALESCE(p_preview, '{}'::jsonb), 'charge_at', 'plan_create'))
+  RETURNING * INTO v_row;
+  v_used := public.team_wallet_free_used(p_user);
+  RETURN jsonb_build_object('recorded', true, 'already', false, 'free_total', public.team_wallet_free_total(), 'free_used', v_used,
+                            'free_left', GREATEST(public.team_wallet_free_total() - v_used, 0), 'row', public.team_wallet_public(v_row));
+END;
+$$;
+REVOKE ALL ON FUNCTION public.team_wallet_record_free_draft(uuid, uuid, text, boolean, uuid, jsonb) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.team_wallet_record_free_draft(uuid, uuid, text, boolean, uuid, jsonb) TO service_role;
+
+DROP FUNCTION IF EXISTS public.team_wallet_charge_ai_plan(uuid, uuid, text, text, jsonb);
+CREATE OR REPLACE FUNCTION public.team_wallet_charge_ai_plan(p_user uuid, p_client uuid, p_client_name text, p_plan_id uuid, p_preview jsonb)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_role text;
+  v_bal bigint;
+  v_amount bigint := public.team_wallet_ai_plan_price_paise();
+  v_row public.team_wallet;
+BEGIN
+  SELECT p.role::text INTO v_role FROM public.profiles p WHERE p.id = p_user;
+  IF v_role IS DISTINCT FROM 'trainer' THEN RAISE EXCEPTION 'WALLET_FORBIDDEN: Only trainers are billed for AI plans.' USING ERRCODE = '42501'; END IF;
+  PERFORM public.team_wallet_lock(p_user);
+  v_row := public.team_wallet_plan_row(p_plan_id);
+  IF v_row.id IS NOT NULL THEN
+    RETURN jsonb_build_object('already', true, 'tx_id', v_row.id, 'bill_paise', -v_row.amount_paise, 'balance_paise', public.team_wallet_balance(p_user),
+                              'negative', public.team_wallet_balance(p_user) < 0, 'row', public.team_wallet_public(v_row));
+  END IF;
+  v_bal := public.team_wallet_balance(p_user);
+  IF v_bal < 0 THEN
+    RAISE EXCEPTION 'WALLET_NEGATIVE: Your wallet is at %. Add funds to make the next plan with Odds AI.', public.team_wallet_rs(v_bal);
+  END IF;
+  IF v_bal - v_amount < -5000 THEN
+    RAISE EXCEPTION 'WALLET_NEGATIVE: The wallet cannot go further below zero. Add funds first.';
+  END IF;
+  INSERT INTO public.team_wallet (user_id, role, kind, amount_paise, status, balance_after_paise, paid_at, meta)
+  VALUES (p_user, v_role, 'ai_plan', -v_amount, 'paid', v_bal - v_amount, now(),
+          jsonb_build_object('note', 'Odds AI plan', 'created_by', p_user, 'plan_id', p_plan_id, 'client_id', p_client,
+                             'client_name', p_client_name, 'preview', COALESCE(p_preview, '{}'::jsonb), 'auto', true, 'charge_at', 'plan_create'))
+  RETURNING * INTO v_row;
+  RETURN jsonb_build_object('already', false, 'tx_id', v_row.id, 'bill_paise', v_amount, 'balance_paise', v_bal - v_amount,
+                            'negative', v_bal - v_amount < 0, 'row', public.team_wallet_public(v_row));
+END;
+$$;
+REVOKE ALL ON FUNCTION public.team_wallet_charge_ai_plan(uuid, uuid, text, uuid, jsonb) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.team_wallet_charge_ai_plan(uuid, uuid, text, uuid, jsonb) TO service_role;
+
+-- ---------------------------------------------------------------------------
+-- 4. The gate: the fixed price, no blocks; charge_at tells the apps when the money moves
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.team_wallet_ai_plan_gate(p_user uuid, p_essentials boolean DEFAULT false, p_client uuid DEFAULT NULL)
+RETURNS jsonb
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_role text;
+  v_charges boolean;
+  v_bal bigint;
+  v_used integer := 0;
+  v_left integer := 0;
+  v_free_this boolean;
+  v_bill bigint := NULL;
+  v_pending public.team_wallet;
+  v_pending_json jsonb := NULL;
+  v_reason text := NULL;
+  v_line text := NULL;
+BEGIN
+  SELECT p.role::text INTO v_role FROM public.profiles p WHERE p.id = p_user;
+  v_charges := (v_role = 'trainer');
+  v_bal := public.team_wallet_balance(p_user);
+  IF v_charges THEN
+    v_used := public.team_wallet_free_used(p_user);
+    v_left := GREATEST(public.team_wallet_free_total() - v_used, 0);
+  END IF;
+  v_free_this := NOT v_charges OR COALESCE(p_essentials, false) OR v_left > 0;
+  IF v_charges AND NOT v_free_this THEN v_bill := public.team_wallet_ai_plan_price_paise(); END IF;
+  SELECT * INTO v_pending FROM public.team_wallet w
+   WHERE w.user_id = p_user AND w.kind = 'ai_plan' AND w.status = 'pending' ORDER BY w.seq DESC LIMIT 1;
+  IF v_pending.id IS NOT NULL THEN
+    v_pending_json := jsonb_build_object('tx_id', v_pending.id, 'bill_paise', -v_pending.amount_paise,
+      'client_id', v_pending.meta->>'client_id', 'client_name', v_pending.meta->>'client_name',
+      'created_at', v_pending.created_at, 'preview', v_pending.meta->'preview');
+  END IF;
+  IF v_charges AND NOT v_free_this THEN
+    IF v_pending.id IS NOT NULL THEN
+      v_reason := 'WALLET_BILL_PENDING'; v_line := 'Settle or discard your last draft first.';
+    ELSIF v_bal < 0 THEN
+      v_reason := 'WALLET_NEGATIVE'; v_line := 'Your wallet is at ' || public.team_wallet_rs(v_bal) || '. Add funds to make the next plan with Odds AI.';
+    END IF;
+  END IF;
+  RETURN jsonb_build_object('charges', v_charges, 'balance_paise', v_bal, 'negative', v_bal < 0,
+    'floor_paise', 0, 'bill_paise', v_bill, 'blocks', NULL, 'price_paise', public.team_wallet_ai_plan_price_paise(), 'charge_at', 'plan_create',
+    'free_total', public.team_wallet_free_total(), 'free_used', v_used, 'free_left', v_left,
+    'essentials', COALESCE(p_essentials, false), 'free_this', v_free_this, 'billed', v_charges AND NOT v_free_this,
+    'pending_bill', v_pending_json, 'ok', v_reason IS NULL, 'reason', v_reason, 'line', v_line);
+END;
+$$;
+REVOKE ALL ON FUNCTION public.team_wallet_ai_plan_gate(uuid, boolean, uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.team_wallet_ai_plan_gate(uuid, boolean, uuid) TO service_role;
+
+-- ---------------------------------------------------------------------------
+-- 5. The trigger: one row per new AI plan, when the plan's rows are inserted
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.team_wallet_plan_created()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  r record;
+  v_role text;
+  v_sub text;
+  v_name text;
+  v_left integer;
+  v_preview jsonb;
+  x jsonb;
+BEGIN
+  FOR r IN
+    SELECT n.plan_id, n.trainer_id, n.client_id,
+           MIN(n.plan_name) AS plan_name, MIN(n.modality) AS modality,
+           COUNT(DISTINCT n.exercise_name) AS exercise_count,
+           array_agg(DISTINCT n.body_part) AS sections
+      FROM new_rows n
+     WHERE n.plan_id IS NOT NULL AND n.trainer_id IS NOT NULL AND n.source = 'ai'
+     GROUP BY n.plan_id, n.trainer_id, n.client_id
+  LOOP
+    BEGIN
+      -- not a plan that existed before this rule (an edit re-inserts the rows of an older plan)
+      CONTINUE WHEN EXISTS (SELECT 1 FROM public.team_wallet_legacy_plans l WHERE l.plan_id = r.plan_id);
+      -- never twice for the same plan (a retried sync, Save & Resubmit, a double tap)
+      CONTINUE WHEN (public.team_wallet_plan_row(r.plan_id)).id IS NOT NULL;
+      SELECT p.role::text INTO v_role FROM public.profiles p WHERE p.id = r.trainer_id;
+      CONTINUE WHEN v_role IS DISTINCT FROM 'trainer';
+      SELECT c.subscription_type, COALESCE(NULLIF(btrim(COALESCE(c.first_name, '') || ' ' || COALESCE(c.last_name, '')), ''), 'Client')
+        INTO v_sub, v_name FROM public.clients c WHERE c.id = r.client_id;
+      v_preview := jsonb_build_object('plan_name', r.plan_name, 'modality', r.modality, 'exercise_count', r.exercise_count,
+                                      'sections', to_jsonb(r.sections), 'split_label', NULL);
+      IF public.team_wallet_is_essentials(v_sub) THEN
+        x := public.team_wallet_record_free_draft(r.trainer_id, r.client_id, v_name, true, r.plan_id, v_preview);
+      ELSE
+        v_left := GREATEST(public.team_wallet_free_total() - public.team_wallet_free_used(r.trainer_id), 0);
+        IF v_left > 0 THEN
+          x := public.team_wallet_record_free_draft(r.trainer_id, r.client_id, v_name, false, r.plan_id, v_preview);
+        ELSE
+          x := public.team_wallet_charge_ai_plan(r.trainer_id, r.client_id, v_name, r.plan_id, v_preview);
+        END IF;
+      END IF;
+    EXCEPTION WHEN others THEN
+      -- The plan always lands: a wallet problem (the floor, a missing profile) is logged, never raised.
+      RAISE WARNING 'team_wallet_plan_created: plan % of % not charged: %', r.plan_id, r.trainer_id, SQLERRM;
+    END;
+  END LOOP;
+  RETURN NULL;
+END;
+$$;
+REVOKE ALL ON FUNCTION public.team_wallet_plan_created() FROM PUBLIC, anon, authenticated;
+
+DROP TRIGGER IF EXISTS trg_team_wallet_plan_created ON public.workout_plan_exercises;
+CREATE TRIGGER trg_team_wallet_plan_created
+  AFTER INSERT ON public.workout_plan_exercises
+  REFERENCING NEW TABLE AS new_rows
+  FOR EACH STATEMENT EXECUTE FUNCTION public.team_wallet_plan_created();
+
+-- ---------------------------------------------------------------------------
+-- 6. The app's read: the price
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.get_my_team_wallet(p_limit integer DEFAULT 50, p_before timestamptz DEFAULT NULL)
+RETURNS jsonb
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_day date := (now() AT TIME ZONE 'Asia/Kolkata')::date;
+  v_today bigint;
+  v_gate jsonb;
+  v_bal bigint;
+BEGIN
+  IF v_uid IS NULL THEN RAISE EXCEPTION 'WALLET_SIGN_IN: Sign in to see your wallet.' USING ERRCODE = '42501'; END IF;
+  SELECT COALESCE(SUM(w.amount_paise), 0) INTO v_today FROM public.team_wallet w
+   WHERE w.user_id = v_uid AND w.kind = 'topup' AND w.status IN ('pending', 'paid')
+     AND (w.created_at AT TIME ZONE 'Asia/Kolkata')::date = v_day;
+  v_gate := public.team_wallet_ai_plan_gate(v_uid, false, NULL);
+  v_bal := public.team_wallet_balance(v_uid);
+  RETURN jsonb_build_object(
+    'balance_paise', v_bal,
+    'negative', v_bal < 0,
+    'negative_line', CASE WHEN v_bal < 0 THEN 'Your wallet is at ' || public.team_wallet_rs(v_bal) || '. Add funds to make the next plan with Odds AI.' ELSE NULL END,
+    'today_topup_paise', v_today,
+    'today_room_paise', GREATEST(public.team_wallet_daily_cap_paise() - v_today, 0),
+    'min_topup_paise', public.team_wallet_min_topup_paise(),
+    'daily_cap_paise', public.team_wallet_daily_cap_paise(),
+    'ai_plan_price_paise', public.team_wallet_ai_plan_price_paise(),
+    'ai_bill_min_paise', public.team_wallet_ai_plan_price_paise(),
+    'ai_bill_max_paise', public.team_wallet_ai_plan_price_paise(),
+    'ai_floor_paise', 0,
+    'charges_ai', v_gate->'charges',
+    'free_total', v_gate->'free_total',
+    'free_used', v_gate->'free_used',
+    'free_left', v_gate->'free_left',
+    'pending_bill', v_gate->'pending_bill',
+    'rows', COALESCE((SELECT jsonb_agg(public.team_wallet_public(w) ORDER BY w.seq DESC)
+      FROM (SELECT * FROM public.team_wallet w2 WHERE w2.user_id = v_uid AND (p_before IS NULL OR w2.created_at < p_before)
+             ORDER BY w2.seq DESC LIMIT GREATEST(1, LEAST(COALESCE(p_limit, 50), 200))) w), '[]'::jsonb));
+END;
+$$;
+REVOKE ALL ON FUNCTION public.get_my_team_wallet(integer, timestamptz) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.get_my_team_wallet(integer, timestamptz) TO authenticated, service_role;
+
+COMMIT;
+
+-- ---------------------------------------------------------------------------
+-- Probe: Sagar and a client, inside a block that is always rolled back. 12 checks.
+-- ---------------------------------------------------------------------------
+CREATE TEMP TABLE IF NOT EXISTS plan_charge_probe (step int, check_name text, expected text, result text);
+TRUNCATE plan_charge_probe;
+
+DO $probe$
+DECLARE
+  v_user uuid; v_client uuid; v_ess uuid; v_bal0 bigint; v_free0 integer;
+  p1 uuid := gen_random_uuid(); p2 uuid := gen_random_uuid(); p3 uuid := gen_random_uuid(); p4 uuid := gen_random_uuid(); p5 uuid := gen_random_uuid();
+  g jsonb; w public.team_wallet; v_n int; v_neg boolean; v_b7 bigint;
+  v_names text[] := '{}'; v_expected text[] := '{}'; v_results text[] := '{}';
+BEGIN
+  SELECT p.id INTO v_user FROM public.profiles p WHERE p.role::text = 'trainer' AND p.email = 'sagaroddsfitness@gmail.com' LIMIT 1;
+  IF v_user IS NULL THEN SELECT p.id INTO v_user FROM public.profiles p WHERE p.role::text = 'trainer' LIMIT 1; END IF;
+  SELECT c.id INTO v_client FROM public.clients c WHERE NOT public.team_wallet_is_essentials(c.subscription_type) ORDER BY c.created_at DESC NULLS LAST LIMIT 1;
+  SELECT c.id INTO v_ess FROM public.clients c WHERE public.team_wallet_is_essentials(c.subscription_type) ORDER BY c.created_at DESC NULLS LAST LIMIT 1;
+  BEGIN
+    v_bal0 := public.team_wallet_balance(v_user);
+    v_free0 := GREATEST(public.team_wallet_free_total() - public.team_wallet_free_used(v_user), 0);
+    -- 1. the gate names the fixed price, charge_at plan_create
+    g := public.team_wallet_ai_plan_gate(v_user, false, v_client);
+    v_names := array_append(v_names, 'gate: fixed price, charge_at plan_create, no blocks'); v_expected := array_append(v_expected, 'price 5000, charge_at plan_create, blocks null, bill ' || CASE WHEN v_free0 > 0 THEN 'null' ELSE '5000' END);
+    v_results := array_append(v_results, 'price ' || (g->>'price_paise') || ', charge_at ' || (g->>'charge_at') || ', blocks ' || COALESCE(g->>'blocks', 'null') || ', bill ' || COALESCE(g->>'bill_paise', 'null'));
+    -- use up the free plans with free rows (so the charge path is exercised): one plan each
+    v_n := 0;
+    WHILE GREATEST(public.team_wallet_free_total() - public.team_wallet_free_used(v_user), 0) > 0 AND v_n < 5 LOOP
+      g := public.team_wallet_record_free_draft(v_user, v_client, 'Probe', false, gen_random_uuid(), NULL); v_n := v_n + 1;
+    END LOOP;
+    -- 2. three AI rows of one plan -> ONE charge row of -5000 keyed by the plan
+    INSERT INTO public.workout_plan_exercises (plan_id, trainer_id, client_id, modality, plan_name, body_part, exercise_name, set_number, order_index, source)
+    VALUES (p1, v_user, v_client, 'Strength Training', 'Probe plan 1', 'Push', 'Bench Press', 1, 1, 'ai'),
+           (p1, v_user, v_client, 'Strength Training', 'Probe plan 1', 'Push', 'Bench Press', 2, 2, 'ai'),
+           (p1, v_user, v_client, 'Strength Training', 'Probe plan 1', 'Pull', 'Barbell Row', 1, 3, 'ai');
+    w := public.team_wallet_plan_row(p1);
+    v_names := array_append(v_names, 'a new AI plan: one charge row of the fixed price'); v_expected := array_append(v_expected, 'rows 1, amount -5000, balance ' || (v_bal0 - 5000) || ', preview 2 exercises');
+    v_results := array_append(v_results, 'rows ' || (SELECT count(*) FROM public.team_wallet x WHERE x.meta->>'plan_id' = p1::text) || ', amount ' || w.amount_paise || ', balance ' || w.balance_after_paise || ', preview ' || (w.meta->'preview'->>'exercise_count') || ' exercises');
+    -- 3. more rows of the same plan (an edit, a retried sync) -> still one row
+    INSERT INTO public.workout_plan_exercises (plan_id, trainer_id, client_id, modality, plan_name, body_part, exercise_name, set_number, order_index, source)
+    VALUES (p1, v_user, v_client, 'Strength Training', 'Probe plan 1', 'Legs', 'Squat', 1, 4, 'ai');
+    v_names := array_append(v_names, 'the same plan again: no second row'); v_expected := array_append(v_expected, '1');
+    v_results := array_append(v_results, (SELECT count(*)::text FROM public.team_wallet x WHERE x.meta->>'plan_id' = p1::text));
+    -- 4. a direct second charge call for the plan answers already
+    g := public.team_wallet_charge_ai_plan(v_user, v_client, 'Probe', p1, NULL);
+    v_names := array_append(v_names, 'charge called twice for one plan: already'); v_expected := array_append(v_expected, 'already true, bill 5000');
+    v_results := array_append(v_results, 'already ' || (g->>'already') || ', bill ' || (g->>'bill_paise'));
+    -- 5. a manual plan -> nothing
+    INSERT INTO public.workout_plan_exercises (plan_id, trainer_id, client_id, modality, plan_name, body_part, exercise_name, set_number, order_index, source)
+    VALUES (p2, v_user, v_client, 'Strength Training', 'Probe manual', 'Push', 'Bench Press', 1, 1, 'human');
+    v_names := array_append(v_names, 'a manual plan: no wallet row'); v_expected := array_append(v_expected, '0');
+    v_results := array_append(v_results, (SELECT count(*)::text FROM public.team_wallet x WHERE x.meta->>'plan_id' = p2::text));
+    -- 6. an Essentials client's AI plan -> a free row, balance unchanged
+    IF v_ess IS NOT NULL THEN
+      INSERT INTO public.workout_plan_exercises (plan_id, trainer_id, client_id, modality, plan_name, body_part, exercise_name, set_number, order_index, source)
+      VALUES (p3, v_user, v_ess, 'Strength Training', 'Probe essentials', 'Push', 'Bench Press', 1, 1, 'ai');
+      w := public.team_wallet_plan_row(p3);
+      v_names := array_append(v_names, 'an Essentials AI plan: free row, nothing charged'); v_expected := array_append(v_expected, 'free true, essentials true, amount 0, balance ' || (v_bal0 - 5000));
+      v_results := array_append(v_results, 'free ' || (w.meta->>'free') || ', essentials ' || (w.meta->>'essentials') || ', amount ' || w.amount_paise || ', balance ' || public.team_wallet_balance(v_user));
+    END IF;
+    -- 7. the second billed plan: while the balance is negative the plan lands, a warning, no charge row;
+    --    with money still in the wallet it is charged like any plan
+    v_neg := public.team_wallet_balance(v_user) < 0;
+    INSERT INTO public.workout_plan_exercises (plan_id, trainer_id, client_id, modality, plan_name, body_part, exercise_name, set_number, order_index, source)
+    VALUES (p4, v_user, v_client, 'Strength Training', 'Probe plan 4', 'Push', 'Bench Press', 1, 1, 'ai');
+    v_names := array_append(v_names, CASE WHEN v_neg THEN 'a billed plan while negative: rows stay, no charge row' ELSE 'a billed plan with money left: charged' END);
+    v_expected := array_append(v_expected, CASE WHEN v_neg THEN 'plan rows 1, wallet rows 0, gate WALLET_NEGATIVE' ELSE 'plan rows 1, wallet rows 1, gate ' || CASE WHEN public.team_wallet_balance(v_user) < 0 THEN 'WALLET_NEGATIVE' ELSE 'ok' END END);
+    v_results := array_append(v_results, 'plan rows ' || (SELECT count(*) FROM public.workout_plan_exercises e WHERE e.plan_id = p4) || ', wallet rows ' || (SELECT count(*) FROM public.team_wallet x WHERE x.meta->>'plan_id' = p4::text) || ', gate ' || COALESCE(public.team_wallet_ai_plan_gate(v_user, false, v_client)->>'reason', 'ok'));
+    -- 8. a Rs 500 top-up (clears any negative first), the next plan is charged Rs 50
+    v_b7 := public.team_wallet_balance(v_user);
+    g := public.team_wallet_create_topup(v_user, 50000);
+    PERFORM public.team_wallet_set_order((g->>'id')::uuid, 'order_probe_plan');
+    g := public.team_wallet_mark_paid((g->>'id')::uuid, 'pay_probe_plan', NULL, 'upi', NULL, 'app_verify');
+    INSERT INTO public.workout_plan_exercises (plan_id, trainer_id, client_id, modality, plan_name, body_part, exercise_name, set_number, order_index, source)
+    VALUES (p5, v_user, v_client, 'Strength Training', 'Probe plan 5', 'Push', 'Bench Press', 1, 1, 'ai');
+    v_names := array_append(v_names, 'after a Rs 500 top-up the next plan is charged Rs 50'); v_expected := array_append(v_expected, 'balance ' || (v_b7 + 50000 - 5000));
+    v_results := array_append(v_results, 'balance ' || public.team_wallet_balance(v_user));
+    -- 9. a legacy plan (existed before this rule) edited: no charge
+    INSERT INTO public.team_wallet_legacy_plans (plan_id, trainer_id, client_id, essentials, created_at) VALUES (p2, v_user, v_client, false, now()) ON CONFLICT DO NOTHING;
+    UPDATE public.workout_plan_exercises SET source = 'ai' WHERE plan_id = p2;
+    INSERT INTO public.workout_plan_exercises (plan_id, trainer_id, client_id, modality, plan_name, body_part, exercise_name, set_number, order_index, source)
+    VALUES (p2, v_user, v_client, 'Strength Training', 'Probe manual', 'Push', 'Incline Press', 1, 2, 'ai');
+    v_names := array_append(v_names, 'a plan from before the rule, re-inserted as AI: no charge'); v_expected := array_append(v_expected, '0');
+    v_results := array_append(v_results, (SELECT count(*)::text FROM public.team_wallet x WHERE x.meta->>'plan_id' = p2::text));
+    -- 10. the free count is untouched by charged plans; the Wallet read names the price
+    PERFORM set_config('request.jwt.claim.sub', v_user::text, true);
+    g := public.get_my_team_wallet(5, NULL);
+    PERFORM set_config('request.jwt.claim.sub', '', true);
+    v_names := array_append(v_names, 'get_my_team_wallet: price 5000, free_left 0'); v_expected := array_append(v_expected, 'price 5000, free_left 0');
+    v_results := array_append(v_results, 'price ' || (g->>'ai_plan_price_paise') || ', free_left ' || (g->>'free_left'));
+    RAISE EXCEPTION 'PROBE_DONE';
+  EXCEPTION WHEN others THEN
+    IF SQLERRM <> 'PROBE_DONE' THEN
+      v_names := array_append(v_names, 'probe stopped'); v_expected := array_append(v_expected, 'ran'); v_results := array_append(v_results, 'could not run: ' || SQLERRM);
+    END IF;
+  END;
+  INSERT INTO plan_charge_probe (step, check_name, expected, result)
+  SELECT n, v_names[n], v_expected[n], v_results[n] FROM generate_subscripts(v_names, 1) AS n;
+END
+$probe$;
+
+INSERT INTO plan_charge_probe (step, check_name, expected, result)
+SELECT 20, 'price constant', '5000', public.team_wallet_ai_plan_price_paise()::text
+UNION ALL
+SELECT 21, 'trigger in place', 'trg_team_wallet_plan_created', (SELECT tgname FROM pg_trigger WHERE tgname = 'trg_team_wallet_plan_created' LIMIT 1)
+UNION ALL
+SELECT 22, 'probe rows left behind', '0', (SELECT count(*)::text FROM public.team_wallet WHERE razorpay->>'order_id' = 'order_probe_plan' OR meta->>'plan_name' = 'Probe plan 1' OR meta->'preview'->>'plan_name' LIKE 'Probe %');
+
+SELECT step, check_name, expected, result FROM plan_charge_probe ORDER BY step;
+```
+
 #### `supabase/functions/_shared/teamWallet.ts`
 
 ```ts
@@ -3332,7 +3944,7 @@ export async function sendTopupReceipt(svc: SupabaseClient, row: any, source: st
     const userId = String(row?.user_id ?? "");
     if (!userId) return;
     const title = `${rupees(Number(row.amount_paise))} added to your wallet`;
-    const body = `Balance ${rupees(Number(row.balance_after_paise ?? 0))}.${row.role === "trainer" ? " Odds AI plans cost Rs 30 to 50 each." : ""}`;
+    const body = `Balance ${rupees(Number(row.balance_after_paise ?? 0))}.${row.role === "trainer" ? " An Odds AI plan costs Rs 50, deducted when you create it." : ""}`;
     const data = { type: "wallet_topup", route: "wallet", tx_id: String(row.id) };
     let r: { success: number; failure: number; errors?: string[] } = { success: 0, failure: 0 };
     try { r = await pushToStaff({ supabase: svc, userId, title, body, data, channelId: "default" }); } catch (e) { r = { success: 0, failure: 1, errors: [String(e)] }; }
@@ -3644,13 +4256,14 @@ Deno.serve(async (req) => {
 // write (QUANTITY, measured on the last 100 plans per modality).
 // Model: PLAN_AI_MODEL secret, else gemini-3.8-flash (owner), falling back to gemini-3.6-flash when
 // Google refuses the name. Docs: docs/features/android/trainer/ai-plan-assistant.md
-// Team Wallet (2 Nov 2026, owner): a TRAINER pays Rs 30 to 50 per draft from their wallet (Rs 30 + Rs 5 per data
-// block the draft read, capped at Rs 50; rule in team_wallet_ai_plan_bill). The preview carries `wallet` (does
-// this user pay, balance, a waiting bill). For a trainer the draft call needs the gate (balance at least Rs 50,
-// no bill waiting: WALLET_FLOOR / WALLET_BILL_PENDING) and, after a successful draft, writes ONE pending
-// team_wallet bill holding the draft and answers { bill, preview } INSTEAD of the draft; the app settles it with
-// wallet-settle-ai-plan (one tap) and only then gets the draft. Admins, super admins and coaches draft free as
-// before. While the wallet migration is not run (functions missing) everyone drafts free.
+// Team Wallet (2 Nov 2026; charging rule final on 3 Nov 2026, owner): GENERATING IS FREE, any number of times. A
+// TRAINER is charged ONCE per plan, a FIXED price (team_wallet_ai_plan_price_paise, Rs 50 for now), when the plan is
+// created: the trigger trg_team_wallet_plan_created on workout_plan_exercises (migration 20261103120000) writes the one
+// wallet row (a free 0-row while the 3 free plans last, free for Essentials, nothing for manual plans). This function
+// writes NOTHING to the wallet: the preview carries `wallet` (the standing: free count, the price, a negative balance)
+// so the Create Plan chooser and the Create Plan button can say what will happen; a draft answers the same figures
+// under `wallet` with charge_at 'plan_create'. Admins, super admins and coaches are never charged. While the wallet
+// migration is not run (functions missing) wallet is null.
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
@@ -3831,12 +4444,11 @@ serve(async (req) => {
     };
     const splits = (Object.keys(SPLITS) as SplitKey[]).map((k) => ({ key: k, label: SPLITS[k].label, sections: SPLITS[k].sections.map((s) => s.name) }));
 
-    // ---- the wallet gate (trainers pay; null while the wallet is not set up on the server) ----
-    // Free drafts (owner, 2 Nov 2026 evening): the first 3 for non-Essentials clients are free, Essentials always free.
-    // Automatic charge (owner, 3 Nov 2026): a billed draft is charged right after it is made (the balance may go
-    // negative, never below minus one plan's price); only a NEGATIVE balance blocks the next one. The gate takes the
-    // client so the chooser can show the exact bill before anything is generated.
-    type WalletGate = { charges: boolean; balance_paise: number; negative: boolean; bill_paise: number | null; free_total: number; free_used: number; free_left: number; essentials: boolean; free_this: boolean; billed: boolean; pending_bill: any; ok: boolean; reason: string | null; line: string | null };
+    // ---- the wallet standing (trainers are charged at plan creation; null while the wallet is not set up) ----
+    // Free plans (owner, 2 Nov 2026 evening): the first 3 for non-Essentials clients are free, Essentials always free.
+    // Since 3 Nov 2026 (owner) the money moves ONCE per plan, at Create Plan, a fixed price (price_paise); generating is
+    // free, so nothing here refuses a draft. The gate takes the client so the chooser can show the standing for it.
+    type WalletGate = { charges: boolean; balance_paise: number; negative: boolean; bill_paise: number | null; price_paise: number | null; charge_at: string; free_total: number; free_used: number; free_left: number; essentials: boolean; free_this: boolean; billed: boolean; pending_bill: any; ok: boolean; reason: string | null; line: string | null };
     let wallet: WalletGate | null = null;
     {
       let { data: g, error: gErr } = await svc.rpc("team_wallet_ai_plan_gate", { p_user: uid, p_essentials: essentials, p_client: clientId });
@@ -3847,6 +4459,7 @@ serve(async (req) => {
         wallet = {
           charges: g.charges === true, balance_paise: Number(g.balance_paise) || 0, negative: g.negative === true || Number(g.balance_paise) < 0,
           bill_paise: g.bill_paise == null ? null : Number(g.bill_paise),
+          price_paise: g.price_paise == null ? null : Number(g.price_paise), charge_at: typeof g.charge_at === "string" ? g.charge_at : "draft",
           free_total: Number(g.free_total) || 0, free_used: Number(g.free_used) || 0, free_left: Number(g.free_left) || 0,
           essentials: g.essentials === true, free_this: g.free_this !== false, billed: g.billed === true,
           pending_bill: g.pending_bill ?? null, ok: g.ok !== false, reason: g.reason ?? null, line: g.line ?? null,
@@ -3859,10 +4472,6 @@ serve(async (req) => {
       return json({ eligible: allowed, allowed, essentials, client_name: clientName, sources, splits, model: MODEL.replace(/^google\//, ""), wallet });
     }
     if (!allowed) return json({ error: "You can only plan for your own or your booked clients." }, 403);
-    if (wallet?.billed && !wallet.ok) {
-      const sentence = wallet.line ?? (wallet.reason === "WALLET_BILL_PENDING" ? "Settle or discard your last draft first." : wallet.reason === "WALLET_NEGATIVE" ? "Your wallet is below zero. Add funds to make the next plan with Odds AI." : "You need at least Rs 50 in your wallet to make an AI plan.");
-      return json({ error: `${wallet.reason ?? "WALLET_FLOOR"}: ${sentence}`, code: wallet.reason, wallet }, 400);
-    }
 
     const split = String(body?.split ?? "") as SplitKey;
     if (!SPLITS[split]) return json({ error: "split must be ppl, upper_lower or bro" }, 400);
@@ -4027,46 +4636,17 @@ ${list}`;
       generated_at: new Date().toISOString(),
     };
     if (!wallet?.charges) return json(answer);
-    const billPreview = { sections: sections.map((s) => s.name), exercise_count: exerciseCount, split_label: SPLITS[split].label };
-
-    // ---- a trainer's free draft (Essentials client, or one of the first 3): recorded as a 0-row, applied at once ----
-    if (wallet.free_this) {
-      const { data: rec, error: recErr } = await svc.rpc("team_wallet_record_free_draft", {
-        p_user: uid, p_client: clientId, p_client_name: clientName, p_essentials: essentials, p_draft_ref: crypto.randomUUID(), p_preview: billPreview,
-      });
-      if (recErr) console.warn(`[ai-plan-draft] free draft not recorded for ${uid}: ${recErr.message}`);
-      const freeLeft = rec && rec.free_left != null ? Number(rec.free_left) : Math.max(0, wallet.free_left - (essentials ? 0 : 1));
-      console.log(`[ai-plan-draft] ${uid} free draft (${essentials ? "Essentials" : `${freeLeft} free left`})`);
-      return json({ ...answer, wallet: { free: true, essentials, free_left: freeLeft, free_total: wallet.free_total } });
-    }
-
-    // ---- a trainer's paid draft: charged right now, the draft lands whatever happens (owner, 3 Nov 2026) ----
-    const { data: charge, error: chargeErr } = await svc.rpc("team_wallet_charge_ai_plan", {
-      p_user: uid, p_client: clientId, p_client_name: clientName, p_draft_ref: crypto.randomUUID(), p_preview: billPreview,
-    });
-    if (chargeErr) {
-      const msg = String(chargeErr.message ?? "");
-      if (/PGRST202|could not find the function/i.test(msg)) {
-        // Migration 20261103110000 not run yet: fall back to the 2 Nov design (the draft held behind a bill).
-        const { data: bill, error: billErr } = await svc.rpc("team_wallet_create_ai_bill", {
-          p_user: uid, p_client: clientId, p_client_name: clientName, p_draft: answer, p_draft_ref: crypto.randomUUID(), p_preview: billPreview,
-        });
-        if (billErr) {
-          const m2 = String(billErr.message ?? "");
-          if (/^WALLET_[A-Z_]+:/.test(m2)) return json({ error: m2, code: m2.split(":")[0] }, m2.startsWith("WALLET_FORBIDDEN") ? 403 : 400);
-          return json({ error: "The wallet could not record the bill. Nothing was charged. Try Generate again." }, 500);
-        }
-        return json({ bill: { tx_id: bill.tx_id, bill_paise: Number(bill.bill_paise), balance_paise: Number(bill.balance_paise), blocks: bill.blocks ?? [] }, preview: billPreview, sources, model: answer.model, generated_at: answer.generated_at });
-      }
-      // The owner's rule: the draft always lands. A refusal here (the balance went negative between the gate and the
-      // draft, or a transient error) is logged and reported with the draft, nothing charged.
-      console.warn(`[ai-plan-draft] wallet charge failed for ${uid}: ${msg}`);
-      return json({ ...answer, wallet: { charged: false, charged_paise: 0, balance_paise: wallet.balance_paise, negative: wallet.negative, error: msg.replace(/^WALLET_[A-Z_]+:\s*/, ""), free_left: wallet.free_left, free_total: wallet.free_total } });
-    }
-    console.log(`[ai-plan-draft] ${uid} charged Rs ${Number(charge?.bill_paise) / 100} (${(charge?.blocks ?? []).join(", ") || "no blocks"}) balance Rs ${Number(charge?.balance_paise) / 100}`);
+    // ---- a trainer: nothing is charged here (owner, 3 Nov 2026: generating is free; the plan's creation charges once,
+    // a fixed price, through the server trigger). The standing travels with the draft so the form can say what
+    // Create Plan will do: free (Essentials, or one of the 3 free plans), or the price.
+    console.log(`[ai-plan-draft] ${uid} draft for a trainer: ${wallet.essentials ? "Essentials, free" : wallet.free_this ? `${wallet.free_left} free left` : `Rs ${Number(wallet.price_paise ?? wallet.bill_paise ?? 0) / 100} at Create Plan`}${wallet.negative ? ", wallet negative" : ""}`);
     return json({
       ...answer,
-      wallet: { charged: true, charged_paise: Number(charge.bill_paise), balance_paise: Number(charge.balance_paise), negative: charge.negative === true, tx_id: charge.tx_id, free_left: 0, free_total: wallet.free_total },
+      wallet: {
+        charged: false, charged_paise: 0, charge_at: "plan_create", price_paise: wallet.price_paise ?? wallet.bill_paise ?? null,
+        balance_paise: wallet.balance_paise, negative: wallet.negative, essentials: wallet.essentials, free_this: wallet.free_this,
+        free_left: wallet.free_left, free_total: wallet.free_total, free: wallet.free_this,
+      },
     });
   } catch (e) {
     console.error("[ai-plan-draft] error:", e);
@@ -4080,9 +4660,11 @@ ${list}`;
 1. `node tests/rules/team_wallet_test.js`, `node tests/rules/wallet_checkout_html_test.js`, `node tests/rules/ai_plan_rules_test.js`: ALL PASS.
 2. Wallet: Rs 0, "No movements yet"; Add money Rs 400 refused in the sheet; Rs 1 opens the Razorpay sheet (test); pay by
    UPI: "Rs 1 added", a PAID row, the push.
-3. As Sagar (trainer): Plan tab > Create Plan: chip "N FREE LEFT"; a free draft lands with no charge line; after the
-   free ones: chip "RS 35" and "Rs 35 from your wallet · balance Rs 0"; Generate for Rs 35 lands the draft and says
-   "Rs 35 deducted. Wallet Rs -35." in red; Wallet shows "Rs -35" red with Add funds; Create Plan again: the popup
-   "Add funds" (Build manually / Add money); Add Rs 500: Wallet Rs 465, the card reads "RS 35 · balance Rs 465".
-4. As an admin: Create Plan shows no chip, drafts free, no wallet line.
-Live on the server 3 Nov 2026 (both migrations, functions deployed, end-to-end tested as Sagar through the same calls).
+3. As Sagar (trainer): Plan tab > Create Plan: chip "N FREE LEFT" or "RS 50"; Generate twice: the Wallet shows no new
+   row; the button reads "Create Plan · Rs 50"; press it: "Rs 50 deducted. Wallet Rs -50." in red, the Wallet shows one
+   "Odds AI plan, <name>" row of - Rs 50 and "Rs -50" with Add funds; Create Plan again: the popup "Add funds"
+   (Build manually / Add money) at the card, and again at the button if a draft is already in the form; Add Rs 500:
+   Wallet Rs 450, the card reads "RS 50 · balance Rs 450"; Save & Resubmit of the plan: no new row; a manual plan: no row.
+4. As an admin: Create Plan shows no chip, drafts free, no wallet line, plain "Create Plan".
+Server: migrations 20261102160000 and 20261103110000 live since 2 and 3 Nov 2026; 20261103120000 (this rule) PGlite-tested
+16 of 16 and handed to the owner to run; ai-plan-draft, wallet-verify-payment and razorpay-webhook redeployed 3 Nov 2026.

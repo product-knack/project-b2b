@@ -19,7 +19,7 @@ import { useDragReorder } from '../lib/useDragReorder';
 import { AiPlanAssistant } from '../components/AiPlanAssistant';
 import { useAiPlanPreview } from '../lib/aiPlanQueries';
 import { draftToBodyParts, shouldFill, draftExerciseCount, aiChoice, planSource, type AiPlanResult, type PlanBuildMode } from '../lib/aiPlanDraft';
-import { walletCardState, aiOptionChip, negativeBalanceLine } from '../lib/teamWallet';
+import { walletCardState, aiOptionChip, negativeBalanceLine, createButtonLabel, createDoneLine } from '../lib/teamWallet';
 import { trackEvent } from '../lib/amplitude';
 
 /* ============ CREATE WORKOUT PLAN ============
@@ -224,7 +224,9 @@ export function CreatePlan() {
   // tap inside the 900 ms window) or unmounting cancels it — an orphaned
   // goBack() used to pop a SECOND screen.
   const navTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const scheduleGoBack = () => { if (navTimer.current) clearTimeout(navTimer.current); navTimer.current = setTimeout(() => goBack(), 900); };
+  const scheduleGoBack = (ms = 900) => { if (navTimer.current) clearTimeout(navTimer.current); navTimer.current = setTimeout(() => goBack(), ms); };
+  // Team Wallet (3 Nov 2026): what the wallet did when an AI plan was saved (shown in the footer before leaving).
+  const [walletDone, setWalletDone] = React.useState<{ text: string; tone: 'red' | 'green' | 'grey' } | null>(null);
   React.useEffect(() => () => { if (navTimer.current) clearTimeout(navTimer.current); }, []);
   const goBack = () => {
     if (navTimer.current) { clearTimeout(navTimer.current); navTimer.current = null; }
@@ -252,9 +254,10 @@ export function CreatePlan() {
   const aiAllowed = !isEdit && aiPreviewQ.data?.allowed === true;
   const [mode, setMode] = React.useState<PlanBuildMode | null>(isEdit ? 'manual' : null);
   const aiPick = aiChoice({ online: isOnline, clientId: selectedClientId, modality, allowed: isEdit ? false : aiPreviewQ.data ? aiPreviewQ.data.allowed : null });
-  // Team Wallet (2 Nov 2026, rule revised 3 Nov 2026): after the 3 free plans a draft is charged automatically once it is
-  // made; the card shows the standing (free count, the exact price and balance, or ADD FUNDS); only a NEGATIVE balance
-  // blocks, with the owner's popup and a button to the Wallet. A balance below the price never blocks.
+  // Team Wallet (2 Nov 2026, rule final 3 Nov 2026): generating is free; after the 3 free plans an AI plan is charged
+  // once, a fixed price (Rs 50), when Create Plan succeeds (the server does it as the rows land). The card shows the
+  // standing (free count, the price and balance, or ADD FUNDS); only a NEGATIVE balance blocks, with the owner's popup
+  // and a button to the Wallet, here and again at the Create Plan button. A balance below the price never blocks.
   const walletCard = walletCardState(aiPreviewQ.data?.wallet ?? null);
   const aiChip = aiOptionChip(aiPreviewQ.data?.wallet ?? null);
   const aiChipColor = aiChip?.tone === 'red' ? C.red : aiChip?.tone === 'amber' ? C.gold : C.green;
@@ -379,6 +382,22 @@ export function CreatePlan() {
       }
       return;
     }
+    // Team Wallet (3 Nov 2026): an AI plan is charged once, a fixed price, by the server when its rows land. Only a
+    // negative balance blocks (the owner's popup); a balance below the price does not.
+    const aiPlan = !!lastAi.current;
+    if (aiPlan && walletCard.state === 'negative') {
+      trackEvent('AI Plan Blocked Negative Wallet', { client_id: selectedClientId, balance_paise: aiPreviewQ.data?.wallet?.balance_paise ?? null, at: 'create' });
+      Alert.alert('Add funds', walletCard.line ?? negativeBalanceLine(aiPreviewQ.data?.wallet?.balance_paise ?? 0), [
+        { text: 'Keep editing', style: 'cancel' },
+        { text: 'Add money', onPress: () => go('wallet') },
+      ]);
+      return;
+    }
+    const finishWallet = (queued: boolean) => {
+      const line = createDoneLine(aiPreviewQ.data?.wallet ?? null, aiPlan, queued);
+      setWalletDone(line);
+      scheduleGoBack(line ? 2200 : 900);
+    };
     // planId is generated on-device so an offline retry can never duplicate the plan.
     const input: WorkoutPlanCreateInput = {
       trainerId,
@@ -403,7 +422,7 @@ export function CreatePlan() {
       await enqueueOutbox('create-plan', `${planName.trim()} · ${clientName}`, input);
       setSavedOffline(true);
       setDone(true);
-      scheduleGoBack();
+      finishWallet(true);
     };
     if (!getIsOnline()) {
       await finishOffline();
@@ -412,7 +431,7 @@ export function CreatePlan() {
     try {
       await createM.mutateAsync(input);
       setDone(true);
-      scheduleGoBack();
+      finishWallet(false);
     } catch (e: any) {
       if (/network request failed|network error|failed to fetch|fetch failed|timeout/i.test(String(e?.message))) {
         await finishOffline();
@@ -937,7 +956,12 @@ export function CreatePlan() {
 
       {/* Sticky footer */}
       <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 18, paddingTop: 12, paddingBottom: insets.bottom + 14, backgroundColor: 'rgba(8,6,6,0.96)', borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)' }}>
-        {missingHint ? (
+        {done && walletDone ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 9 }}>
+            <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: walletDone.tone === 'red' ? C.red : walletDone.tone === 'green' ? C.green : C.gold }} />
+            <Body style={{ flex: 1, fontSize: 11.5, color: walletDone.tone === 'red' ? '#FF9B8F' : walletDone.tone === 'green' ? C.green : C.muted2 }}>{walletDone.text}</Body>
+          </View>
+        ) : missingHint ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 9 }}>
             <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: C.gold }} />
             <Body style={{ flex: 1, fontSize: 11.5, color: C.muted2 }}>{missingHint}</Body>
@@ -962,7 +986,7 @@ export function CreatePlan() {
               <Text style={{ fontFamily: F.bodyBold, fontSize: 14.5, color: '#fff' }}>
                 {busy ? (isEdit ? 'Saving…' : 'Creating…')
                   : done ? (savedOffline ? 'Saved on device ✓' : isEdit ? 'Resubmitted for review!' : 'Sent for review!')
-                  : isEdit ? 'Save & Resubmit' : 'Create Plan'}
+                  : isEdit ? 'Save & Resubmit' : createButtonLabel(aiPreviewQ.data?.wallet ?? null, aiApplied)}
               </Text>
             </LinearGradient>
           </Pressable>

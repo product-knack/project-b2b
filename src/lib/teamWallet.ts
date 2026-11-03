@@ -1,14 +1,18 @@
 /* Team Wallet rules (2 Nov 2026). Pure: no React, no network; tested in node (tests/rules/team_wallet_test.js) and
-   copied byte for byte to iOS. The server (hub-track migration 20261102160000) holds every limit; these are the
-   same numbers for the sheet's live hints and the copy of every row, chip and bill line.
-   Owner: Rs 500 minimum, Rs 5,000 per person per IST day, the Odds AI plan costs Rs 30 to 50 (trainers only),
-   shown after the draft, one tap Deduct from wallet. Plan: docs/team-wallet-plan.md. */
+   copied byte for byte to iOS. The server (hub-track migrations 20261102160000 to 20261103120000) holds every limit;
+   these are the same numbers for the sheet's live hints and the copy of every row, chip and line.
+   Owner: Rs 500 minimum, Rs 5,000 per person per IST day. The Odds AI plan (trainers only), final rule 3 Nov 2026:
+   generating is free any number of times; ONE fixed charge (Rs 50, the server constant wins) when the plan is
+   created, the first 3 plans free, Essentials free, manual plans free; only a negative balance blocks.
+   Plans: docs/team-wallet-plan.md, docs/ai-plan-charge-on-create-plan.md. */
 
 export const MIN_TOPUP_PAISE = 50000;
 /** Exactly Rs 1 is accepted as a test top-up (owner, 2 Nov 2026, while the wallet is being tested). */
 export const TEST_TOPUP_PAISE = 100;
 export const DAILY_CAP_PAISE = 500000;
 export const AI_FLOOR_PAISE = 5000;
+/** The fixed price of an Odds AI plan (3 Nov 2026); the server's price_paise replaces it when present. */
+export const AI_PLAN_PRICE_PAISE = 5000;
 export const TOPUP_PICKS = [50000, 100000, 200000, 500000] as const;
 export const TOPUP_EXPIRY_MS = 30 * 60_000;
 export const BILL_EXPIRY_MS = 24 * 60 * 60_000;
@@ -39,6 +43,8 @@ export type TeamWalletRead = {
   /** 3 Nov 2026: the balance is below zero (an AI plan took it there); the owner's sentence for the screen. */
   negative: boolean;
   negative_line: string | null;
+  /** The fixed price of an Odds AI plan, charged once when the plan is created (3 Nov 2026). */
+  ai_plan_price_paise: number;
   charges_ai: boolean;
   free_total: number;
   free_used: number;
@@ -47,12 +53,14 @@ export type TeamWalletRead = {
   rows: WalletRow[];
 };
 /** What ai-plan-draft's preview says about the caller's wallet (null while the wallet is not on the server).
-    Free drafts (owner, 2 Nov 2026): a trainer's first 3 AI plans for non-Essentials clients are free (free_left), an
-    Essentials client is always free; free_this = this draft costs nothing, billed = the bill sheet will follow. */
+    Free plans (owner, 2 Nov 2026): a trainer's first 3 AI plans for non-Essentials clients are free (free_left), an
+    Essentials client is always free; free_this = this plan costs nothing, billed = the plan will be charged. */
 export type WalletGate = {
   charges: boolean; balance_paise: number; floor_paise: number;
-  /** 3 Nov 2026: the balance is below zero (only this blocks a paid draft), and the exact bill for the client asked about. */
+  /** 3 Nov 2026: the balance is below zero (only this blocks), the price (bill_paise = the same fixed figure). */
   negative: boolean; bill_paise: number | null; line: string | null;
+  /** 3 Nov 2026 (final): the fixed price and when the money moves ('plan_create' = once, when Create Plan succeeds). */
+  price_paise: number; charge_at: 'plan_create' | 'draft';
   free_total: number; free_used: number; free_left: number; essentials: boolean; free_this: boolean; billed: boolean;
   pending_bill: PendingBill | null; ok: boolean; reason: 'WALLET_FLOOR' | 'WALLET_BILL_PENDING' | 'WALLET_NEGATIVE' | null;
 };
@@ -129,6 +137,7 @@ export const parseWalletRead = (d: any): TeamWalletRead => ({
   ai_floor_paise: num(d?.ai_floor_paise, 0),
   negative: d?.negative === true || num(d?.balance_paise) < 0,
   negative_line: d?.negative_line ? String(d.negative_line) : num(d?.balance_paise) < 0 ? negativeBalanceLine(num(d?.balance_paise)) : null,
+  ai_plan_price_paise: num(d?.ai_plan_price_paise, AI_PLAN_PRICE_PAISE) || AI_PLAN_PRICE_PAISE,
   charges_ai: d?.charges_ai === true,
   free_total: num(d?.free_total, FREE_DRAFTS),
   free_used: num(d?.free_used),
@@ -144,9 +153,11 @@ export const parseWalletGate = (w: any): WalletGate | null => {
   const essentials = w.essentials === true;
   const free_this = typeof w.free_this === 'boolean' ? w.free_this : !charges || essentials || free_left > 0;
   const balance_paise = num(w.balance_paise);
+  const price_paise = num(w.price_paise, 0) > 0 ? num(w.price_paise) : num(w.bill_paise, 0) > 0 ? num(w.bill_paise) : AI_PLAN_PRICE_PAISE;
   return {
     charges, balance_paise, floor_paise: num(w.floor_paise, 0),
     negative: w.negative === true || balance_paise < 0, bill_paise: w.bill_paise == null ? null : num(w.bill_paise), line: w.line == null ? null : String(w.line),
+    price_paise, charge_at: w.charge_at === 'draft' ? 'draft' : 'plan_create',
     free_total: num(w.free_total, FREE_DRAFTS), free_used: num(w.free_used), free_left, essentials, free_this,
     billed: typeof w.billed === 'boolean' ? w.billed : charges && !free_this,
     pending_bill: parsePendingBill(w.pending_bill), ok: w.ok !== false && !reason, reason,
@@ -256,30 +267,53 @@ export const freeLeftLine = (n: number): string => `${n} free AI plan${n === 1 ?
 export const balanceText = (paise: number): string => (num(paise) < 0 ? `Rs -${rupees(-num(paise)).slice(3)}` : rupees(paise));
 /** The owner's sentence for a wallet below zero (3 Nov 2026). */
 export const negativeBalanceLine = (balancePaise: number): string => `Your wallet is at ${balanceText(balancePaise)}. Add funds to make the next plan with Odds AI.`;
-/** The Create Plan AI card: what the wallet allows and the line to show. Since 3 Nov 2026 only a negative balance
-    blocks; a balance below the price does not (the plan is charged after the draft and may take the wallet negative). */
+/** The price the gate names (the server's constant; the local figure only while the server does not say). */
+export const planPrice = (w: WalletGate | null | undefined): number => (w && w.price_paise > 0 ? w.price_paise : AI_PLAN_PRICE_PAISE);
+/** The Create Plan AI card: what the wallet allows and the line to show. Only a negative balance blocks (3 Nov 2026);
+    a balance below the price does not. The money moves once, when the plan is created (rule final 3 Nov 2026). */
 export const walletCardState = (w: WalletGate | null | undefined): { state: WalletCardState; line: string | null; action: 'wallet' | 'bill' | null } => {
   if (!w) return { state: 'unknown', line: null, action: null };
   if (!w.charges) return { state: 'free', line: null, action: null };
   if (w.essentials) return { state: 'essentials', line: 'Free for Essentials clients.', action: null };
-  if (w.free_left > 0) return { state: 'free_left', line: `${freeLeftLine(w.free_left)}. After that Rs 30 to 50 a plan from your wallet.`, action: null };
+  if (w.free_left > 0) return { state: 'free_left', line: `${freeLeftLine(w.free_left)}, then ${rupees(planPrice(w))} a plan from your wallet when you create it.`, action: null };
   if (w.pending_bill) return { state: 'bill_pending', line: 'Settle or discard your last draft first.', action: 'bill' };
   if (w.negative) return { state: 'negative', line: w.line ?? negativeBalanceLine(w.balance_paise), action: 'wallet' };
-  const price = w.bill_paise != null ? rupees(w.bill_paise) : 'Rs 30 to 50';
-  return { state: 'ok', line: `${price} from your wallet · balance ${balanceText(w.balance_paise)}`, action: null };
+  return { state: 'ok', line: `${rupees(planPrice(w))} from your wallet when you create the plan · balance ${balanceText(w.balance_paise)}`, action: null };
 };
-/** The chooser card's chip (3 Nov 2026): "2 FREE LEFT" / "FREE FOR ESSENTIALS" / "RS 33" / "ADD FUNDS". */
+/** The chooser card's chip (3 Nov 2026): "2 FREE LEFT" / "FREE FOR ESSENTIALS" / "RS 50" / "ADD FUNDS". */
 export const aiOptionChip = (w: WalletGate | null | undefined): { text: string; tone: Tone } | null => {
   if (!w || !w.charges) return null;
   if (w.essentials) return { text: 'FREE FOR ESSENTIALS', tone: 'green' };
   if (w.free_left > 0) return { text: `${w.free_left} FREE LEFT`, tone: 'green' };
   if (w.pending_bill) return { text: 'BILL WAITING', tone: 'amber' };
   if (w.negative) return { text: 'ADD FUNDS', tone: 'red' };
-  return { text: w.bill_paise != null ? rupees(w.bill_paise).toUpperCase() : 'RS 30 TO 50', tone: 'amber' };
+  return { text: rupees(planPrice(w)).toUpperCase(), tone: 'amber' };
 };
-/** After a charged draft: "Rs 33 deducted. Wallet Rs -5." (red when negative). */
+/** "Rs 50 deducted. Wallet Rs 417." (red when negative). */
 export const afterChargeLine = (chargedPaise: number, balancePaise: number): { text: string; tone: 'red' | 'green' } =>
   chargedPaise > 0 ? { text: `${rupees(chargedPaise)} deducted. Wallet ${balanceText(balancePaise)}.`, tone: balancePaise < 0 ? 'red' : 'green' } : { text: `Wallet ${balanceText(balancePaise)}.`, tone: balancePaise < 0 ? 'red' : 'green' };
+/** The assistant panel's hint under Generate (generating is free; what Create Plan will do). Null when nothing is charged. */
+export const generateHint = (w: WalletGate | null | undefined): string | null => {
+  if (!w || !w.charges) return null;
+  if (w.essentials) return 'Generating is free. Essentials plans are free.';
+  if (w.free_left > 0) return `Generating is free. This plan uses 1 of your ${w.free_left} free AI plan${w.free_left === 1 ? '' : 's'}.`;
+  return `Generating is free. ${rupees(planPrice(w))} is deducted once, when you tap Create Plan.`;
+};
+/** The Create Plan button for an AI plan: "Create Plan · Rs 50" / "Create Plan · free"; plain for manual plans and free roles. */
+export const createButtonLabel = (w: WalletGate | null | undefined, aiPlan: boolean): string => {
+  if (!aiPlan || !w || !w.charges) return 'Create Plan';
+  if (w.essentials || w.free_left > 0) return 'Create Plan · free';
+  return `Create Plan · ${rupees(planPrice(w))}`;
+};
+/** The line after an AI plan is saved: what the wallet did (the server charged inside the save; the phone knows the
+    price and the last balance). queued = saved on the device, the charge lands with the sync. */
+export const createDoneLine = (w: WalletGate | null | undefined, aiPlan: boolean, queued: boolean): { text: string; tone: 'red' | 'green' | 'grey' } | null => {
+  if (!aiPlan || !w || !w.charges) return null;
+  if (w.essentials) return { text: 'Free for Essentials clients. Nothing deducted.', tone: 'green' };
+  if (w.free_left > 0) return { text: `Free AI plan used. ${freeLeftLine(w.free_left - 1)}.`, tone: 'green' };
+  if (queued) return { text: `${rupees(planPrice(w))} will be deducted when it syncs.`, tone: 'grey' };
+  return afterChargeLine(planPrice(w), w.balance_paise - planPrice(w));
+};
 
 /** The sentence after "WALLET_CODE:" of a server refusal, else null. */
 export const codedWalletSentence = (e: unknown): string | null => {

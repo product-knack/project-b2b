@@ -119,8 +119,13 @@ export const parseAiPlanResult = (d: any): AiPlanResult => {
     sources: d.sources ?? null,
     model: String(d.model ?? ''),
     generated_at: String(d.generated_at ?? new Date().toISOString()),
-    // 3 Nov 2026: the charge made for this draft (free drafts answer charged false with the free count left)
-    wallet: w ? { charged: w.charged === true, charged_paise: Number(w.charged_paise) || 0, balance_paise: Number(w.balance_paise) || 0, negative: w.negative === true, free_left: w.free_left == null ? null : Number(w.free_left), error: w.error ? String(w.error) : null } : null,
+    // 3 Nov 2026 (final rule): the standing for this plan; charge_at 'plan_create' = nothing charged for the draft
+    wallet: w ? {
+      charged: w.charged === true, charged_paise: Number(w.charged_paise) || 0,
+      charge_at: w.charge_at === 'draft' ? 'draft' : 'plan_create', price_paise: w.price_paise == null ? null : Number(w.price_paise),
+      balance_paise: Number(w.balance_paise) || 0, negative: w.negative === true, essentials: w.essentials === true,
+      free_this: w.free_this === true || w.free === true, free_left: w.free_left == null ? null : Number(w.free_left), error: w.error ? String(w.error) : null,
+    } : null,
   };
 };
 /** Deduct from wallet: the bill becomes paid and the held draft comes back. */
