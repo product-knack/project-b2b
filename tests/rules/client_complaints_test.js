@@ -56,7 +56,7 @@ eq('report handled line: new', X.reportHandledLine({ status: 'new', staff: null 
 eq('source labels', [X.sourceLabel('session_code'), X.sourceLabel('home'), X.sourceLabel('profile'), X.sourceLabel('page'), X.sourceLabel('x')], ['SESSION CODE', 'HOME', 'PROFILE', 'PAGE', 'APP']);
 eq('role chips', [X.roleChip('trainer'), X.roleChip('doctor'), X.roleChip('therapist'), X.roleChip(null)], ['TRAINER', 'DOCTOR', 'THERAPIST', 'EXPERT']);
 eq('empty lines', [X.emptyLine('logs', false, 'open'), X.emptyLine('logs', true, 'open'), X.emptyLine('logs', false, 'handled'), X.emptyLine('reports', true, 'open')],
-  ['No flagged logs about your team. Nothing flagged since 21 Oct 2026.', 'No flagged logs. Nothing flagged since 21 Oct 2026.', 'No handled flags yet.', 'No reports.']);
+  ['No flagged logs about your team in the live competition.', 'No flagged logs in the live competition.', 'No handled flags yet.', 'No reports.']);
 
 // 3. filters and counts
 const logs = [log, handled, X.parseInaccurateLog({ ...raw, session_id: 's3', expert: { id: 'e3', name: 'Other', role: 'doctor' }, team_manager: { id: 'm2', name: 'Zed Manager' } })];

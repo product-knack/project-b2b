@@ -19,12 +19,12 @@ the HOD and admins see every team with a manager filter; a report about the view
 
 # Client complaints (android; the server contract is here too)
 
-Status: built 3 Nov 2026 (tsc clean, rule test 46 checks, Android bundle clean); migration 20261104100000 PGlite-tested 21 of 21, the owner runs it; not in a signed build yet · Last verified: 2026-11-03 (rule tests, PGlite; live read-only probes of the two client-app tables) · Sibling file: none yet (web page planned, same RPCs; see section 10)
+Status: built 3 Nov 2026 (tsc clean, rule test 46 checks, Android bundle clean); migration 20261104100000 PGlite-tested 21 of 21 and LIVE 3 Nov 2026 (18 of 18); not in a signed build yet · Last verified: 2026-11-03 (rule tests, PGlite, live read-only RPC check as a manager and the admin) · Sibling file: none yet (web page planned, same RPCs; see section 10)
 
 ## 1. Purpose and access
 - The client app (B2C) lets a client review the expert's log after every training ("Accurately logged" / "Something's off" with issues and a note, since 21 Oct 2026) and report an expert who asked them to train, treat or pay outside Odds (since 14 Oct 2026, "Only Odds management reads your report. We never tell the expert."). This page is where managers read and handle both.
 - Who sees it: the drawer item **Client complaints** (every nav) is shown by `chrome.tsx` when `caps.data.isManager || caps.data.isPhysioHod || dbRole in (admin, super_admin)` (plus the head-doctor id, as the other HOD surfaces). The server rule is `complaint_viewer_kind(uid)`: `all` for admin / super_admin / a `role_specialization` containing `physio_hod` (today Anjana Odds, `Anjanarawat@oddsfitness.com`, id `30df5c2b…`), `manager` for `profiles.managers`, nothing for anyone else (`COMPLAINT_FORBIDDEN`).
-- A manager sees the complaints about the members of their current teams (ongoing `manager_score` rows, else the latest batch; the manager included). The HOD and admins see every team with a manager filter. **A report about the viewer is never returned to them**, even to a manager who is the reported expert.
+- A manager sees the complaints about the members of their LIVE competition teams (ongoing `manager_score` rows only; the manager included), dated inside that competition. The HOD and admins see every team with a manager filter. **A report about the viewer is never returned to them**, even to a manager who is the reported expert.
 - Test accounts: Sagar (a manager with a team) for the team view; the admin account for the all-teams view. No HOD password.
 
 ## 2. Entry points
@@ -34,12 +34,12 @@ Status: built 3 Nov 2026 (tsc clean, rule test 46 checks, Android bundle clean);
 - Files: `src/components/ClientComplaintsPanel.tsx` (segments, status chips, the two cards, the Mark handled sheet, the report status sheet), `src/lib/clientComplaintsQueries.ts` (the three reads and three writes), `src/lib/clientComplaints.ts` (pure rules; test `tests/rules/client_complaints_test.js`), `src/lib/approvalRequests.ts` (`codedSentence` reads `COMPLAINT_` codes), hub-track migration `20261104100000_client_complaints.sql`.
 
 ## 3. UI map
-- Title "Client complaints", sub "Inaccurate logs and reports about your team" / "... about every team". A grey note: "Clients review every log after a training and can report an expert who asked them to go outside Odds. Reports are never shown to the expert."
+- Title "Client complaints", sub "Inaccurate logs and reports about your team in the live competition" / "... about every team in the live competition". A grey note: "Clients review every log after a training and can report an expert who asked them to go outside Odds. Reports are never shown to the expert."
 - All-teams viewers: a chip row **All managers**, one chip per manager seen in the rows (first name), **No team** (experts in no current team, reports the client could not match). A manager on several teams: **All my teams** + one chip per team (filters on the phone by the team's member ids).
 - Pills **Inaccurate logs** (open count) / **Reports** (open count); status pills **Open** / **Handled** / **All**.
 - Log card: client name; "about <expert>" + role chip (TRAINER / DOCTOR / THERAPIST / COACH); all-teams: "· Team <manager>" or "· No team"; chip OPEN (red) / HANDLED (green); "29 Oct, 2:00 PM · Rehabilitation · Rehab Session"; issue chips EXERCISES / REPS / LOADS / DURATION; the client's note in quotes; "Flagged 2 Nov, 11:47 AM"; **As logged by <first name>** expands to one line per exercise ("Goblet Squat · 3 sets · 12, 12, 10 reps · 20 kg"; duration based "Plank · 2 sets · 40 sec"; loads per set when they differ), else the session notes (rehab logs), else "Nothing was logged for this session."; **Mark handled** → sheet "Mark handled / <client> about <expert>": toggle "The log was corrected", note (500), Save; handled: "Handled by Priyanshu, 3 Nov · log corrected · <note>" with **Reopen** (confirm alert).
 - Report card (violet): client name; "reported <expert>" + role chip, or the typed name with UNMATCHED; team line for all-teams; status chip NEW (red) / IN REVIEW (amber) / CONFIRMED, MONTH FREE (green) / DISMISSED (grey); source chip SESSION CODE / HOME / PROFILE / PAGE and "Session code line of 28 Oct, 6:00 PM · Strength" when linked; the note in quotes or "No note from the client."; "Reported 1 Nov, 9:12 PM"; lock line "Never shown to the expert. Only management reads this."; the handled line; button **Review** / **Decide** / **Change status** → sheet "Report status" with radio Start review / Confirm (month free) ("The free month is credited by billing, not here.") / Dismiss, a note, Save, "Reopen as new".
-- Empty: "No flagged logs about your team. Nothing flagged since 21 Oct 2026." / "No flagged logs. ..." (all teams) / "No handled flags yet." / "No reports." / "No handled reports yet." Offline: the cached lists, the sheets refuse with "No connection ...".
+- Empty: "No flagged logs about your team in the live competition." / "No flagged logs in the live competition." (all teams) / "No handled flags yet." / "No reports." / "No handled reports yet." Offline: the cached lists, the sheets refuse with "No connection ...".
 
 ## 4. Data model
 - Reads only through the RPCs (no table reads from the app). `training_sessions.log_review` jsonb `{verdict, at, issues[], note}` + the staff keys this page adds `{staff_reviewed_at, staff_reviewed_by, staff_note, log_fixed}` (the client's four keys are never changed; the B2C check constraint allows extra keys). `specialist_reports` + three columns added by the migration: `handled_by uuid, handled_at timestamptz, staff_note text`; `status` text `new | in_review | confirmed | dismissed` (validated in the RPC, no new constraint on the B2C table).
@@ -50,7 +50,8 @@ Every function SECURITY DEFINER; refusals `COMPLAINT_SIGN_IN` / `COMPLAINT_FORBI
 | function | who | does |
 |---|---|---|
 | `complaint_viewer_kind(user)` | internal | `all` / `manager` / NULL |
-| `complaint_current_teams()` | internal | (team_id, team_name, manager_id, member_id, is_manager) for the ongoing teams, else the latest batch |
+| `complaint_current_teams()` | internal | (team_id, team_name, manager_id, member_id, is_manager, team_start, team_end) for the ONGOING teams only (since 20261104110000) |
+| `complaint_in_window(at, start, end)` | internal | the complaint's moment falls inside the team's competition (IST days); no dates = no window |
 | `complaint_scope(viewer, manager)` | internal | the (expert_id, manager_id) pairs the viewer may see; `manager` = narrow an all-teams viewer; the zero uuid = experts in no current team |
 | `get_inaccurate_logs(p_status open\|handled\|all, p_manager, p_limit)` jsonb | authenticated | rows `{session_id, scheduled_at, session_type, session_name, expert{id,name,role}, team_manager{id,name}\|null, client{id,name}, issues[], note, at, staff{reviewed_at, reviewed_by, reviewed_by_name, note, log_fixed}\|null, logged[{exercise, sets, reps[], loads[], duration_seconds, notes}], session_notes}` newest `at` first; `logged` = `workout_exercises` where `session_id = training_sessions.workout_session_id`, grouped by exercise (rows of one save share `created_at`, so alphabetical within a save) |
 | `get_specialist_reports(p_status, p_manager, p_limit)` jsonb | authenticated | rows `{id, created_at, source, client, expert\|null, trainer_name, team_manager\|null, session{id, at, modality}\|null, note, status, staff{handled_at, handled_by, handled_by_name, note}\|null}`; never `trainer_id = auth.uid()`; unmatched only for `all` viewers under all / no team |
@@ -65,7 +66,8 @@ Every function SECURITY DEFINER; refusals `COMPLAINT_SIGN_IN` / `COMPLAINT_FORBI
 
 ## 6. Business rules
 - Open log = no `staff_reviewed_at`; open report = status new or in_review. Handled = the rest.
-- Scope by the CURRENT teams only (ongoing else latest batch, the same rule as My Crew); an expert in two teams shows for both managers; marking by one shows for both.
+- **Live competition only (owner, 3 Nov 2026, later)**: `complaint_current_teams()` returns the ONGOING `manager_score` rows only (`team_start <= today <= team_end`, IST), no fallback to the last finished batch: a manager whose team is over sees nothing. Every list and count keeps only the complaints dated inside the live competition of the expert's team (`complaint_in_window(at, team_start, team_end)`: the client's `log_review.at` for a flag, `created_at` for a report, IST days); the flag push follows the same window. Experts in no live team ("No team", all-teams viewers only) and unmatched reports keep no window. Migration `20261104110000_client_complaints_live_only.sql`.
+- An expert in two live teams shows for both managers; marking by one shows for both.
 - The team chip on the phone filters by member ids of that team; the manager chips of an all-teams viewer re-query the server with `p_manager` (chips are built from the unfiltered lists so none disappears).
 - Dates in IST ("29 Oct, 2:00 PM"). The push and the lists use `log_review.at` (the client's time), not the arrival time (offline outbox).
 - Confirming a report records our status only; the free month is a billing step outside this page.
@@ -85,6 +87,8 @@ Every function SECURITY DEFINER; refusals `COMPLAINT_SIGN_IN` / `COMPLAINT_FORBI
 - Phone: as Sagar (manager) the drawer shows Client complaints; the page lists the flags about his team only; Mark handled → the card greys with the line; Reopen → back to Open. As the admin: every team, the manager chips, "No team". A trainer who is no manager has no drawer item and the route answers "Manager access required".
 
 ## 10. Change log
+- 2026-11-03 (later): live competition only (owner): ongoing teams, no fallback batch, complaints dated inside the competition, the push too; migration `20261104110000` (PGlite, the owner runs it); page sub and empty lines say "in the live competition".
+- 2026-11-03 (live): Live 3 Nov 2026: migration 20261104100000 ran (18 of 18 probe rows). Read-only RPC check through the same calls the screen makes: Sagar (a manager) gets counts {manager, 0 flags, 1 report} and the one report about a member of his team; the admin gets all 3 flags (two about Jyoti Sharma, rehab, no exercise rows so the session notes travel as the log; one about aarti Gupta, 6 logged exercises) and the 1 report, all under team Aastha; the manager filter returns the same 3, "No team" 0; no trainer-visible leak (the reports table stays closed).
 - 2026-11-03: built (owner's plan `odds-app/docs/client-complaints-plan.md`; revised the same day to an individual page). Migration `20261104100000` PGlite 21 of 21, handed to the owner; rules + 46 checks; queries; panel; screen; drawer in every nav; Managers Overview link; push route; `COMPLAINT_` codes. Web page not built yet (same RPCs; `/trainer/client-complaints` planned). iOS handoff `odds-app/docs/ios-client-complaints-handoff.md` (card 15).
 
 ## 2. Code (generated from the Android tree)
@@ -278,8 +282,8 @@ export const reportSessionLine = (r: Pick<SpecialistReport, 'session' | 'source'
   return [`${lead} ${fmtWhen(r.session.at)}`.trim(), modalityLabel(r.session.modality)].filter(Boolean).join(' · ');
 };
 export const REPORT_PRIVACY_LINE = 'Never shown to the expert. Only management reads this.';
-export const EMPTY_LOGS_TEAM = 'No flagged logs about your team. Nothing flagged since 21 Oct 2026.';
-export const EMPTY_LOGS_ALL = 'No flagged logs. Nothing flagged since 21 Oct 2026.';
+export const EMPTY_LOGS_TEAM = 'No flagged logs about your team in the live competition.';
+export const EMPTY_LOGS_ALL = 'No flagged logs in the live competition.';
 export const EMPTY_REPORTS = 'No reports.';
 export const emptyLine = (kind: ComplaintKind, allTeams: boolean, status: ComplaintStatusFilter): string => {
   if (kind === 'reports') return status === 'handled' ? 'No handled reports yet.' : EMPTY_REPORTS;
@@ -380,7 +384,7 @@ eq('report handled line: new', X.reportHandledLine({ status: 'new', staff: null 
 eq('source labels', [X.sourceLabel('session_code'), X.sourceLabel('home'), X.sourceLabel('profile'), X.sourceLabel('page'), X.sourceLabel('x')], ['SESSION CODE', 'HOME', 'PROFILE', 'PAGE', 'APP']);
 eq('role chips', [X.roleChip('trainer'), X.roleChip('doctor'), X.roleChip('therapist'), X.roleChip(null)], ['TRAINER', 'DOCTOR', 'THERAPIST', 'EXPERT']);
 eq('empty lines', [X.emptyLine('logs', false, 'open'), X.emptyLine('logs', true, 'open'), X.emptyLine('logs', false, 'handled'), X.emptyLine('reports', true, 'open')],
-  ['No flagged logs about your team. Nothing flagged since 21 Oct 2026.', 'No flagged logs. Nothing flagged since 21 Oct 2026.', 'No handled flags yet.', 'No reports.']);
+  ['No flagged logs about your team in the live competition.', 'No flagged logs in the live competition.', 'No handled flags yet.', 'No reports.']);
 
 // 3. filters and counts
 const logs = [log, handled, X.parseInaccurateLog({ ...raw, session_id: 's3', expert: { id: 'e3', name: 'Other', role: 'doctor' }, team_manager: { id: 'm2', name: 'Zed Manager' } })];
@@ -896,7 +900,7 @@ export function ClientComplaints() {
   }
   return (
     <Page gap={14} pt={6}>
-      <TitleBlock title="Client complaints" sub={allTeams ? 'Inaccurate logs and reports about every team' : 'Inaccurate logs and reports about your team'} />
+      <TitleBlock title="Client complaints" sub={allTeams ? 'Inaccurate logs and reports about every team in the live competition' : 'Inaccurate logs and reports about your team in the live competition'} />
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 14, backgroundColor: 'rgba(0,0,0,0.25)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' }}>
         <Icon name="alert" size={15} color={C.gold} strokeWidth={2.1} />
         <Body style={{ flex: 1, fontSize: 11.5, color: C.ink3, lineHeight: 16 }}>Clients review every log after a training and can report an expert who asked them to go outside Odds. Reports are never shown to the expert.</Body>
@@ -938,251 +942,7 @@ export function ClientComplaints() {
 Route + SENSITIVE_ROUTES, the drawer item after Wallet in every nav, the drawer gate, the push route, the `COMPLAINT_` code prefix, the Managers Overview header link.
 
 ```diff
-diff --git a/src/Router.tsx b/src/Router.tsx
-index 53af08b..565ae3e 100644
---- a/src/Router.tsx
-+++ b/src/Router.tsx
-@@ -24,8 +24,9 @@ import { Incentives } from './screens/incentives';
- import { EssentialsAuction } from './screens/essentialsAuction';
- import { EssentialsManager } from './screens/essentialsManager';
- import { Nucleus, NucleusPiece } from './screens/nucleus';
- import { Wallet } from './screens/wallet';
-+import { ClientComplaints } from './screens/clientComplaints';
- import { QhpNavigation } from './screens/qhpNavigation';
- import { WorkoutAnalyst } from './screens/workoutAnalyst';
- import { Messenger, ChatNotifications } from './screens/messenger';
- import { ClientThreads } from './screens/clientThreads';
-@@ -131,8 +132,9 @@ const SCREENS: Record<string, React.ComponentType> = {
-   nucleus: Nucleus,
-   'nucleus-piece': NucleusPiece,
-   // Team Wallet (2 Nov 2026): every role; money on screen, so it is in SENSITIVE_ROUTES.
-   wallet: Wallet,
-+  'client-complaints': ClientComplaints,
-   'qhp-navigate': QhpNavigation,
-   qhp: Qhp,
-   'qhp-manager': QhpManager,
-   'qhp-stats': QhpStats,
-@@ -285,9 +287,9 @@ const SENSITIVE_ROUTES = new Set([
-   'academy-teacher', 'academy-student',
-   // Chats \u2014 client health details are routinely discussed in messages
-   'messenger', 'client-threads', 'manager-chat',
-   // Team Wallet (2 Nov 2026): balances, payment ids and the Razorpay checkout
--  'wallet',
-+  'wallet', 'client-complaints',
- ]);
- 
- /* Memoised on (route, role): ScreenHost re-renders on every transition frame
-    end, swipe offset reset and store change, and each of those used to re-create
-diff --git a/src/components/PushTokenManager.tsx b/src/components/PushTokenManager.tsx
-index 4f9b5d8..1d2cf66 100644
---- a/src/components/PushTokenManager.tsx
-+++ b/src/components/PushTokenManager.tsx
-@@ -86,8 +86,9 @@ export function PushTokenManager() {
-     if (t === 'qhp_location_missing') { go(dbRoleRef.current === 'ops' ? 'ops-leads' : 'qhp-manager'); return; }
-     if (t === 'qhp_location_added') { go(dbRoleRef.current === 'trainer' ? 'qhp' : homeRouteFor(roleRef.current)); return; }
-     // Team Wallet (2 Nov 2026): the top-up receipt opens the Wallet screen.
-     if (t === 'wallet_topup' || data.route === 'wallet') { go('wallet'); return; }
-+    if (t === 'client_complaint' || data.route === 'client-complaints') { go('client-complaints'); return; } // a flagged log or a client report (3 Nov 2026)
-     // 7 PM team-flags push → straight into the manager chat.
-     if (t === 'manager_team_flags' || data.route === 'manager-chat') { go('manager-chat'); return; }
-     // Anything else that names a route/session (unknown web routes included) → home.
-     // plan_expiry lands on the trainer's home too: the roster cards there carry the
-diff --git a/src/components/chrome.tsx b/src/components/chrome.tsx
-index ec70f39..6d6a347 100644
---- a/src/components/chrome.tsx
-+++ b/src/components/chrome.tsx
-@@ -202,8 +202,10 @@ export function Drawer() {
-     // B2C Reports \u2014 originally one hardcoded profile (Rajat Sharma). The Academy
-     // workspace links it too, so academy/admin accounts also see it.
-     if (it.route === 'b2c-reports') return session?.user?.id === '196ec824-a093-4944-ae3d-3c4919ebf0df' || role === 'academy' || role === 'admin';
-     if (it.route === 'mgr-dash' || it.label === 'Managers Overview' || it.label === 'QHP Overview') return caps.data.isManager;
-+    // Client complaints (3 Nov 2026): managers (their teams), the physio HOD and admins (every team), the server rule complaint_viewer_kind
-+    if (it.route === 'client-complaints') return caps.data.isManager || caps.data.isPhysioHod || dbRole === 'admin' || dbRole === 'super_admin' || session?.user?.id === '30df5c2b-0f40-4736-9f41-7cbc830a191a';
-     if (it.label === 'Trainers Tracker') return caps.data.isTrainerManager;
-     if (it.route === 'crm-esc') return caps.data.isCrmManager; // web: crm_manager spec only
-     if (it.label === 'Trainer Roster') return caps.data.canViewAllTrainers;
-     if (it.route === 'workout-analyst') return caps.data.workoutAnalyst;
-diff --git a/src/data.ts b/src/data.ts
-index 16d9d49..094f9b4 100644
---- a/src/data.ts
-+++ b/src/data.ts
-@@ -310,8 +310,9 @@ export const trainerNav: NavGroup[] = [
-     { label: 'Essentials Auction', icon: 'gavel', route: 'essentials-auction' },
-     { label: 'Essentials Manager', icon: 'gavel', route: 'essentials-manager' },
-     { label: 'Payouts', icon: 'rupee', route: 'payouts' },
-     { label: 'Wallet', icon: 'rupee', route: 'wallet' },
-+    { label: 'Client complaints', icon: 'alert', route: 'client-complaints' },
-     { label: 'Referrals', icon: 'userPlus', route: 'referrals' },
-     { label: 'Incentive', icon: 'gift', route: 'incentives' },
-   ] },
-   { label: 'QHP', items: [
-@@ -342,8 +343,9 @@ export const crmNav: NavGroup[] = [
-     { label: 'Odds AI', icon: 'sparkle', route: 'crm-ai' },
-     { label: 'My Clients', icon: 'users', route: 'crm-clients' },
-     { label: 'Revenue Forecast', icon: 'rupee', route: 'crm-revenue-forecast' },
-     { label: 'Wallet', icon: 'rupee', route: 'wallet' },
-+    { label: 'Client complaints', icon: 'alert', route: 'client-complaints' },
-     { label: 'Messenger', icon: 'chat', route: 'messenger' },
-     { label: 'Client Threads', icon: 'atSign', route: 'client-threads' },
-   ] },
-   { label: 'Client Insights', items: [
-@@ -374,8 +376,9 @@ export const coachNav: NavGroup[] = [
-     { label: 'Dashboard', icon: 'grid', route: 'coach-dashboard' },
-     { label: 'Trainers', icon: 'crown', route: 'coach-trainers' },
-     { label: 'Assessments', icon: 'heart', route: 'coach-assessments' },
-     { label: 'Wallet', icon: 'rupee', route: 'wallet' },
-+    { label: 'Client complaints', icon: 'alert', route: 'client-complaints' },
-   ] },
-   { label: 'Clients', items: [
-     { label: 'My Clients', icon: 'users', route: 'coach-clients' },
-     { label: 'Client Threads', icon: 'atSign', route: 'client-threads' },
-@@ -407,8 +410,9 @@ export const opsNav: NavGroup[] = [
-     { label: 'Dashboard', icon: 'grid', route: 'ops-dashboard' },
-     { label: 'Leads', icon: 'users', route: 'ops-leads' },
-     { label: 'Clients', icon: 'layers', route: 'ops-clients' },
-     { label: 'Wallet', icon: 'rupee', route: 'wallet' },
-+    { label: 'Client complaints', icon: 'alert', route: 'client-complaints' },
-     { label: 'Messenger', icon: 'chat', route: 'messenger' },
-     { label: 'Client Threads', icon: 'atSign', route: 'client-threads' },
-   ] },
-   { label: 'Sales', items: [
-@@ -437,8 +441,9 @@ export const adminNav: NavGroup[] = [
-     { label: 'Clients', icon: 'users', route: 'admin-clients' },
-     { label: 'Renewals', icon: 'swap', route: 'admin-renewals' },
-     { label: 'Revenue Forecast', icon: 'rupee', route: 'admin-revenue-forecast' },
-     { label: 'Wallet', icon: 'rupee', route: 'wallet' },
-+    { label: 'Client complaints', icon: 'alert', route: 'client-complaints' },
-     { label: 'Requests', icon: 'inbox', route: 'admin-requests' },
-     { label: 'Incidents', icon: 'alert', route: 'admin-incidents' },
-     { label: 'Users', icon: 'userCircle', route: 'admin-users' },
-     { label: 'Performance', icon: 'trend', route: 'admin-performance' },
-@@ -464,8 +469,9 @@ export const marketingNav: NavGroup[] = [
-     { label: 'Influencer Clients', icon: 'users', route: 'marketing-clients' },
-     { label: 'Leads', icon: 'userPlus', route: 'marketing-leads' },
-     { label: 'Lead Analytics', icon: 'chart', route: 'marketing-lead-analytics' },
-     { label: 'Wallet', icon: 'rupee', route: 'wallet' },
-+    { label: 'Client complaints', icon: 'alert', route: 'client-complaints' },
-     { label: 'Messenger', icon: 'chat', route: 'messenger' },
-   ] },
-   { label: 'Learn', items: [
-     { label: 'Odds Nucleus', icon: 'nucleus', route: 'nucleus' },
-@@ -487,8 +493,9 @@ export const academyNav: NavGroup[] = [
-     { label: 'Progression', icon: 'chart', route: 'coach-progression' },
-     { label: 'Academy Management', icon: 'award', route: 'academy-management' },
-     { label: 'B2C Reports', icon: 'file', route: 'b2c-reports' },
-     { label: 'Wallet', icon: 'rupee', route: 'wallet' },
-+    { label: 'Client complaints', icon: 'alert', route: 'client-complaints' },
-     { label: 'Messenger', icon: 'chat', route: 'messenger' },
-     { label: 'Client Threads', icon: 'atSign', route: 'client-threads' },
-   ] },
-   { label: 'Learn', items: [
-@@ -513,8 +520,9 @@ export const doctorNav: NavGroup[] = [
-     { label: 'Client Threads', icon: 'atSign', route: 'client-threads' },
-     { label: 'Referrals', icon: 'userPlus', route: 'referrals' },
-     { label: 'Reimbursement', icon: 'rupee', route: 'doctor-reimbursements' },
-     { label: 'Wallet', icon: 'rupee', route: 'wallet' },
-+    { label: 'Client complaints', icon: 'alert', route: 'client-complaints' },
-   ] },
-   { label: 'Head Doctor', items: [
-     { label: 'All Clients', icon: 'layers', route: 'doctor-all-clients' },
-     { label: 'Roster', icon: 'calendar', route: 'doctor-roster' },
-@@ -536,8 +544,9 @@ export const consultantNav: NavGroup[] = [
-   { label: 'Workspace', items: [
-     { label: 'Consultant Dashboard', icon: 'home', route: 'doctor-dashboard' },
-     { label: 'All Calls', icon: 'calendar', route: 'doctor-consultant-calls' },
-     { label: 'Wallet', icon: 'rupee', route: 'wallet' },
-+    { label: 'Client complaints', icon: 'alert', route: 'client-complaints' },
-   ] },
-   { label: 'Learn', items: [
-     { label: 'Odds Nucleus', icon: 'nucleus', route: 'nucleus' },
-   ] },
-@@ -548,8 +557,9 @@ export const therapistNav: NavGroup[] = [
-     { label: 'Dashboard', icon: 'grid', route: 'therapist-dashboard' },
-     { label: 'My Clients', icon: 'users', route: 'therapist-clients' },
-     { label: 'Sessions', icon: 'calendar', route: 'therapist-sessions' },
-     { label: 'Wallet', icon: 'rupee', route: 'wallet' },
-+    { label: 'Client complaints', icon: 'alert', route: 'client-complaints' },
-     { label: 'Messenger', icon: 'chat', route: 'messenger' },
-     { label: 'Client Threads', icon: 'atSign', route: 'client-threads' },
-   ] },
-   { label: 'Learn', items: [
-@@ -564,8 +574,9 @@ export const therapistNav: NavGroup[] = [
- export const essentialManagerNav: NavGroup[] = [
-   { label: 'Workspace', items: [
-     { label: 'Essentials Manager', icon: 'gavel', route: 'essentials-manager' },
-     { label: 'Wallet', icon: 'rupee', route: 'wallet' },
-+    { label: 'Client complaints', icon: 'alert', route: 'client-complaints' },
-   ] },
-   { label: 'Learn', items: [
-     { label: 'Odds Nucleus', icon: 'nucleus', route: 'nucleus' },
-   ] },
-@@ -574,8 +585,9 @@ export const essentialManagerNav: NavGroup[] = [
- export const techNav: NavGroup[] = [
-   { label: 'Workspace', items: [
-     { label: 'Tech Desk', icon: 'activity', route: 'tech-desk-inbox' },
-     { label: 'Wallet', icon: 'rupee', route: 'wallet' },
-+    { label: 'Client complaints', icon: 'alert', route: 'client-complaints' },
-   ] },
-   { label: 'Learn', items: [
-     { label: 'Odds Nucleus', icon: 'nucleus', route: 'nucleus' },
-   ] },
-diff --git a/src/lib/approvalRequests.ts b/src/lib/approvalRequests.ts
-index c6758f9..bae989d 100644
---- a/src/lib/approvalRequests.ts
-+++ b/src/lib/approvalRequests.ts
-@@ -113,9 +113,9 @@ export const sessionCodeStatusLine = (r: ApprovalRequest | null | undefined): {
-     into its generic line; these screens show the server's own sentence first and fall back to friendlyError
-     otherwise. LOCATION_ added 2 Nov 2026 (set_client_brb_location); WALLET_ the same day (Team Wallet). */
- export const codedSentence = (e: unknown): string | null => {
-   const msg = String((e as { message?: unknown } | null)?.message ?? '').trim();
--  const m = msg.match(/^(?:OTP|APPROVAL|LOCATION|WALLET)_[A-Z_]+:\s*(.+)$/s);
-+  const m = msg.match(/^(?:OTP|APPROVAL|LOCATION|WALLET|COMPLAINT)_[A-Z_]+:\s*(.+)$/s);
-   return m && m[1].trim() ? m[1].trim() : null;
- };
- 
- /** Reason / note checks the server also makes (so the button can say why it is not ready). */
-diff --git a/src/screens/trainer.tsx b/src/screens/trainer.tsx
-index 41dab65..8ad9f47 100644
---- a/src/screens/trainer.tsx
-+++ b/src/screens/trainer.tsx
-@@ -56,8 +56,10 @@ import { isPlanLimitError, planLimitText, planBlockedText } from '../lib/planGat
- import { SessionOtpSheet } from '../components/SessionOtpSheet';
- import { ClientThreadsCard } from '../components/clientThreadsCard';
- import { ManagerTeamChatCard } from './managerChat';
- import { istToday, useMyManagerTeam, TRAINER_MODALITIES } from '../lib/managerChatQueries';
-+import { useComplaintCounts } from '../lib/clientComplaintsQueries';
-+import { openLine as complaintsOpenLine } from '../lib/clientComplaints';
- import { useKeyboardHeight } from '../lib/useKeyboardHeight';
- import { ClientLocationSheet, type LocationTarget } from '../components/ClientLocationSheet';
- import { useClientPins } from '../lib/clientLocationQueries';
- import { mapsLinkFor } from '../lib/sharedLocation';
-@@ -12203,9 +12205,10 @@ function MgrMemberRow({ member, rank, metric, value, unit, first, periodStart, p
-   );
- }
- 
- export function Managers() {
--  const { mgrTab, set } = useStore();
-+  const { mgrTab, set, go } = useStore();
-+  const complaintCountsQ = useComplaintCounts(); // the header link to the Client complaints page (3 Nov 2026)
-   const trainerId = useTrainerId();
-   const mgrCaps = useMyCapabilities();
-   const teamQ = useManagerTeam(trainerId);
-   const teams = teamQ.data?.teams ?? [];
-@@ -12302,8 +12305,14 @@ export function Managers() {
-           <Mono style={{ fontSize: 10, letterSpacing: 1, color: C.mono2, textTransform: 'uppercase' }}>{periodLabel}{team.isOngoing ? ' · LIVE' : ''}</Mono>
-           <Serif style={{ fontSize: 18 }}>{team.teamName || 'My Team'}</Serif>
-         </View>
-       </View>
-+      {/* Client complaints (3 Nov 2026): its own page; this is only the way in from the overview */}
-+      <Pressable onPress={() => go('client-complaints')} hitSlop={8} accessibilityRole="button" style={{ flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 10, paddingHorizontal: 13, borderRadius: 13, backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: hexA(C.gold, 0.3) }}>
-+        <Icon name="alert" size={14} color={C.gold} strokeWidth={2.1} />
-+        <Text style={{ flex: 1, fontFamily: F.bodySemi, fontSize: 12.5, color: C.ink }}>Client complaints · {complaintsOpenLine(complaintCountsQ.data)}</Text>
-+        <Icon name="chevRight" size={14} color={C.muted} strokeWidth={2.2} />
-+      </Pressable>
-       {teams.length > 1 ? (
-         <HScroll>
-           {teams.map((t) => {
-             const active = t.id === team.id;
+
 ```
 
 ## 3. Server for reference (nothing to build on iOS)
@@ -1776,6 +1536,319 @@ SELECT 22, 'probe flags left behind', '0', (SELECT count(*)::text FROM public.tr
 SELECT step, check_name, expected, result FROM complaints_probe ORDER BY step;
 ```
 
+#### `supabase/migrations/20261104110000_client_complaints_live_only.sql` (owner, later the same day: the LIVE competition only)
+
+```sql
+-- ============================================================================
+-- Client complaints: the LIVE competition only (3 Nov 2026, owner: "show only the current competition team and its
+-- complaints only, means the live one")
+-- 1. complaint_current_teams(): ongoing manager_score rows only (team_start <= today <= team_end, IST). No fallback
+--    to the last finished batch any more: no live competition = no team = nothing to see for a manager.
+-- 2. complaint_scope() carries the team's dates; get_inaccurate_logs / get_specialist_reports / count_client_complaints
+--    keep only the complaints dated inside the live competition of the expert's team (the client's `at` for a flag,
+--    created_at for a report; IST days). Experts in no live team ("No team", all-teams viewers only) keep no window.
+-- Replaces the functions of 20261104100000 with the same signatures (the two dropped ones grew a column).
+-- ============================================================================
+
+BEGIN;
+
+DROP FUNCTION IF EXISTS public.complaint_scope(uuid, uuid);
+DROP FUNCTION IF EXISTS public.complaint_current_teams();
+
+CREATE OR REPLACE FUNCTION public.complaint_current_teams()
+RETURNS TABLE(team_id uuid, team_name text, manager_id uuid, member_id uuid, is_manager boolean, team_start date, team_end date)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  WITH today AS (SELECT (now() AT TIME ZONE 'Asia/Kolkata')::date AS d),
+  live AS (
+    SELECT ms.* FROM public.manager_score ms, today
+     WHERE ms.team_start <= today.d AND (ms.team_end IS NULL OR ms.team_end >= today.d)
+  )
+  SELECT c.id, c.team_name, c.manager_id, c.manager_id, true, c.team_start, c.team_end FROM live c WHERE c.manager_id IS NOT NULL
+  UNION
+  SELECT c.id, c.team_name, c.manager_id, (m.value #>> '{}')::uuid, false, c.team_start, c.team_end
+    FROM live c, jsonb_array_elements(CASE WHEN jsonb_typeof(c.team_json) = 'array' THEN c.team_json ELSE '[]'::jsonb END) m
+   WHERE (m.value #>> '{}') ~* '^[0-9a-f-]{36}$'
+$$;
+REVOKE ALL ON FUNCTION public.complaint_current_teams() FROM PUBLIC, anon, authenticated;
+
+CREATE OR REPLACE FUNCTION public.complaint_scope(p_viewer uuid, p_manager uuid DEFAULT NULL)
+RETURNS TABLE(expert_id uuid, manager_id uuid, team_start date, team_end date)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_kind text := public.complaint_viewer_kind(p_viewer);
+BEGIN
+  IF v_kind IS NULL THEN RETURN; END IF;
+  IF v_kind = 'manager' THEN
+    RETURN QUERY
+      SELECT DISTINCT t.member_id, t.manager_id, t.team_start, t.team_end FROM public.complaint_current_teams() t
+       WHERE t.team_id IN (SELECT t2.team_id FROM public.complaint_current_teams() t2 WHERE t2.member_id = p_viewer);
+    RETURN;
+  END IF;
+  RETURN QUERY
+    SELECT DISTINCT t.member_id, t.manager_id, t.team_start, t.team_end FROM public.complaint_current_teams() t
+     WHERE p_manager IS NULL OR t.manager_id = p_manager
+    UNION
+    SELECT p.id, NULL::uuid, NULL::date, NULL::date FROM public.profiles p
+     WHERE (p_manager IS NULL OR p_manager = '00000000-0000-0000-0000-000000000000'::uuid)
+       AND p.role::text IN ('trainer', 'doctor', 'therapist', 'coach')
+       AND NOT EXISTS (SELECT 1 FROM public.complaint_current_teams() t WHERE t.member_id = p.id);
+END;
+$$;
+REVOKE ALL ON FUNCTION public.complaint_scope(uuid, uuid) FROM PUBLIC, anon, authenticated;
+
+/** Is a moment inside the team's competition window (IST days)? No team dates = no window. */
+CREATE OR REPLACE FUNCTION public.complaint_in_window(p_at timestamptz, p_start date, p_end date)
+RETURNS boolean LANGUAGE sql IMMUTABLE AS $$
+  SELECT p_at IS NOT NULL
+     AND (p_start IS NULL OR (p_at AT TIME ZONE 'Asia/Kolkata')::date >= p_start)
+     AND (p_end IS NULL OR (p_at AT TIME ZONE 'Asia/Kolkata')::date <= p_end)
+$$;
+
+CREATE OR REPLACE FUNCTION public.get_inaccurate_logs(p_status text DEFAULT 'open', p_manager uuid DEFAULT NULL, p_limit integer DEFAULT 200)
+RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_kind text := public.complaint_viewer_kind(v_uid);
+  v_rows jsonb;
+BEGIN
+  IF v_uid IS NULL THEN RAISE EXCEPTION 'COMPLAINT_SIGN_IN: Sign in to see client complaints.' USING ERRCODE = '42501'; END IF;
+  IF v_kind IS NULL THEN RAISE EXCEPTION 'COMPLAINT_FORBIDDEN: Only managers can see client complaints.' USING ERRCODE = '42501'; END IF;
+  SELECT COALESCE(jsonb_agg(j ORDER BY (j->>'at') DESC NULLS LAST), '[]'::jsonb) INTO v_rows
+  FROM (
+    SELECT jsonb_build_object(
+      'session_id', ts.id,
+      'scheduled_at', ts.scheduled_at,
+      'session_type', ts.session_type,
+      'session_name', ts.session_name,
+      'expert', jsonb_build_object('id', e.id, 'name', public.complaint_name(e.first_name, e.last_name), 'role', e.role::text),
+      'team_manager', CASE WHEN s.manager_id IS NULL THEN NULL ELSE jsonb_build_object('id', m.id, 'name', public.complaint_name(m.first_name, m.last_name)) END,
+      'client', jsonb_build_object('id', ts.client_id, 'name', COALESCE(public.complaint_name(c.first_name, c.last_name), 'Client')),
+      'issues', COALESCE(ts.log_review->'issues', '[]'::jsonb),
+      'note', ts.log_review->>'note',
+      'at', ts.log_review->>'at',
+      'staff', CASE WHEN ts.log_review ? 'staff_reviewed_at' THEN jsonb_build_object(
+                 'reviewed_at', ts.log_review->>'staff_reviewed_at', 'reviewed_by', ts.log_review->>'staff_reviewed_by',
+                 'reviewed_by_name', (SELECT public.complaint_name(h.first_name, h.last_name) FROM public.profiles h WHERE h.id::text = ts.log_review->>'staff_reviewed_by'),
+                 'note', ts.log_review->>'staff_note', 'log_fixed', COALESCE((ts.log_review->>'log_fixed')::boolean, false))
+               ELSE NULL END,
+      'logged', COALESCE((
+        SELECT jsonb_agg(jsonb_build_object('exercise', x.exercise_name, 'sets', x.sets, 'reps', x.reps, 'loads', x.loads,
+                                            'duration_seconds', x.duration_seconds, 'notes', x.notes) ORDER BY x.first_set, x.exercise_name)
+          FROM (SELECT w.exercise_name, count(*) AS sets,
+                       jsonb_agg(w.reps_performed ORDER BY w.set_number) AS reps,
+                       jsonb_agg(w.load_performed ORDER BY w.set_number) AS loads,
+                       max(w.duration_seconds) AS duration_seconds,
+                       max(w.exercise_notes) AS notes,
+                       min(w.created_at) AS first_set
+                  FROM public.workout_exercises w
+                 WHERE ts.workout_session_id IS NOT NULL AND w.session_id = ts.workout_session_id
+                 GROUP BY w.exercise_name) x), '[]'::jsonb),
+      'session_notes', NULLIF(btrim(COALESCE(ts.notes, '')), '')
+    ) AS j
+    FROM public.training_sessions ts
+    JOIN (SELECT DISTINCT ON (sc.expert_id) sc.expert_id, sc.manager_id, sc.team_start, sc.team_end FROM public.complaint_scope(v_uid, p_manager) sc ORDER BY sc.expert_id, sc.manager_id NULLS LAST) s ON s.expert_id = ts.trainer_id
+    LEFT JOIN public.profiles e ON e.id = ts.trainer_id
+    LEFT JOIN public.profiles m ON m.id = s.manager_id
+    LEFT JOIN public.clients c ON c.id = ts.client_id
+    WHERE ts.log_review->>'verdict' = 'inaccurate'
+      AND public.complaint_in_window(COALESCE(NULLIF(ts.log_review->>'at', '')::timestamptz, ts.session_acknowledged_at, ts.created_at), s.team_start, s.team_end)
+      AND (COALESCE(p_status, 'open') = 'all'
+           OR (p_status = 'handled' AND ts.log_review ? 'staff_reviewed_at')
+           OR (COALESCE(p_status, 'open') = 'open' AND NOT (ts.log_review ? 'staff_reviewed_at')))
+    ORDER BY (ts.log_review->>'at') DESC NULLS LAST
+    LIMIT GREATEST(1, LEAST(COALESCE(p_limit, 200), 500))
+  ) q;
+  RETURN v_rows;
+END;
+$$;
+REVOKE ALL ON FUNCTION public.get_inaccurate_logs(text, uuid, integer) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.get_inaccurate_logs(text, uuid, integer) TO authenticated, service_role;
+
+CREATE OR REPLACE FUNCTION public.get_specialist_reports(p_status text DEFAULT 'open', p_manager uuid DEFAULT NULL, p_limit integer DEFAULT 200)
+RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_kind text := public.complaint_viewer_kind(v_uid);
+  v_rows jsonb;
+BEGIN
+  IF v_uid IS NULL THEN RAISE EXCEPTION 'COMPLAINT_SIGN_IN: Sign in to see client complaints.' USING ERRCODE = '42501'; END IF;
+  IF v_kind IS NULL THEN RAISE EXCEPTION 'COMPLAINT_FORBIDDEN: Only managers can see client complaints.' USING ERRCODE = '42501'; END IF;
+  SELECT COALESCE(jsonb_agg(j ORDER BY (j->>'created_at') DESC), '[]'::jsonb) INTO v_rows
+  FROM (
+    SELECT jsonb_build_object(
+      'id', r.id,
+      'created_at', r.created_at,
+      'source', r.source,
+      'client', jsonb_build_object('id', r.client_id, 'name', COALESCE(public.complaint_name(c.first_name, c.last_name), 'Client')),
+      'expert', CASE WHEN e.id IS NULL THEN NULL ELSE jsonb_build_object('id', e.id, 'name', public.complaint_name(e.first_name, e.last_name), 'role', e.role::text) END,
+      'trainer_name', r.trainer_name,
+      'team_manager', CASE WHEN s.manager_id IS NULL THEN NULL ELSE jsonb_build_object('id', m.id, 'name', public.complaint_name(m.first_name, m.last_name)) END,
+      'session', CASE WHEN ss.id IS NULL THEN NULL ELSE jsonb_build_object('id', ss.id, 'at', ss.scheduled_datetime, 'modality', ss.modality) END,
+      'note', r.note,
+      'status', COALESCE(r.status, 'new'),
+      'staff', CASE WHEN r.handled_at IS NULL THEN NULL ELSE jsonb_build_object(
+                 'handled_at', r.handled_at, 'handled_by', r.handled_by,
+                 'handled_by_name', (SELECT public.complaint_name(h.first_name, h.last_name) FROM public.profiles h WHERE h.id = r.handled_by),
+                 'note', r.staff_note) END
+    ) AS j
+    FROM public.specialist_reports r
+    LEFT JOIN (SELECT DISTINCT ON (sc.expert_id) sc.expert_id, sc.manager_id, sc.team_start, sc.team_end FROM public.complaint_scope(v_uid, p_manager) sc ORDER BY sc.expert_id, sc.manager_id NULLS LAST) s ON s.expert_id = r.trainer_id
+    LEFT JOIN public.profiles e ON e.id = r.trainer_id
+    LEFT JOIN public.profiles m ON m.id = s.manager_id
+    LEFT JOIN public.clients c ON c.id = r.client_id
+    LEFT JOIN public.session_schedule ss ON ss.id = r.schedule_session_id
+    WHERE (r.trainer_id IS NULL OR r.trainer_id <> v_uid)
+      AND ( (r.trainer_id IS NOT NULL AND s.expert_id IS NOT NULL AND public.complaint_in_window(r.created_at, s.team_start, s.team_end))
+            OR (r.trainer_id IS NULL AND v_kind = 'all' AND (p_manager IS NULL OR p_manager = '00000000-0000-0000-0000-000000000000'::uuid)) )
+      AND (COALESCE(p_status, 'open') = 'all'
+           OR (p_status = 'handled' AND COALESCE(r.status, 'new') IN ('confirmed', 'dismissed'))
+           OR (COALESCE(p_status, 'open') = 'open' AND COALESCE(r.status, 'new') IN ('new', 'in_review')))
+    ORDER BY r.created_at DESC
+    LIMIT GREATEST(1, LEAST(COALESCE(p_limit, 200), 500))
+  ) q;
+  RETURN v_rows;
+END;
+$$;
+REVOKE ALL ON FUNCTION public.get_specialist_reports(text, uuid, integer) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.get_specialist_reports(text, uuid, integer) TO authenticated, service_role;
+
+CREATE OR REPLACE FUNCTION public.count_client_complaints()
+RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_kind text := public.complaint_viewer_kind(v_uid);
+  v_logs integer := 0;
+  v_reports integer := 0;
+BEGIN
+  IF v_uid IS NULL OR v_kind IS NULL THEN RETURN jsonb_build_object('viewer', v_kind, 'logs_open', 0, 'reports_open', 0); END IF;
+  SELECT count(*) INTO v_logs FROM public.training_sessions ts
+   JOIN (SELECT DISTINCT ON (sc.expert_id) sc.expert_id, sc.team_start, sc.team_end FROM public.complaint_scope(v_uid, NULL) sc ORDER BY sc.expert_id, sc.manager_id NULLS LAST) s ON s.expert_id = ts.trainer_id
+   WHERE ts.log_review->>'verdict' = 'inaccurate' AND NOT (ts.log_review ? 'staff_reviewed_at')
+     AND public.complaint_in_window(COALESCE(NULLIF(ts.log_review->>'at', '')::timestamptz, ts.session_acknowledged_at, ts.created_at), s.team_start, s.team_end);
+  SELECT count(*) INTO v_reports FROM public.specialist_reports r
+   LEFT JOIN (SELECT DISTINCT ON (sc.expert_id) sc.expert_id, sc.team_start, sc.team_end FROM public.complaint_scope(v_uid, NULL) sc ORDER BY sc.expert_id, sc.manager_id NULLS LAST) s ON s.expert_id = r.trainer_id
+   WHERE COALESCE(r.status, 'new') IN ('new', 'in_review') AND (r.trainer_id IS NULL OR r.trainer_id <> v_uid)
+     AND ((r.trainer_id IS NOT NULL AND s.expert_id IS NOT NULL AND public.complaint_in_window(r.created_at, s.team_start, s.team_end))
+          OR (r.trainer_id IS NULL AND v_kind = 'all'));
+  RETURN jsonb_build_object('viewer', v_kind, 'logs_open', v_logs, 'reports_open', v_reports);
+END;
+$$;
+REVOKE ALL ON FUNCTION public.count_client_complaints() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.count_client_complaints() TO authenticated, service_role;
+
+/** The flag push follows the same window: a flag dated outside the expert's live competition would never show on the
+    page, so nobody is pushed for it. An expert in no live team keeps the old targets (the HOD for a doctor / therapist). */
+CREATE OR REPLACE FUNCTION public.trg_fn_log_review_flagged()
+RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_targets uuid[];
+  v_client text;
+  v_expert text;
+  v_when text;
+  v_issues text;
+  v_at timestamptz;
+BEGIN
+  BEGIN
+    IF NEW.log_review->>'verdict' IS DISTINCT FROM 'inaccurate' THEN RETURN NULL; END IF;
+    IF TG_OP = 'UPDATE' AND OLD.log_review->>'verdict' = 'inaccurate' THEN RETURN NULL; END IF;
+    v_at := COALESCE(NULLIF(NEW.log_review->>'at', '')::timestamptz, NEW.session_acknowledged_at, now());
+    IF EXISTS (SELECT 1 FROM public.complaint_current_teams() t WHERE t.member_id = NEW.trainer_id)
+       AND NOT EXISTS (SELECT 1 FROM public.complaint_current_teams() t WHERE t.member_id = NEW.trainer_id AND public.complaint_in_window(v_at, t.team_start, t.team_end)) THEN
+      RETURN NULL;
+    END IF;
+    v_targets := public.complaint_push_targets(NEW.trainer_id);
+    IF array_length(v_targets, 1) IS NULL THEN RETURN NULL; END IF;
+    SELECT split_part(public.complaint_name(c.first_name, c.last_name), ' ', 1) INTO v_client FROM public.clients c WHERE c.id = NEW.client_id;
+    SELECT split_part(public.complaint_name(p.first_name, p.last_name), ' ', 1) INTO v_expert FROM public.profiles p WHERE p.id = NEW.trainer_id;
+    v_when := to_char(COALESCE(NEW.scheduled_at, NEW.created_at) AT TIME ZONE 'Asia/Kolkata', 'FMDD Mon');
+    SELECT string_agg(i, ', ') INTO v_issues FROM jsonb_array_elements_text(COALESCE(NEW.log_review->'issues', '[]'::jsonb)) i;
+    PERFORM public.complaints_push(v_targets, 'Client flagged a log',
+      COALESCE(v_client, 'A client') || ' says ' || COALESCE(v_expert, 'the expert') || '''s session of ' || v_when ||
+        ' was not logged accurately' || CASE WHEN v_issues IS NULL OR v_issues = '' THEN '' ELSE ' (' || v_issues || ')' END || '. Tap to review.',
+      jsonb_build_object('type', 'client_complaint', 'route', 'client-complaints', 'kind', 'log', 'session_id', NEW.id));
+  EXCEPTION WHEN others THEN
+    RAISE WARNING 'trg_fn_log_review_flagged: % (session %)', SQLERRM, NEW.id;
+  END;
+  RETURN NULL;
+END;
+$$;
+REVOKE ALL ON FUNCTION public.trg_fn_log_review_flagged() FROM PUBLIC, anon, authenticated;
+
+COMMIT;
+
+-- ---------------------------------------------------------------------------
+-- Probe (rolled back, pushes silenced): 6 checks.
+-- ---------------------------------------------------------------------------
+CREATE TEMP TABLE IF NOT EXISTS complaints_live_probe (step int, check_name text, expected text, result text);
+TRUNCATE complaints_live_probe;
+
+DO $probe$
+DECLARE
+  v_mgr uuid; v_member uuid; v_hod uuid; v_session uuid; v_start date; v_old uuid;
+  x jsonb; v_res text;
+  v_names text[] := '{}'; v_expected text[] := '{}'; v_results text[] := '{}';
+  as_user CONSTANT text := 'request.jwt.claim.sub';
+BEGIN
+  PERFORM set_config('complaints.silent', 'on', true);
+  SELECT t.manager_id, t.member_id, t.team_start INTO v_mgr, v_member, v_start FROM public.complaint_current_teams() t
+   WHERE NOT t.is_manager AND t.manager_id IS NOT NULL
+     AND EXISTS (SELECT 1 FROM public.training_sessions ts WHERE ts.trainer_id = t.member_id AND ts.client_id IS NOT NULL AND ts.log_review IS NULL)
+   ORDER BY t.team_id LIMIT 1;
+  SELECT p.id INTO v_hod FROM public.profiles p WHERE p.role_specialization::text ILIKE '%physio_hod%' AND p.status = 'active' LIMIT 1;
+  -- a manager of a team that is over (not live) and of no live team
+  SELECT ms.manager_id INTO v_old FROM public.manager_score ms
+   WHERE ms.team_end IS NOT NULL AND ms.team_end < (now() AT TIME ZONE 'Asia/Kolkata')::date
+     AND NOT EXISTS (SELECT 1 FROM public.complaint_current_teams() t WHERE t.member_id = ms.manager_id) LIMIT 1;
+  SELECT ts.id INTO v_session FROM public.training_sessions ts WHERE ts.trainer_id = v_member AND ts.client_id IS NOT NULL AND ts.log_review IS NULL ORDER BY ts.created_at DESC LIMIT 1;
+  BEGIN
+    IF v_mgr IS NULL OR v_session IS NULL THEN RAISE EXCEPTION 'no live team with a member who has an unreviewed training'; END IF;
+    -- 1. only live teams: every team in scope is ongoing today
+    v_names := array_append(v_names, 'complaint_current_teams: live teams only'); v_expected := array_append(v_expected, 'all live');
+    v_results := array_append(v_results, CASE WHEN EXISTS (SELECT 1 FROM public.complaint_current_teams() t WHERE t.team_start > (now() AT TIME ZONE 'Asia/Kolkata')::date OR (t.team_end IS NOT NULL AND t.team_end < (now() AT TIME ZONE 'Asia/Kolkata')::date)) THEN 'a finished or future team leaked' ELSE 'all live' END);
+    -- 2. a manager of a finished team only sees nothing (manager kind, empty scope)
+    IF v_old IS NOT NULL THEN
+      PERFORM set_config(as_user, v_old::text, true);
+      v_names := array_append(v_names, 'a manager whose only team is over sees nothing'); v_expected := array_append(v_expected, 'logs 0, reports 0');
+      v_results := array_append(v_results, 'logs ' || jsonb_array_length(public.get_inaccurate_logs('all', NULL, 50)) || ', reports ' || jsonb_array_length(public.get_specialist_reports('all', NULL, 50)));
+    END IF;
+    -- 3. a flag dated before the live competition started is hidden from the manager and the HOD
+    UPDATE public.training_sessions SET log_review = jsonb_build_object('verdict', 'inaccurate', 'at', to_char((v_start - 1)::timestamp AT TIME ZONE 'Asia/Kolkata' AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'), 'issues', jsonb_build_array('loads'), 'note', 'Probe: before the competition') WHERE id = v_session;
+    PERFORM set_config(as_user, v_mgr::text, true);
+    v_res := CASE WHEN EXISTS (SELECT 1 FROM jsonb_array_elements(public.get_inaccurate_logs('all', NULL, 200)) r WHERE r->>'session_id' = v_session::text) THEN 'manager sees' ELSE 'manager hidden' END;
+    PERFORM set_config(as_user, v_hod::text, true);
+    v_res := v_res || ', ' || CASE WHEN EXISTS (SELECT 1 FROM jsonb_array_elements(public.get_inaccurate_logs('all', NULL, 200)) r WHERE r->>'session_id' = v_session::text) THEN 'HOD sees' ELSE 'HOD hidden' END;
+    v_names := array_append(v_names, 'a flag dated before the live competition is hidden'); v_expected := array_append(v_expected, 'manager hidden, HOD hidden');
+    v_results := array_append(v_results, v_res);
+    -- 4. the same flag dated now shows, and counts
+    UPDATE public.training_sessions SET log_review = log_review || jsonb_build_object('at', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')) WHERE id = v_session;
+    PERFORM set_config(as_user, v_mgr::text, true);
+    x := public.count_client_complaints();
+    v_names := array_append(v_names, 'the same flag dated today shows for the manager and counts'); v_expected := array_append(v_expected, 'shown, counted');
+    v_results := array_append(v_results, CASE WHEN EXISTS (SELECT 1 FROM jsonb_array_elements(public.get_inaccurate_logs('open', NULL, 200)) r WHERE r->>'session_id' = v_session::text) THEN 'shown' ELSE 'hidden' END || ', ' || CASE WHEN (x->>'logs_open')::int >= 1 THEN 'counted' ELSE 'not counted' END);
+    RAISE EXCEPTION 'PROBE_DONE';
+  EXCEPTION WHEN others THEN
+    IF SQLERRM <> 'PROBE_DONE' THEN
+      v_names := array_append(v_names, 'probe stopped'); v_expected := array_append(v_expected, 'ran'); v_results := array_append(v_results, 'could not run: ' || SQLERRM);
+    END IF;
+  END;
+  PERFORM set_config(as_user, '', true);
+  INSERT INTO complaints_live_probe (step, check_name, expected, result)
+  SELECT n, v_names[n], v_expected[n], v_results[n] FROM generate_subscripts(v_names, 1) AS n;
+END
+$probe$;
+
+INSERT INTO complaints_live_probe (step, check_name, expected, result)
+SELECT 20, 'window helper', 'true, false, false, true', public.complaint_in_window('2026-11-03 10:00+05:30', '2026-08-01', '2027-01-31')::text || ', ' || public.complaint_in_window('2026-07-31 23:00+05:30', '2026-08-01', '2027-01-31')::text || ', ' || public.complaint_in_window('2027-02-01 00:30+05:30', '2026-08-01', '2027-01-31')::text || ', ' || public.complaint_in_window('2020-01-01', NULL, NULL)::text
+UNION ALL
+SELECT 21, 'probe flags left behind', '0', (SELECT count(*)::text FROM public.training_sessions WHERE log_review->>'note' LIKE 'Probe:%');
+
+SELECT step, check_name, expected, result FROM complaints_live_probe ORDER BY step;
+```
+
 ## 4. Check on the iPhone
 1. `node tests/rules/client_complaints_test.js`: ALL PASS (46).
 2. As Sagar (a manager): the drawer shows Client complaints; the page lists the flags about his team only (status Open);
@@ -1786,4 +1859,5 @@ SELECT step, check_name, expected, result FROM complaints_probe ORDER BY step;
    name under No team; the report sheet: Start review / Confirm (month free) / Dismiss, Reopen as new.
 4. A trainer who is no manager: no drawer item; the route (from a push) says "Manager access required".
 5. A push "Client flagged a log" opens the page.
-Server: migration 20261104100000 LIVE since 3 Nov 2026 (18 of 18 live probe rows; the RPCs checked read-only as a manager and the admin).
+Server: migration 20261104100000 PGlite-tested 21 of 21 and handed to the owner on 3 Nov 2026 (the status line of the
+feature file says when it ran).

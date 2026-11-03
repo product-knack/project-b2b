@@ -52,7 +52,7 @@ export function ClientComplaints() {
   }
   return (
     <Page gap={14} pt={6}>
-      <TitleBlock title="Client complaints" sub={allTeams ? 'Inaccurate logs and reports about every team' : 'Inaccurate logs and reports about your team'} />
+      <TitleBlock title="Client complaints" sub={allTeams ? 'Inaccurate logs and reports about every team in the live competition' : 'Inaccurate logs and reports about your team in the live competition'} />
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 14, backgroundColor: 'rgba(0,0,0,0.25)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' }}>
         <Icon name="alert" size={15} color={C.gold} strokeWidth={2.1} />
         <Body style={{ flex: 1, fontSize: 11.5, color: C.ink3, lineHeight: 16 }}>Clients review every log after a training and can report an expert who asked them to go outside Odds. Reports are never shown to the expert.</Body>

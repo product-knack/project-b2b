@@ -181,8 +181,8 @@ export const reportSessionLine = (r: Pick<SpecialistReport, 'session' | 'source'
   return [`${lead} ${fmtWhen(r.session.at)}`.trim(), modalityLabel(r.session.modality)].filter(Boolean).join(' · ');
 };
 export const REPORT_PRIVACY_LINE = 'Never shown to the expert. Only management reads this.';
-export const EMPTY_LOGS_TEAM = 'No flagged logs about your team. Nothing flagged since 21 Oct 2026.';
-export const EMPTY_LOGS_ALL = 'No flagged logs. Nothing flagged since 21 Oct 2026.';
+export const EMPTY_LOGS_TEAM = 'No flagged logs about your team in the live competition.';
+export const EMPTY_LOGS_ALL = 'No flagged logs in the live competition.';
 export const EMPTY_REPORTS = 'No reports.';
 export const emptyLine = (kind: ComplaintKind, allTeams: boolean, status: ComplaintStatusFilter): string => {
   if (kind === 'reports') return status === 'handled' ? 'No handled reports yet.' : EMPTY_REPORTS;

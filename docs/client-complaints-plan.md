@@ -1,6 +1,6 @@
 # Client complaints page for managers and the physio HOD: end-to-end plan (3 Nov 2026)
 
-Status: BUILT 3 Nov 2026 (migration 20261104100000 LIVE the same day, 18 of 18; Android built, tsc + 46 rule checks + bundle clean; feature file docs/features/android/trainer/client-complaints.md; iOS handoff card 15). Web page not built. Originally: Owner (3 Nov 2026): "add to all managers' dashboards a Client complaints page
+Status: BUILT 3 Nov 2026 (migration 20261104100000 LIVE the same day, 18 of 18; Android built, tsc + 46 rule checks + bundle clean; feature file docs/features/android/trainer/client-complaints.md; iOS handoff card 15). Web page not built. Revised again the same day (owner): the LIVE competition only, ongoing teams with no fallback batch and only complaints dated inside the competition (migration 20261104110000). Originally: Owner (3 Nov 2026): "add to all managers' dashboards a Client complaints page
 that shows only the complaints about trainers in that manager's team; the physio manager Anjana Rawat sees, on the
 same page, every manager's team's complaints with a filter by manager name." Revised the same day: an INDIVIDUAL
 page "Client complaints" (its own screen and drawer item), not a tab inside Managers Overview.
