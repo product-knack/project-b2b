@@ -28,7 +28,9 @@ import { LatestVoiceChip, LatestVoicePopup, LatestVoiceInfo } from '../component
 import { useClientsLatestVoiceNotes } from '../lib/sessionVoiceQueries';
 import { ListenStatusChip, ListenNowSheet, type ListenNowInfo } from '../components/clientHealthSummaryCard';
 import { listenChipShown } from '../lib/clientHealthSummary';
-import { useMyListenStatuses } from '../lib/clientHealthSummaryQueries';
+import { useMyListenStatuses, useCrewListenProgress, prefetchClientHealthSummaries } from '../lib/clientHealthSummaryQueries';
+import { useLocalListensMap } from '../lib/listenLocal';
+import { useIsOnline } from '../lib/offline';
 import { friendlyError } from '../lib/friendlyError';
 import { shortNames, shortNameFor } from '../lib/crewNames';
 import { usePlanCover } from '../lib/managerChatQueries';
@@ -1453,6 +1455,18 @@ function TomorrowPlanSheet({ visible, onClose, onSend, sending, existing, addOnl
   const listenQ = useMyListenStatuses(rows.map((r) => r.clientId), visible);
   const listenById = listenQ.data ?? {};
   const [listenFor, setListenFor] = React.useState<ListenNowInfo>(null);
+  // Listen progress (3 Nov 2026): the phone's own records (offline listens count at once), everyone's percent for the
+  // Who listened block, and the rows prefetched while online so tomorrow's summaries can be heard offline.
+  const listenLocal = useLocalListensMap(rows.map((r) => r.clientId));
+  const crewListenQ = useCrewListenProgress(rows.map((r) => r.clientId), visible);
+  const qcListen = useQueryClient();
+  const onlineForPrefetch = useIsOnline();
+  const crewTeamQ = useMyManagerTeam(); // cached: the chat screen reads the same query
+  const crewMembers = (crewTeamQ.data?.members ?? []).map((m) => ({ id: m.id, name: m.name }));
+  React.useEffect(() => {
+    if (!visible || !onlineForPrefetch || !rows.length) return;
+    prefetchClientHealthSummaries(qcListen, rows.map((r) => r.clientId));
+  }, [visible, onlineForPrefetch, rows.map((r) => r.clientId).join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
   const latestVoice = latestVoiceQ.data ?? {};
   const [voiceFor, setVoiceFor] = React.useState<LatestVoiceInfo>(null);
   // Expired-plan gate (27 Oct 2026): one batched read; a selected row whose plan for the picked modality is
@@ -1593,7 +1607,7 @@ function TomorrowPlanSheet({ visible, onClose, onSend, sending, existing, addOnl
         {hasChips ? (
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, paddingLeft: 42, paddingRight: 11, paddingBottom: 10 }}>
               {latestVoice[r.clientId] ? <LatestVoiceChip compact latest={latestVoice[r.clientId]} onPress={() => setVoiceFor({ name: r.name, latest: latestVoice[r.clientId] })} /> : null}
-              <ListenStatusChip compact status={listenById[r.clientId]} onPress={() => setListenFor({ id: r.clientId, name: r.name })} />
+              <ListenStatusChip compact status={listenById[r.clientId]} local={listenLocal[r.clientId]} onPress={() => setListenFor({ id: r.clientId, name: r.name })} />
               {cycles[r.clientId] ? <CycleChip cycle={cycles[r.clientId]} onPress={() => setCycleFor({ name: r.name, cycle: cycles[r.clientId] })} /> : null}
               {essentials[r.clientId] ? <EssentialsBadge status={essentials[r.clientId]} compact /> : null}
               {protocols[r.clientId] ? <ProtocolChip onPress={() => setProtoFor({ name: r.name, proto: protocols[r.clientId] })} /> : null}
@@ -1687,7 +1701,8 @@ function TomorrowPlanSheet({ visible, onClose, onSend, sending, existing, addOnl
       <ProtocolPopup info={protoFor} onClose={() => setProtoFor(null)} />
       <CyclePopup info={cycleFor} onClose={() => setCycleFor(null)} />
       <LatestVoicePopup info={voiceFor} onClose={() => setVoiceFor(null)} />
-      <ListenNowSheet info={listenFor} onClose={() => { setListenFor(null); listenQ.refetch(); }} />
+      <ListenNowSheet info={listenFor} onClose={() => { setListenFor(null); listenQ.refetch(); crewListenQ.refetch(); }}
+        crewRows={crewListenQ.data ?? []} crewLoading={crewListenQ.isLoading} members={crewMembers} />
     </Modal>
   );
 }

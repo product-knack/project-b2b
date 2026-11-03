@@ -323,6 +323,51 @@ const last = (log) => log.states[log.states.length - 1];
     void otherSilenced;
   }
 
+  /* 17. progress (3 Nov 2026): parts plus the position inside a part, 100 only at the end, the final percent on stop */
+  {
+    const { ctl, log, handles } = build();
+    const prog = [];
+    ctl.play('weekly', REQ, { onProgress: (p, final) => prog.push(final ? `F${p}` : p) });
+    await tick(); await tick();
+    handles[0]._status({ playing: true, currentTime: 5, duration: 10 });   // half of part 1 of 3 = 16
+    handles[0]._status({ playing: true, currentTime: 5, duration: 10 });   // same percent, not repeated
+    handles[0]._status({ playing: true, didJustFinish: true });            // part 1 done = 33
+    handles[0]._status({ playing: true, currentTime: 9, duration: 10 });   // part 2 at 90 percent = 63
+    handles[0]._status({ playing: true, didJustFinish: true });            // part 2 done = 66
+    handles[0]._status({ playing: true, currentTime: 10, duration: 10 });  // part 3 at the end but not finished = 99
+    handles[0]._status({ playing: true, didJustFinish: true });            // all done = 100, final
+    eq('recording progress steps', prog, [16, 33, 63, 66, 99, 100, 'F100']);
+    eq('no progress after the end', (ctl.stop(), prog.length), 7);
+  }
+  {
+    const { ctl, handles } = build();
+    const prog = [];
+    ctl.play('weekly', REQ, { onProgress: (p, final) => prog.push(final ? `F${p}` : p) });
+    await tick(); await tick();
+    handles[0]._status({ playing: true, currentTime: 4, duration: 10 });   // 13
+    ctl.stop();
+    eq('a stop reports the final percent once', prog, [13, 'F13']);
+  }
+  {
+    const { ctl, log } = build({ getAudio: async () => { throw new Error('offline'); } });
+    const prog = [];
+    ctl.play('weekly', REQ, { onProgress: (p, final) => prog.push(final ? `F${p}` : p) });
+    await tick(); await tick();
+    const d = log.device[0].cb;
+    d.onChunk(1, 4); d.onChunk(2, 4); d.onChunk(3, 4); d.onDone();
+    eq('device voice progress by sentences, 100 at the end', prog, [25, 50, 75, 100, 'F100']);
+  }
+  {
+    const { ctl, log } = build({ getAudio: async () => { throw new Error('offline'); } });
+    const prog = [];
+    ctl.play('weekly', REQ, { onProgress: (p, final) => prog.push(final ? `F${p}` : p) });
+    await tick(); await tick();
+    const d = log.device[0].cb;
+    d.onChunk(1, 4);
+    d.onStopped();
+    eq('device voice stopped from outside reports the final percent', prog, [25, 'F25']);
+  }
+
   /* 16. message helpers */
   eq('CLOUD_UNAVAILABLE text', V.CLOUD_UNAVAILABLE('x'), "Cloud voice unavailable (x); using this device's voice.");
   eq('STALL_MS', V.STALL_MS, 15000);

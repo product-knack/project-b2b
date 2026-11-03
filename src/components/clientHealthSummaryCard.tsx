@@ -16,14 +16,19 @@ import { Serif, Mono, Body } from './primitives';
 import { ReplayMask } from './ReplayShield';
 import { LatestHealthDataBlock } from './LatestHealthData';
 import { useAuth } from '../auth';
-import { useClientHealthSummary, useLogSummaryListen } from '../lib/clientHealthSummaryQueries';
+import { useClientHealthSummary } from '../lib/clientHealthSummaryQueries';
 import { useSummaryVoice, type SummaryVoice, type VoiceSource } from '../lib/summaryVoice';
+import { useListenWriter } from '../lib/listenSync';
+import { useLocalListens } from '../lib/listenLocal';
+import { useIsOnline } from '../lib/offline';
 import {
   TITLES, type Which, type ClientHealthSummaryRow, type WeeklySummary, type ContextSummary,
   durationText, fmtStamp, historyOf, summaryOf, generatedAtOf, hasScript, lastListen, isNewSince,
   listenGate, gateDue, type GateState,
-  listenRuleLine, LISTEN_WHY, LISTEN_CHIP_DUE, LISTEN_CHIP_DUE_SHORT, LISTEN_CHIP_OK, listenNowLine, gateFromStatus, type ListenStatusRow,
+  listenRuleLine, LISTEN_WHY, listenNowLine, gateFromStatus, type ListenStatusRow,
   type ListenGate, type HeardMap, listenStillNeeded, listenAllHeard, LISTEN_PROCEED, LISTEN_WAIT,
+  mergedProgress, progressLine, LISTEN_100_ALERT, LISTEN_OFFLINE_SAVED, LISTEN_NO_SCRIPT_OFFLINE, HEARD_PERCENT, entryPercent, entryHeard,
+  type LocalListens, statusPercent, listenChipText, crewListenLines, crewLineText, type CrewListenRow,
 } from '../lib/clientHealthSummary';
 
 const GOLD = C.gold;
@@ -135,14 +140,21 @@ type RowProps = {
   /** Gate mode: a status chip instead of the "new since you listened" badge. */
   status?: { text: string; color: string } | null;
   ordinal?: number;
+  /** Progress (3 Nov 2026): my best percent of the current build, the live percent while playing, and whether the
+      phone's record is still waiting for the network. */
+  percent?: number;
+  livePercent?: number | null;
+  offlineSaved?: boolean;
 };
-function SummaryRow({ which, row, uid, active, paused, busy, canPause, source, part, parts, transcriptOpen, onPlay, onStop, onToggleTranscript, status, ordinal, rule, ruleDue }: RowProps) {
+function SummaryRow({ which, row, uid, active, paused, busy, canPause, source, part, parts, transcriptOpen, onPlay, onStop, onToggleTranscript, status, ordinal, rule, ruleDue, percent, livePercent, offlineSaved }: RowProps) {
   const s = summaryOf(row, which);
   const col = colorOf(which);
   const has = hasScript(row, which);
   const last = lastListen(historyOf(row), which);
   const fresh = !status && isNewSince(row, which, uid);
   const sub = busy ? 'Preparing the voice…' : active && source === 'sarvam' && parts > 1 ? `${subLine(row, which)} · part ${part} of ${parts}` : subLine(row, which);
+  const shown = Math.max(percent ?? 0, active && livePercent != null ? livePercent : 0);
+  const heard = shown >= HEARD_PERCENT;
   return (
     <View style={{ borderRadius: 16, padding: 12, backgroundColor: hexA(col, 0.05), borderWidth: 1, borderColor: hexA(col, active ? 0.5 : 0.2), gap: 8 }}>
       <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 11 }}>
@@ -185,6 +197,23 @@ function SummaryRow({ which, row, uid, active, paused, busy, canPause, source, p
       {transcriptOpen && s?.script ? (
         <Body style={{ fontSize: 12.5, color: C.ink, lineHeight: 19, padding: 11, borderRadius: 12, backgroundColor: 'rgba(0,0,0,0.3)' }}>{s.script}</Body>
       ) : null}
+      {has && percent != null ? (
+        <View style={{ gap: 4 }} accessibilityLabel={progressLine(shown)}>
+          <View style={{ height: 5, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
+            <View style={{ width: `${Math.max(0, Math.min(100, heard ? 100 : shown))}%`, height: 5, borderRadius: 3, backgroundColor: heard ? C.green : shown > 0 ? GOLD : 'transparent' }} />
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Mono style={{ fontSize: 8.5, letterSpacing: 0.6, color: heard ? C.green : shown > 0 ? GOLD : C.muted3 }}>{progressLine(shown).toUpperCase()}</Mono>
+            {offlineSaved ? <Mono style={{ fontSize: 8, letterSpacing: 0.5, color: C.muted3 }}>· {LISTEN_OFFLINE_SAVED.toUpperCase()}</Mono> : null}
+          </View>
+          {!heard && (ruleDue || status) ? (
+            <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6, paddingVertical: 6, paddingHorizontal: 9, borderRadius: 10, backgroundColor: hexA(C.red, 0.09), borderWidth: 1, borderColor: hexA(C.red, 0.35) }}>
+              <Icon name="alert" size={12} color="#FF9B8F" strokeWidth={2.3} />
+              <Text style={{ flex: 1, fontFamily: F.bodySemi, fontSize: 11.5, lineHeight: 16, color: '#FF9B8F' }}>{LISTEN_100_ALERT}</Text>
+            </View>
+          ) : null}
+        </View>
+      ) : null}
       {rule ? (
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6, paddingVertical: 7, paddingHorizontal: 9, borderRadius: 10, backgroundColor: hexA(ruleDue ? C.red : C.green, 0.09), borderWidth: 1, borderColor: hexA(ruleDue ? C.red : C.green, 0.35) }}>
           <Icon name={ruleDue ? 'alert' : 'checks'} size={12} color={ruleDue ? '#FF9B8F' : C.green} strokeWidth={2.3} />
@@ -223,6 +252,7 @@ function HistorySheet({ visible, onClose, row }: { visible: boolean; onClose: ()
                   <Text numberOfLines={1} style={{ fontFamily: F.bodySemi, fontSize: 12.5, color: '#fff' }}>{h.by_name ?? 'Unknown'}{h.role ? <Text style={{ color: C.muted3 }}> · {h.role}</Text> : null}</Text>
                   <Mono style={{ fontSize: 8.5, letterSpacing: 0.6, color: C.muted3, marginTop: 1 }}>{h.which === 'weekly' ? 'WEEK' : 'CONTEXT'} · {fmtStamp(h.at).toUpperCase()}</Mono>
                 </View>
+                <Mono style={{ fontSize: 9, letterSpacing: 0.5, color: entryHeard(h) ? C.green : GOLD }}>{entryHeard(h) ? '100%' : `${entryPercent(h)}%`}</Mono>
               </View>
             ))}
           </ScrollView>
@@ -237,23 +267,29 @@ export function ClientHealthSummaryCard({ clientId, clientName }: { clientId: st
   const { session } = useAuth();
   const uid = session?.user?.id ?? null;
   const q = useClientHealthSummary(clientId ?? null);
-  const logM = useLogSummaryListen(clientId ?? null);
   const voice = useSummaryVoice();
   const [transcript, setTranscript] = React.useState<Which | null>(null);
   const [histOpen, setHistOpen] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
   const row = q.data ?? null;
   const history = historyOf(row);
+  // Progress (3 Nov 2026): the phone's record merged with the server's; writes through listenSync (outbox offline).
+  const local = useLocalListens(clientId ?? null);
+  const writer = useListenWriter(row, clientId ?? null);
+  const [live, setLive] = React.useState<{ which: Which; pct: number } | null>(null);
+  const gate = listenGate(row, uid, Date.now(), local);
 
   const play = (which: Which) => {
     const s = summaryOf(row, which);
     if (!s?.script || !clientId) return;
     if (voice.speakingId === which) { tapActive(voice); return; }
     setErr(null);
-    // The trail first: the RPC is the record of who listened, whatever the voice does next.
-    logM.mutate(which, { onError: (e) => setErr((e as Error).message) });
+    // The trail first: the record of who listened, whatever the voice does next (the phone's record, then the server).
+    writer.onPlay(which, (e) => setErr(e.message));
+    setLive({ which, pct: 0 });
     voice.play(which, { clientId, which, script: s.script }, {
       onError: (m) => { setTranscript(which); setErr(BOTH_FAILED(m)); },
+      onProgress: (pct, final) => { setLive(final ? null : { which, pct }); writer.onProgress(which, pct, final); },
     });
   };
 
@@ -288,7 +324,8 @@ export function ClientHealthSummaryCard({ clientId, clientName }: { clientId: st
             <Body style={{ fontSize: 10.5, color: C.muted2, lineHeight: 15 }}>{LISTEN_WHY}</Body>
             {(['weekly', 'context'] as Which[]).map((which) => (
               <SummaryRow key={which} which={which} row={row} uid={uid} {...rowVoiceProps(voice, which)} transcriptOpen={transcript === which}
-                rule={listenRuleLine(which, listenGate(row, uid)[which], clientName)} ruleDue={listenGate(row, uid)[which] === 'due'}
+                rule={listenRuleLine(which, gate[which], clientName)} ruleDue={gate[which] === 'due'}
+                percent={mergedProgress(row, which, uid, local[which])} livePercent={live?.which === which ? live.pct : null} offlineSaved={!!local[which] && !local[which]!.synced}
                 onPlay={() => play(which)} onStop={voice.stop} onToggleTranscript={() => setTranscript((t) => (t === which ? null : which))} />
             ))}
           </View>
@@ -313,25 +350,30 @@ export function ClientSummaryStrip({ clientId, date, accent = GOLD, latest = fal
   const uid = session?.user?.id ?? null;
   const [open, setOpen] = React.useState(!!defaultOpen);
   const q = useClientHealthSummary(clientId ?? null, true, date ?? null);
-  const logM = useLogSummaryListen(clientId ?? null);
   const voice = useSummaryVoice();
+  const online = useIsOnline();
   const [transcript, setTranscript] = React.useState<Which | null>(null);
   const [err, setErr] = React.useState<string | null>(null);
   const row = q.data ?? null;
-  const gate = listenGate(row, uid);
+  const local = useLocalListens(clientId ?? null);
+  const writer = useListenWriter(row, clientId ?? null);
+  const [live, setLive] = React.useState<{ which: Which; pct: number } | null>(null);
+  const gate = listenGate(row, uid, Date.now(), local);
   const due = gateDue(gate);
   React.useEffect(() => { if (!open) voice.stop(); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!clientId || q.isError) return null;
   const hasWeekly = hasScript(row, 'weekly'), hasContext = hasScript(row, 'context');
-  const summaryLine = q.isLoading ? 'Loading…' : !row || (!hasWeekly && !hasContext) ? 'Nothing built yet for this day' : [hasWeekly ? `This week · ${durationText(row!.weekly_summary!.script)}` : null, hasContext ? `Health context · ${durationText(row!.context_summary!.script)}` : null].filter(Boolean).join('   ');
+  const summaryLine = q.isLoading ? 'Loading…' : !row || (!hasWeekly && !hasContext) ? (!online ? LISTEN_NO_SCRIPT_OFFLINE((clientName ?? '').split(' ')[0] || 'this client') : 'Nothing built yet for this day') : [hasWeekly ? `This week · ${durationText(row!.weekly_summary!.script)}` : null, hasContext ? `Health context · ${durationText(row!.context_summary!.script)}` : null].filter(Boolean).join('   ');
   const play = (which: Which) => {
     const s = summaryOf(row, which);
     if (!s?.script) return;
     if (voice.speakingId === which) { tapActive(voice); return; }
     setErr(null);
-    logM.mutate(which, { onError: (e) => setErr((e as Error).message) });
+    writer.onPlay(which, (e) => setErr(e.message));
+    setLive({ which, pct: 0 });
     voice.play(which, { clientId, which, script: s.script, date: row?.briefing_date ?? date ?? null }, {
       onError: (m) => { setTranscript(which); setErr(BOTH_FAILED(m)); },
+      onProgress: (pct, final) => { setLive(final ? null : { which, pct }); writer.onProgress(which, pct, final); },
     });
   };
   return (
@@ -352,6 +394,7 @@ export function ClientSummaryStrip({ clientId, date, accent = GOLD, latest = fal
             {(['weekly', 'context'] as Which[]).map((which) => (
               <SummaryRow key={which} which={which} row={row} uid={uid} {...rowVoiceProps(voice, which)} transcriptOpen={transcript === which}
                 rule={listenRuleLine(which, gate[which], clientName)} ruleDue={gate[which] === 'due'}
+                percent={mergedProgress(row, which, uid, local[which])} livePercent={live?.which === which ? live.pct : null} offlineSaved={!!local[which] && !local[which]!.synced}
                 onPlay={() => play(which)} onStop={voice.stop} onToggleTranscript={() => setTranscript((t) => (t === which ? null : which))} />
             ))}
             {voice.notice ? <Body style={{ fontSize: 11, color: GOLD }}>{voice.notice}</Body> : null}
@@ -389,10 +432,12 @@ export function ListenGateSheet({ visible, clientId, clientName, onContinue }: {
   const { session } = useAuth();
   const uid = session?.user?.id ?? null;
   const q = useClientHealthSummary(clientId, visible);
-  const logM = useLogSummaryListen(clientId);
   const voice = useSummaryVoice();
   const row = q.data ?? null;
-  const gate = listenGate(row, uid);
+  const local = useLocalListens(clientId);
+  const writer = useListenWriter(row, clientId);
+  const [live, setLive] = React.useState<{ which: Which; pct: number } | null>(null);
+  const gate = listenGate(row, uid, Date.now(), local);
   // What is due is fixed when the sheet opens (22 Oct 2026): Play records the listen at once and the refreshed
   // row would read "done" seconds into the audio. Only a play to the end (or a transcript that stood in) counts.
   const [atOpen, setAtOpen] = React.useState<ListenGate | null>(null);
@@ -414,10 +459,16 @@ export function ListenGateSheet({ visible, clientId, clientName, onContinue }: {
     if (!s?.script || !clientId) return;
     if (voice.speakingId === which) { tapActive(voice); return; }
     setErr(null);
-    logM.mutate(which, { onError: (e) => setErr((e as Error).message) });
+    writer.onPlay(which, (e) => setErr(e.message));
+    setLive({ which, pct: 0 });
     voice.play(which, { clientId, which, script: s.script }, {
-      // Heard to the end: the recording's last part, or the device voice when it stood in.
+      // Heard to the end: the recording's last part, or the device voice when it stood in (95 percent counts, 3 Nov 2026).
       onDone: () => setHeard((h) => ({ ...h, [which]: true })),
+      onProgress: (pct, final) => {
+        setLive(final ? null : { which, pct });
+        writer.onProgress(which, pct, final);
+        if (pct >= HEARD_PERCENT) setHeard((h) => (h[which] ? h : { ...h, [which]: true }));
+      },
       onError: (m) => {
         // Nothing could speak: the transcript stands in and counts as heard.
         setTranscript(which);
@@ -454,6 +505,7 @@ export function ListenGateSheet({ visible, clientId, clientName, onContinue }: {
               <SummaryRow key={which} which={which} row={row} uid={uid} ordinal={i + 1} {...rowVoiceProps(voice, which)} transcriptOpen={transcript === which}
                 onPlay={() => play(which)} onStop={voice.stop} onToggleTranscript={() => setTranscript((t) => (t === which ? null : which))}
                 status={gateStatus(which, gateNow[which], heard[which], row)}
+                percent={heard[which] ? 100 : mergedProgress(row, which, uid, local[which])} livePercent={live?.which === which ? live.pct : null} offlineSaved={!!local[which] && !local[which]!.synced}
                 rule={listenRuleLine(which, gateNow[which], clientName)} ruleDue={gateNow[which] === 'due' && !heard[which]} />
             ))}
             {voice.notice ? <Body style={{ fontSize: 11, color: GOLD }}>{voice.notice}</Body> : null}
@@ -477,25 +529,57 @@ export function ListenGateSheet({ visible, clientId, clientName, onContinue }: {
 export { gateDue };
 
 /* ---------- My Crew (27 Oct 2026): the chip on a plan row and the Listen now sheet ---------- */
-/** Red "NOT HEARD · LISTEN NOW" while either summary is due for the signed-in trainer, green "HEARD" otherwise, nothing when none exists. */
-export function ListenStatusChip({ status, onPress, compact = false }: { status: ListenStatusRow | null | undefined; onPress: () => void; compact?: boolean }) {
-  const gate = gateFromStatus(status);
+/** Red "NOT HEARD · LISTEN NOW" while either summary is due for the signed-in trainer, amber "60 PERCENT · FINISH" when
+    a listen is under way, green "HEARD 100" otherwise, nothing when none exists. `local` = the phone's own record. */
+export function ListenStatusChip({ status, onPress, compact = false, local }: { status: ListenStatusRow | null | undefined; onPress: () => void; compact?: boolean; local?: LocalListens | null }) {
+  const gate = gateFromStatus(status, Date.now(), local);
   if (gate.weekly === 'none' && gate.context === 'none') return null;
-  const due = gateDue(gate);
-  const col = due ? C.red : C.green;
+  const chip = listenChipText(gate, { weekly: statusPercent(status, 'weekly', local), context: statusPercent(status, 'context', local) }, compact);
+  const col = chip.tone === 'red' ? C.red : chip.tone === 'amber' ? GOLD : C.green;
   return (
-    <Pressable onPress={onPress} hitSlop={10} accessibilityRole="button" accessibilityLabel={due ? 'Summaries not heard, listen now' : 'Summaries heard'}
+    <Pressable onPress={onPress} hitSlop={10} accessibilityRole="button" accessibilityLabel={chip.tone === 'green' ? 'Summaries heard' : `Summaries not fully heard, ${chip.text.toLowerCase()}`}
       style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 4, paddingHorizontal: 8, borderRadius: 999, backgroundColor: hexA(col, 0.12), borderWidth: 1, borderColor: hexA(col, 0.45) }}>
-      <Icon name={due ? 'alert' : 'checks'} size={9} color={col} strokeWidth={2.2} />
-      <Mono style={{ fontSize: 8, letterSpacing: 0.5, color: col }}>{due ? (compact ? LISTEN_CHIP_DUE_SHORT : LISTEN_CHIP_DUE) : LISTEN_CHIP_OK}</Mono>
+      <Icon name={chip.tone === 'green' ? 'checks' : 'alert'} size={9} color={col} strokeWidth={2.2} />
+      <Mono style={{ fontSize: 8, letterSpacing: 0.5, color: col }}>{chip.text}</Mono>
     </Pressable>
   );
 }
 
 export type ListenNowInfo = { id: string; name: string; when?: 'tomorrow' | 'today' } | null;
 
-/** The sheet behind the chip: the rule sentence and the two Play rows (the strip, open). */
-export function ListenNowSheet({ info, onClose }: { info: ListenNowInfo; onClose: () => void }) {
+/** My Crew's "Who listened" block (3 Nov 2026): every crew member's percent for both summaries of this client. */
+export function CrewListenBlock({ clientId, rows, members, loading }: { clientId: string; rows: CrewListenRow[]; members: { id: string; name: string }[]; loading?: boolean }) {
+  const { crew, others } = crewListenLines(rows, clientId, members);
+  const Line = ({ l }: { l: ReturnType<typeof crewListenLines>['crew'][number] }) => {
+    const all = l.weeklyHeard && l.contextHeard;
+    return (
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6 }}>
+        <Icon name={all ? 'checks' : 'alert'} size={11} color={all ? C.green : GOLD} strokeWidth={2.2} />
+        <Text numberOfLines={1} style={{ width: 92, fontFamily: F.bodySemi, fontSize: 12, color: '#fff' }}>{l.name.split(' ')[0]}</Text>
+        <Mono style={{ flex: 1, fontSize: 8.5, letterSpacing: 0.4, color: all ? C.green : C.ink3 }} numberOfLines={1}>{crewLineText(l).toUpperCase()}</Mono>
+      </View>
+    );
+  };
+  return (
+    <View style={{ padding: 11, borderRadius: 13, backgroundColor: 'rgba(0,0,0,0.3)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', gap: 4 }}>
+      <Mono style={{ fontSize: 9, letterSpacing: 1.2, color: C.muted3 }}>WHO LISTENED · PERCENT OF THE CURRENT BUILD</Mono>
+      {loading && !rows.length ? <ActivityIndicator size="small" color={GOLD} style={{ alignSelf: 'flex-start', marginVertical: 6 }} /> : null}
+      {crew.map((l) => <Line key={l.by} l={l} />)}
+      {others.length ? (
+        <>
+          <Mono style={{ fontSize: 8, letterSpacing: 0.8, color: C.muted3, marginTop: 4 }}>OTHERS</Mono>
+          {others.map((l) => <Line key={l.by} l={l} />)}
+        </>
+      ) : null}
+      {!crew.length && !others.length && !loading ? <Body style={{ fontSize: 11.5, color: C.muted2 }}>Nobody has listened yet.</Body> : null}
+      <Body style={{ fontSize: 10.5, color: C.muted3, lineHeight: 14, marginTop: 2 }}>A listen counts from 95 percent. A phone that listened offline shows here after it syncs.</Body>
+    </View>
+  );
+}
+
+/** The sheet behind the chip: the rule sentence, the Who listened block (when the caller passes the crew) and the two
+    Play rows (the strip, open). */
+export function ListenNowSheet({ info, onClose, crewRows, members, crewLoading }: { info: ListenNowInfo; onClose: () => void; crewRows?: CrewListenRow[]; members?: { id: string; name: string }[]; crewLoading?: boolean }) {
   const insets = useSafeAreaInsets();
   return (
     <Modal visible={!!info} transparent animationType="slide" onRequestClose={onClose}>
@@ -517,6 +601,7 @@ export function ListenNowSheet({ info, onClose }: { info: ListenNowInfo; onClose
               </Pressable>
             </View>
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 12, paddingBottom: 6 }}>
+              {info && crewRows ? <CrewListenBlock clientId={info.id} rows={crewRows} members={members ?? []} loading={crewLoading} /> : null}
               {info ? <ClientSummaryStrip clientId={info.id} clientName={info.name} accent={GOLD} defaultOpen /> : null}
             </ScrollView>
           </View>

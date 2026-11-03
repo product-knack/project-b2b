@@ -105,5 +105,43 @@ eq('listen chip shown: both built', R.listenChipShown(st, NOW), true);
 eq('listen chip hidden: nothing built', R.listenChipShown({ ...st, has_weekly: false, has_context: false }, NOW), false);
 eq('listen chip shown: only the context built', R.listenChipShown({ ...st, has_weekly: false }, NOW), true);
 eq('short label', R.LISTEN_CHIP_DUE_SHORT, 'NOT HEARD');
+
+/* ---- listen progress (3 Nov 2026): heard only from 95 percent; legacy plays count; offline record merges ---- */
+eq('legacy entry (no percent) is heard at 100', [R.entryHeard({ at: 'x', by: ME, which: 'weekly' }), R.entryPercent({ at: 'x', by: ME, which: 'weekly' })], [true, 100]);
+eq('94 is not heard, 95 is', [R.entryHeard({ at: 'x', by: ME, which: 'weekly', percent: 94 }), R.entryHeard({ at: 'x', by: ME, which: 'weekly', percent: 95 })], [false, true]);
+const playedToday = [{ at: '2026-10-09T02:00:00Z', by: ME, which: 'weekly', percent: 40, heard: false }, { at: '2026-10-06T02:00:00Z', by: ME, which: 'context', percent: 30, heard: false }];
+eq('a Play stopped at 40 and 30 percent leaves both due', R.listenGate(row({ listen_history: playedToday }), ME, NOW), { weekly: 'due', context: 'due' });
+const heardToday = [{ at: '2026-10-09T02:00:00Z', by: ME, which: 'weekly', percent: 97, heard: true, heard_at: '2026-10-09T02:05:00Z' }, { at: '2026-10-06T02:00:00Z', by: ME, which: 'context', percent: 100, heard: true }];
+eq('97 percent today and 100 percent context are done', R.listenGate(row({ listen_history: heardToday }), ME, NOW), { weekly: 'done', context: 'done' });
+eq('my progress: best percent of the current build', R.myProgress(row({ listen_history: [{ at: '2026-10-09T01:00:00Z', by: ME, which: 'weekly', percent: 20 }, { at: '2026-10-09T02:00:00Z', by: ME, which: 'weekly', percent: 60 }, { at: '2026-10-07T02:00:00Z', by: ME, which: 'weekly', percent: 100 }] }), 'weekly', ME), 60);
+eq('my progress: someone else does not count', R.myProgress(row({ listen_history: [{ at: '2026-10-09T02:00:00Z', by: OTHER, which: 'weekly', percent: 100 }] }), 'weekly', ME), 0);
+const localHeard = { clientId: 'c', which: 'weekly', version: null, generatedAt: '2026-10-08T18:29:00Z', briefingDate: null, percent: 96, heard: true, heardAt: '2026-10-09T03:00:00Z', at: '2026-10-09T02:50:00Z', synced: false };
+eq('offline record heard today clears the weekly gate', R.listenGate(row(), ME, NOW, { weekly: localHeard }).weekly, 'done');
+eq('offline record for another build does not', R.listenGate(row(), ME, NOW, { weekly: { ...localHeard, generatedAt: '2026-10-07T18:29:00Z' } }).weekly, 'due');
+eq('offline record at 50 does not', R.listenGate(row(), ME, NOW, { weekly: { ...localHeard, percent: 50, heard: false, heardAt: null } }).weekly, 'due');
+eq('merged progress takes the higher of server and phone', R.mergedProgress(row({ listen_history: [{ at: '2026-10-09T02:00:00Z', by: ME, which: 'weekly', percent: 40 }] }), 'weekly', ME, { ...localHeard, percent: 70, heard: false }), 70);
+eq('progress lines', [R.progressLine(60), R.progressLine(95), R.progressLine(100)], ['You: 60 percent heard', 'Heard 100 percent, you can log.', 'Heard 100 percent, you can log.']);
+eq('alert sentence', R.LISTEN_100_ALERT, 'Listen to 100 percent now, so you do not have to listen again when you log the session.');
+// the batched status with the new columns
+const stNew = { ...st, my_last_weekly_at: '2026-10-09T02:00:00Z', my_weekly_percent: 40, my_weekly_heard: false, my_weekly_heard_at: null, my_context_percent: 100, my_context_heard: true, my_context_heard_at: '2026-10-06T02:00:00Z', my_last_context_at: '2026-10-06T02:00:00Z' };
+eq('status: a 40 percent play today is due, the heard context is done', R.gateFromStatus(stNew, NOW), { weekly: 'due', context: 'done' });
+eq('status: old server without heard columns falls back to the last play', R.gateFromStatus({ ...st, my_last_weekly_at: '2026-10-09T02:00:00Z', my_last_context_at: '2026-10-06T02:00:00Z' }, NOW), { weekly: 'done', context: 'done' });
+eq('status: the phone record clears it', R.gateFromStatus(stNew, NOW, { weekly: localHeard }).weekly, 'done');
+eq('chip: 40 percent due reads FINISH', R.listenChipText({ weekly: 'due', context: 'done' }, { weekly: 40, context: 100 }), { text: '40 PERCENT · FINISH', tone: 'amber' });
+eq('chip: nothing played reads NOT HEARD', R.listenChipText({ weekly: 'due', context: 'due' }, { weekly: 0, context: 0 }, true), { text: 'NOT HEARD', tone: 'red' });
+eq('chip: all heard', R.listenChipText({ weekly: 'done', context: 'done' }, { weekly: 100, context: 100 }), { text: 'HEARD 100', tone: 'green' });
+eq('status percent merges the phone record', R.statusPercent(stNew, 'weekly', { weekly: { ...localHeard, percent: 80, heard: false } }), 80);
+// the crew block
+const crewRows = [
+  { client_id: 'c', which: 'weekly', by: 'm1', by_name: 'Sagar Sharma', role: 'trainer', percent: 100, heard: true, at: null, version: 5 },
+  { client_id: 'c', which: 'context', by: 'm1', by_name: 'Sagar Sharma', role: 'trainer', percent: 40, heard: false, at: null, version: 2 },
+  { client_id: 'c', which: 'weekly', by: 'x9', by_name: 'Dr Who', role: 'doctor', percent: 97, heard: true, at: null, version: 5 },
+  { client_id: 'other', which: 'weekly', by: 'm2', by_name: 'Priya', role: 'trainer', percent: 100, heard: true, at: null, version: 5 },
+];
+const lines = R.crewListenLines(crewRows, 'c', [{ id: 'm1', name: 'Sagar Sharma' }, { id: 'm2', name: 'Priya Singh' }]);
+eq('crew lines: every member listed, others separate', [lines.crew.map((l) => l.name), lines.others.map((l) => l.name)], [['Priya Singh', 'Sagar Sharma'], ['Dr Who']]);
+eq('crew line text: Sagar', R.crewLineText(lines.crew[1]), 'This week 100 percent · Health context 40 percent');
+eq('crew line text: Priya never played this client', R.crewLineText(lines.crew[0]), 'This week 0 percent · Health context 0 percent');
+eq('crew line text: 97 reads as 100 (heard)', R.crewLineText(lines.others[0]), 'This week 100 percent · Health context 0 percent');
 console.log(fails ? `${fails} FAILED` : 'ALL PASS');
 process.exit(fails ? 1 : 0);

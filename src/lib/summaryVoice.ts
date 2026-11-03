@@ -45,10 +45,14 @@ export type PlayCallbacks = {
   onDone?: () => void;
   /** Neither the recording nor the device voice could speak. */
   onError?: (message: string) => void;
+  /** How much of the summary has been heard so far, 0 to 100 (3 Nov 2026): the recording from the player's
+      position across its parts, the device voice from the sentences spoken. Reported at most once per percent
+      step and once more when the run stops early (the final percent). */
+  onProgress?: (percent: number, final: boolean) => void;
 };
 
 /* ---------- injected dependencies (the real ones are below) ---------- */
-export type PlayerStatus = { isLoaded?: boolean; playing?: boolean; didJustFinish?: boolean; error?: string | null };
+export type PlayerStatus = { isLoaded?: boolean; playing?: boolean; didJustFinish?: boolean; error?: string | null; currentTime?: number; duration?: number };
 export type PlayerLike = {
   play(): void;
   pause(): void;
@@ -63,6 +67,8 @@ export type DeviceSpeechCallbacks = {
   onResume?: () => void;
   /** Someone else stopped the device voice (it is one engine for the whole app). */
   onStopped?: () => void;
+  /** Sentences spoken so far of the total (progress for the device voice). */
+  onChunk?: (spoken: number, total: number) => void;
 };
 export type SummaryVoiceDeps = {
   getAudio: (req: SummaryAudioRequest) => Promise<string[]>;
@@ -132,11 +138,28 @@ export function createSummaryVoice(deps: SummaryVoiceDeps, onState: (s: SummaryV
     deps.deviceStop();
   };
 
+  // Progress of the current run (3 Nov 2026): the last percent reported, so a stop can report the final figure
+  // once and a percent is never reported twice.
+  let lastPct = -1;
+  let progressCb: PlayCallbacks['onProgress'] | undefined;
+  const report = (pct: number, final = false) => {
+    const p = Math.max(0, Math.min(100, Math.floor(pct)));
+    if (!progressCb) return;
+    if (final) { if (p > lastPct) lastPct = p; progressCb(lastPct < 0 ? 0 : lastPct, true); return; }
+    if (p <= lastPct) return;
+    lastPct = p;
+    progressCb(p, false);
+  };
+
   const stop = () => {
+    const hadRun = state.phase !== 'idle' && lastPct >= 0;
     run++;
     releaseAudioFocus(holder);
     releasePlayer();
     endDevice();
+    if (hadRun) report(lastPct, true);
+    lastPct = -1;
+    progressCb = undefined;
     emit({ ...IDLE_VOICE });
   };
   /** A run ended on its own (heard to the end, or nothing could speak). */
@@ -147,12 +170,13 @@ export function createSummaryVoice(deps: SummaryVoiceDeps, onState: (s: SummaryV
     releasePlayer();
     emit({ id, phase: 'playing', source: 'device', notice, part: 0, parts: 0 });
     const cancel = deps.deviceSpeak(script, {
-      onDone: () => { if (myRun !== run) return; finished(); emit({ ...IDLE_VOICE, notice }); cb?.onDone?.(); },
+      onDone: () => { if (myRun !== run) return; report(100); report(100, true); finished(); emit({ ...IDLE_VOICE, notice }); cb?.onDone?.(); },
       onError: (m) => { if (myRun !== run) return; finished(); emit({ ...IDLE_VOICE, notice }); cb?.onError?.(m); },
       onPause: () => { if (myRun === run) emit({ phase: 'paused' }); },
       onResume: () => { if (myRun === run) emit({ phase: 'playing' }); },
       // The engine was stopped from outside (another reader): this reading is over, not heard.
-      onStopped: () => { if (myRun !== run) return; finished(); emit({ ...IDLE_VOICE, notice }); },
+      onStopped: () => { if (myRun !== run) return; report(lastPct, true); finished(); emit({ ...IDLE_VOICE, notice }); },
+      onChunk: (spoken, total) => { if (myRun === run && total > 0) report(Math.min(99, (spoken / total) * 100)); },
     });
     if (myRun === run) cancelDevice = typeof cancel === 'function' ? cancel : () => {};
   };
@@ -177,16 +201,24 @@ export function createSummaryVoice(deps: SummaryVoiceDeps, onState: (s: SummaryV
       if (myRun !== run || fellBack) return;
       if (st.error) { fallback(st.error); return; }
       if (st.playing && !started) { started = true; clearStall(); }
+      // Progress: parts finished plus the position inside the current part, parts weighted equally (they are
+      // cut at near-equal sentence counts). Never 100 before the last part reports its finish.
+      if (started && typeof st.currentTime === 'number' && typeof st.duration === 'number' && st.duration > 0) {
+        const inPart = Math.max(0, Math.min(1, st.currentTime / st.duration));
+        report(Math.min(99, ((i + inPart) / urls.length) * 100));
+      }
       // A finish counts once per part: only after the part was heard playing (a repeated
       // end-of-part status while the next source loads must not skip a part).
       if (st.didJustFinish && started) {
         started = false;
         i++;
         if (i < urls.length) {
+          report(Math.min(99, (i / urls.length) * 100));
           emit({ part: i + 1 });
           armStall(myRun, () => fallback('no sound'));
           try { p.replace({ uri: urls[i] }); p.play(); } catch (e) { fallback(msgOf(e)); }
         } else {
+          report(100); report(100, true);
           finished();
           releasePlayer();
           emit({ ...IDLE_VOICE });
@@ -203,6 +235,8 @@ export function createSummaryVoice(deps: SummaryVoiceDeps, onState: (s: SummaryV
     stop();
     claimAudioFocus(holder);
     const myRun = run;
+    progressCb = cb?.onProgress;
+    lastPct = cb?.onProgress ? 0 : -1;
     emit({ id, phase: 'preparing', source: null, notice: null, part: 0, parts: 0 });
     deps.getAudio(req)
       .then((urls) => {
@@ -277,6 +311,7 @@ function deviceSpeak(text: string, cb: DeviceSpeechCallbacks): () => void {
   let i = 0;
   const next = () => {
     if (dead) return;
+    if (i > 0) cb.onChunk?.(i, parts.length);
     if (i >= parts.length) { dead = true; cb.onDone(); return; }
     try {
       Speech.speak(parts[i++], {

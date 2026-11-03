@@ -24,7 +24,7 @@ const OUTBOX_KEY = 'outbox:v1';
 export type OutboxItem = {
   id: string;
   userId?: string;        // who queued it — items never drain (or show) under another account
-  kind: 'workout-log' | 'create-plan' | 'edit-plan' | 'chat-message' | 'location-log' | 'screenshot-log' | 'session-voice-note' | 'nav-track' | 'route-ended' | 'session-otp-verify';
+  kind: 'workout-log' | 'create-plan' | 'edit-plan' | 'chat-message' | 'location-log' | 'screenshot-log' | 'session-voice-note' | 'nav-track' | 'route-ended' | 'session-otp-verify' | 'summary-listen' | 'summary-listen-progress';
   label: string;          // human line for the pending-sync UI
   createdAt: string;      // ORIGINAL device timestamp at submit time
   status: 'pending' | 'syncing' | 'failed';
@@ -330,6 +330,14 @@ async function processItem(item: OutboxItem): Promise<{ linkPending?: boolean } 
     // phone was offline at Arrived / Exit. Lazy require: routeTracker imports enqueue.
     const { submitRouteEnded } = require('./routeTracker');
     await submitRouteEnded(item.payload);
+  } else if (item.kind === 'summary-listen' || item.kind === 'summary-listen-progress') {
+    // Spoken-summary listens made offline (3 Nov 2026): the Play entry, then the best percent, each with the
+    // real heard time and the briefing day it was heard on. Lazy require: listenSync imports enqueue.
+    const { submitQueuedListen } = require('./listenSync');
+    await submitQueuedListen(item.kind, item.payload);
+    qcRef?.invalidateQueries({ queryKey: ['client-health-summary', item.payload?.clientId] });
+    qcRef?.invalidateQueries({ queryKey: ['listen-status'] });
+    qcRef?.invalidateQueries({ queryKey: ['crew-listen-progress'] });
   }
 }
 

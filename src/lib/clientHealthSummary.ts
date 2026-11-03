@@ -13,6 +13,12 @@ export type ListenEntry = {
   role?: string | null;
   which: Which;
   version?: number | null;
+  /** Progress (3 Nov 2026): the best percent of this listen; absent on a legacy play (counts as heard). */
+  percent?: number | null;
+  heard?: boolean | null;
+  heard_at?: string | null;
+  carried?: boolean | null;
+  briefing_date?: string | null;
 };
 
 export type WeeklySummary = {
@@ -104,6 +110,17 @@ export const generatedAtOf = (row: ClientHealthSummaryRow | null | undefined, wh
 export const hasScript = (row: ClientHealthSummaryRow | null | undefined, which: Which): boolean =>
   !!summaryOf(row, which)?.script?.trim();
 
+/* ---------- Listen progress (3 Nov 2026) ----------
+   Owner: "show everyone in percent how much they listened, and an alert to listen to 100 percent so the session
+   log needs no second listen; 95 percent and above counts as 100". A trail entry now carries percent / heard; an
+   entry WITHOUT a percent key is a play from before this rule and counts as heard. */
+export const HEARD_PERCENT = 95;
+export const entryPercent = (e: ListenEntry | null | undefined): number =>
+  !e ? 0 : e.percent == null ? 100 : Math.max(0, Math.min(100, Math.round(Number(e.percent) || 0)));
+export const entryHeard = (e: ListenEntry | null | undefined): boolean => !!e && (e.percent == null ? true : entryPercent(e) >= HEARD_PERCENT);
+/** The moment an entry counts as heard: heard_at when the server stamped it, else its at. */
+export const entryHeardAt = (e: ListenEntry): string => e.heard_at ?? e.at;
+
 /** The signed-in user's newest listen of that kind (the trail is oldest first). */
 export const myLastListen = (history: ListenEntry[], which: Which, uid: string | null | undefined): ListenEntry | null => {
   if (!uid) return null;
@@ -112,6 +129,28 @@ export const myLastListen = (history: ListenEntry[], which: Which, uid: string |
     if (h.which === which && h.by === uid) return h;
   }
   return null;
+};
+/** The signed-in user's newest HEARD listen of that kind (percent at or above the threshold, or a legacy play). */
+export const myLastHeard = (history: ListenEntry[], which: Which, uid: string | null | undefined): ListenEntry | null => {
+  if (!uid) return null;
+  for (let i = history.length - 1; i >= 0; i--) {
+    const h = history[i];
+    if (h.which === which && h.by === uid && entryHeard(h)) return h;
+  }
+  return null;
+};
+/** The signed-in user's best percent for the CURRENT build of that kind (0 when nothing since the build). */
+export const myProgress = (row: ClientHealthSummaryRow | null | undefined, which: Which, uid: string | null | undefined): number => {
+  const g = generatedAtOf(row, which);
+  if (!uid || !g) return 0;
+  const built = new Date(g).getTime();
+  let best = 0;
+  for (const h of historyOf(row)) {
+    if (h.which !== which || h.by !== uid) continue;
+    if (new Date(h.at).getTime() < built && !(h.carried && entryHeard(h))) continue;
+    best = Math.max(best, entryPercent(h));
+  }
+  return best;
 };
 
 /** Anyone's newest listen of that kind. */
@@ -140,22 +179,59 @@ export const isNewSince = (row: ClientHealthSummaryRow | null | undefined, which
    (carried: true), so the context is heard once per update, not once per day. */
 export type GateState = 'none' | 'done' | 'due';
 
-export const gateStateFor = (row: ClientHealthSummaryRow | null | undefined, which: Which, uid: string | null | undefined, nowMs: number = Date.now()): GateState => {
+/** Since 3 Nov 2026 only a HEARD listen (95 percent or more, or a legacy play) can make a summary done; `local`
+    is the phone's own record for the current build (an offline listen not yet synced), merged in by the caller. */
+export const gateStateFor = (row: ClientHealthSummaryRow | null | undefined, which: Which, uid: string | null | undefined, nowMs: number = Date.now(), local?: LocalListen | null): GateState => {
   const g = generatedAtOf(row, which);
   if (!hasScript(row, which) || !g) return 'none';
-  const mine = myLastListen(historyOf(row), which, uid);
-  if (!mine) return 'due';
-  const heardAt = new Date(mine.at).getTime();
-  if (!isFinite(heardAt) || heardAt < new Date(g).getTime()) return 'due';
-  if (which === 'weekly' && istDayOf(mine.at) !== istDayOf(nowMs)) return 'due';
-  return 'done';
+  const built = new Date(g).getTime();
+  const mine = myLastHeard(historyOf(row), which, uid);
+  const ok = (atIso: string): boolean => {
+    const heardAt = new Date(atIso).getTime();
+    if (!isFinite(heardAt) || heardAt < built) return false;
+    if (which === 'weekly' && istDayOf(atIso) !== istDayOf(nowMs)) return false;
+    return true;
+  };
+  if (mine && ok(entryHeardAt(mine))) return 'done';
+  const v = summaryOf(row, which)?.version ?? null;
+  if (local && local.which === which && local.heard && local.heardAt && (local.version == null || v == null || local.version === v) && local.generatedAt === g && ok(local.heardAt)) return 'done';
+  return 'due';
 };
 
 export type ListenGate = { weekly: GateState; context: GateState };
-export const listenGate = (row: ClientHealthSummaryRow | null | undefined, uid: string | null | undefined, nowMs: number = Date.now()): ListenGate => ({
-  weekly: gateStateFor(row, 'weekly', uid, nowMs),
-  context: gateStateFor(row, 'context', uid, nowMs),
+/** The phone's own record of one listen (listenLocal.ts): what this phone heard of a build, synced or not. */
+export type LocalListen = {
+  clientId: string;
+  which: Which;
+  version: number | null;
+  /** The build this record is for (generated_at); another build means a new summary, the record no longer counts. */
+  generatedAt: string | null;
+  briefingDate: string | null;
+  percent: number;
+  heard: boolean;
+  heardAt: string | null;
+  at: string;
+  synced: boolean;
+};
+export type LocalListens = Partial<Record<Which, LocalListen | null>>;
+export const listenGate = (row: ClientHealthSummaryRow | null | undefined, uid: string | null | undefined, nowMs: number = Date.now(), local?: LocalListens | null): ListenGate => ({
+  weekly: gateStateFor(row, 'weekly', uid, nowMs, local?.weekly ?? null),
+  context: gateStateFor(row, 'context', uid, nowMs, local?.context ?? null),
 });
+
+/** The percent to show for one row: the server's best for the current build merged with the phone's record. */
+export const mergedProgress = (row: ClientHealthSummaryRow | null | undefined, which: Which, uid: string | null | undefined, local?: LocalListen | null): number => {
+  const server = myProgress(row, which, uid);
+  const g = generatedAtOf(row, which);
+  const mine = local && local.which === which && local.generatedAt === g ? local.percent : 0;
+  return Math.max(server, mine);
+};
+/** The lines under a Play row's progress bar (owner's words, 3 Nov 2026). */
+export const LISTEN_100_ALERT = 'Listen to 100 percent now, so you do not have to listen again when you log the session.';
+export const LISTEN_100_OK = 'Heard 100 percent, you can log.';
+export const progressLine = (percent: number): string => (percent >= HEARD_PERCENT ? LISTEN_100_OK : `You: ${Math.max(0, Math.min(100, Math.round(percent)))} percent heard`);
+export const LISTEN_OFFLINE_SAVED = 'Saved on this phone · syncs when online';
+export const LISTEN_NO_SCRIPT_OFFLINE = (first: string) => `Connect once to load ${first}'s summaries.`;
 export const gateDue = (g: ListenGate): boolean => g.weekly === 'due' || g.context === 'due';
 
 /* ---------- The rule, written once (27 Oct 2026) ----------
@@ -185,7 +261,8 @@ export const LISTEN_CHIP_DUE_SHORT = 'NOT HEARD';
 export const listenNowLine = (clientFirstName: string | null | undefined, when: 'tomorrow' | 'today' = 'tomorrow'): string =>
   `You have not heard ${(clientFirstName ?? '').trim().split(/\s+/)[0] || 'this client'}'s summaries. You cannot log ${when}'s session without this. Listen now.`;
 
-/** One row of get_my_listen_status (a batched read for My Crew): the same gate, computed from flat fields. */
+/** One row of get_my_listen_status (a batched read for My Crew): the same gate, computed from flat fields.
+    Since 3 Nov 2026 the heard columns decide; the old my_last_*_at columns stay for older builds. */
 export type ListenStatusRow = {
   client_id: string;
   has_weekly: boolean;
@@ -194,26 +271,80 @@ export type ListenStatusRow = {
   context_generated_at: string | null;
   my_last_weekly_at: string | null;
   my_last_context_at: string | null;
+  weekly_version?: number | null;
+  context_version?: number | null;
+  my_weekly_percent?: number | null;
+  my_context_percent?: number | null;
+  my_weekly_heard?: boolean | null;
+  my_context_heard?: boolean | null;
+  my_weekly_heard_at?: string | null;
+  my_context_heard_at?: string | null;
 };
 /** True when the listen chip has something to say (a summary exists for at least one kind). */
 export const listenChipShown = (s: ListenStatusRow | null | undefined, nowMs: number = Date.now()): boolean => {
   const g = gateFromStatus(s, nowMs);
   return !(g.weekly === 'none' && g.context === 'none');
 };
-export const gateFromStatus = (s: ListenStatusRow | null | undefined, nowMs: number = Date.now()): ListenGate => {
+export const gateFromStatus = (s: ListenStatusRow | null | undefined, nowMs: number = Date.now(), local?: LocalListens | null): ListenGate => {
   const one = (which: Which): GateState => {
     if (!s) return 'none';
     const has = which === 'weekly' ? s.has_weekly : s.has_context;
     const g = which === 'weekly' ? s.weekly_generated_at : s.context_generated_at;
-    const mine = which === 'weekly' ? s.my_last_weekly_at : s.my_last_context_at;
     if (!has || !g) return 'none';
-    if (!mine) return 'due';
-    const heardAt = new Date(mine).getTime();
-    if (!isFinite(heardAt) || heardAt < new Date(g).getTime()) return 'due';
-    if (which === 'weekly' && istDayOf(mine) !== istDayOf(nowMs)) return 'due';
-    return 'done';
+    const built = new Date(g).getTime();
+    const ok = (atIso: string): boolean => {
+      const t = new Date(atIso).getTime();
+      if (!isFinite(t) || t < built) return false;
+      if (which === 'weekly' && istDayOf(atIso) !== istDayOf(nowMs)) return false;
+      return true;
+    };
+    // The server before this rule had no heard columns: fall back to the last play, as before.
+    const heardKnown = which === 'weekly' ? s.my_weekly_heard : s.my_context_heard;
+    const heardAt = which === 'weekly' ? (s.my_weekly_heard_at ?? null) : (s.my_context_heard_at ?? null);
+    const mine = heardKnown == null ? (which === 'weekly' ? s.my_last_weekly_at : s.my_last_context_at) : heardKnown ? (heardAt ?? (which === 'weekly' ? s.my_last_weekly_at : s.my_last_context_at)) : null;
+    if (mine && ok(mine)) return 'done';
+    const l = local?.[which];
+    if (l && l.heard && l.heardAt && l.generatedAt === g && ok(l.heardAt)) return 'done';
+    return 'due';
   };
   return { weekly: one('weekly'), context: one('context') };
+};
+/** My Crew chip text and tone from the status and the phone's record: HEARD 100 / 60 PERCENT · FINISH / NOT HEARD. */
+export const statusPercent = (s: ListenStatusRow | null | undefined, which: Which, local?: LocalListens | null): number => {
+  const server = which === 'weekly' ? Number(s?.my_weekly_percent ?? 0) : Number(s?.my_context_percent ?? 0);
+  const g = which === 'weekly' ? s?.weekly_generated_at : s?.context_generated_at;
+  const l = local?.[which];
+  const mine = l && g && l.generatedAt === g ? l.percent : 0;
+  return Math.max(server || 0, mine);
+};
+export const listenChipText = (gate: ListenGate, percents: Record<Which, number>, compact = false): { text: string; tone: 'red' | 'amber' | 'green' } => {
+  const due = gateDue(gate);
+  if (!due) return { text: 'HEARD 100', tone: 'green' };
+  const dueKinds = (['weekly', 'context'] as Which[]).filter((w) => gate[w] === 'due');
+  const least = Math.min(...dueKinds.map((w) => percents[w] ?? 0));
+  if (least > 0) return { text: `${Math.round(least)} PERCENT · FINISH`, tone: 'amber' };
+  return { text: compact ? LISTEN_CHIP_DUE_SHORT : LISTEN_CHIP_DUE, tone: 'red' };
+};
+/** One line of the My Crew "Who listened" block, from get_crew_listen_progress rows (best per person per kind). */
+export type CrewListenRow = { client_id: string; which: Which; by: string; by_name: string | null; role: string | null; percent: number; heard: boolean; at: string | null; version: number | null };
+export type CrewListenLine = { by: string; name: string; weekly: number | null; context: number | null; weeklyHeard: boolean; contextHeard: boolean };
+export const crewListenLines = (rows: CrewListenRow[], clientId: string, members: { id: string; name: string }[]): { crew: CrewListenLine[]; others: CrewListenLine[] } => {
+  const byId = new Map<string, CrewListenLine>();
+  const line = (id: string, name: string): CrewListenLine => byId.get(id) ?? (byId.set(id, { by: id, name, weekly: null, context: null, weeklyHeard: false, contextHeard: false }), byId.get(id)!);
+  for (const m of members) line(m.id, m.name);
+  for (const r of rows) {
+    if (r.client_id !== clientId) continue;
+    const l = line(r.by, r.by_name ?? 'Unknown');
+    if (r.which === 'weekly') { l.weekly = Math.max(l.weekly ?? 0, r.percent); l.weeklyHeard = l.weeklyHeard || r.heard; }
+    else { l.context = Math.max(l.context ?? 0, r.percent); l.contextHeard = l.contextHeard || r.heard; }
+  }
+  const memberIds = new Set(members.map((m) => m.id));
+  const all = [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
+  return { crew: all.filter((l) => memberIds.has(l.by)), others: all.filter((l) => !memberIds.has(l.by)) };
+};
+export const crewLineText = (l: CrewListenLine): string => {
+  const one = (p: number | null, heard: boolean) => (p == null ? '0 percent' : heard ? '100 percent' : `${Math.round(p)} percent`);
+  return `This week ${one(l.weekly, l.weeklyHeard)} · Health context ${one(l.context, l.contextHeard)}`;
 };
 
 /* ---------- The Add Workout listen sheet (22 Oct 2026) ----------

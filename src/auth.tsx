@@ -3,6 +3,7 @@ import type { Session } from '@supabase/supabase-js';
 import { supabase } from './lib/supabase';
 import { runSessionTeardown } from './lib/sessionTeardown';
 import { setOutboxUser } from './lib/offline';
+import { setListenLocalUser } from './lib/listenLocal';
 import type { Role } from './store';
 
 type AuthCtx = {
@@ -46,11 +47,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     supabase.auth.getSession().then(({ data }) => {
       hadSessionRef.current = !!data.session;
       setOutboxUser(data.session?.user?.id ?? null);
+      setListenLocalUser(data.session?.user?.id ?? null);
       setSession(data.session);
       setLoading(false);
     });
     const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
       setOutboxUser(s?.user?.id ?? null);
+      setListenLocalUser(s?.user?.id ?? null);
       if (!s && hadSessionRef.current) runSessionTeardown();
       hadSessionRef.current = !!s;
       setSession(s);

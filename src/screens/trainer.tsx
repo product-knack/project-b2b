@@ -27,6 +27,7 @@ import { useClientCycleStatus, ClientCycle } from '../lib/cycleQueries';
 import { CycleChip, CyclePopup, CyclePopupInfo, cycleColor } from '../components/cycleLabel';
 import { EssentialsBadge } from '../components/essentialsBadge';
 import { ClientHealthSummaryCard, ListenGateSheet, ClientSummaryStrip } from '../components/clientHealthSummaryCard';
+import { useLocalListens } from '../lib/listenLocal';
 import { LatestRecoveryLine } from '../components/LatestHealthData';
 import { dayMonth, dayBefore } from '../lib/latestDaily';
 import { useClientHealthSummary } from '../lib/clientHealthSummaryQueries';
@@ -6716,14 +6717,18 @@ export function Workout() {
   // only, online only, never while editing a queued log; fails open when the
   // row cannot be read (no summary = nothing to require).
   const { session: authSession, dbRole: authRole } = useAuth();
-  const listenEligible = !!workoutScheduleId && !editingOutboxId && isOnline;
+  // Since 3 Nov 2026 the gate works offline too (owner: "no network must work the same"): the row comes from the
+  // persisted cache, the device voice reads it, and the phone's own listen record (listenLocal) clears the gate until
+  // the outbox syncs it. Only a client whose row was never loaded on this phone has nothing to require.
+  const listenEligible = !!workoutScheduleId && !editingOutboxId;
   const summaryQ = useClientHealthSummary(selectedClientId, listenEligible);
+  const listenLocal = useLocalListens(listenEligible ? selectedClientId : null);
   const [listenDone, setListenDone] = React.useState(false);
   // Once needed, the listen sheet STAYS up until the trainer taps Proceed to workout (22 Oct 2026): Play records the
   // listen at once, so the refreshed row read "done" and closed the sheet mid-audio on the second Play.
   const [listenArmed, setListenArmed] = React.useState(false);
   React.useEffect(() => { setListenDone(false); setListenArmed(false); }, [selectedClientId, workoutScheduleId, editingOutboxId]);
-  const listenDue = listenEligible && !!summaryQ.data && gateDue(listenGate(summaryQ.data, authSession?.user?.id ?? null));
+  const listenDue = listenEligible && !!summaryQ.data && gateDue(listenGate(summaryQ.data, authSession?.user?.id ?? null, Date.now(), listenLocal));
   React.useEffect(() => { if (listenDue && !listenDone) setListenArmed(true); }, [listenDue, listenDone]);
   const listenRequired = listenSheetUp({ done: listenDone, armed: listenArmed, eligible: listenEligible, due: listenDue });
   // Session timer (13 Oct 2026): a log whose health data is already complete starts its
