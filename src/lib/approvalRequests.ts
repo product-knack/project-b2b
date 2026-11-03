@@ -114,7 +114,7 @@ export const sessionCodeStatusLine = (r: ApprovalRequest | null | undefined): { 
     otherwise. LOCATION_ added 2 Nov 2026 (set_client_brb_location); WALLET_ the same day (Team Wallet). */
 export const codedSentence = (e: unknown): string | null => {
   const msg = String((e as { message?: unknown } | null)?.message ?? '').trim();
-  const m = msg.match(/^(?:OTP|APPROVAL|LOCATION|WALLET)_[A-Z_]+:\s*(.+)$/s);
+  const m = msg.match(/^(?:OTP|APPROVAL|LOCATION|WALLET|COMPLAINT)_[A-Z_]+:\s*(.+)$/s);
   return m && m[1].trim() ? m[1].trim() : null;
 };
 

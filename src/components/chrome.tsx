@@ -203,6 +203,8 @@ export function Drawer() {
     // workspace links it too, so academy/admin accounts also see it.
     if (it.route === 'b2c-reports') return session?.user?.id === '196ec824-a093-4944-ae3d-3c4919ebf0df' || role === 'academy' || role === 'admin';
     if (it.route === 'mgr-dash' || it.label === 'Managers Overview' || it.label === 'QHP Overview') return caps.data.isManager;
+    // Client complaints (3 Nov 2026): managers (their teams), the physio HOD and admins (every team), the server rule complaint_viewer_kind
+    if (it.route === 'client-complaints') return caps.data.isManager || caps.data.isPhysioHod || dbRole === 'admin' || dbRole === 'super_admin' || session?.user?.id === '30df5c2b-0f40-4736-9f41-7cbc830a191a';
     if (it.label === 'Trainers Tracker') return caps.data.isTrainerManager;
     if (it.route === 'crm-esc') return caps.data.isCrmManager; // web: crm_manager spec only
     if (it.label === 'Trainer Roster') return caps.data.canViewAllTrainers;

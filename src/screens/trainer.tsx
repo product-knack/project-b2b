@@ -57,6 +57,8 @@ import { SessionOtpSheet } from '../components/SessionOtpSheet';
 import { ClientThreadsCard } from '../components/clientThreadsCard';
 import { ManagerTeamChatCard } from './managerChat';
 import { istToday, useMyManagerTeam, TRAINER_MODALITIES } from '../lib/managerChatQueries';
+import { useComplaintCounts } from '../lib/clientComplaintsQueries';
+import { openLine as complaintsOpenLine } from '../lib/clientComplaints';
 import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import { ClientLocationSheet, type LocationTarget } from '../components/ClientLocationSheet';
 import { useClientPins } from '../lib/clientLocationQueries';
@@ -12204,7 +12206,8 @@ function MgrMemberRow({ member, rank, metric, value, unit, first, periodStart, p
 }
 
 export function Managers() {
-  const { mgrTab, set } = useStore();
+  const { mgrTab, set, go } = useStore();
+  const complaintCountsQ = useComplaintCounts(); // the header link to the Client complaints page (3 Nov 2026)
   const trainerId = useTrainerId();
   const mgrCaps = useMyCapabilities();
   const teamQ = useManagerTeam(trainerId);
@@ -12303,6 +12306,12 @@ export function Managers() {
           <Serif style={{ fontSize: 18 }}>{team.teamName || 'My Team'}</Serif>
         </View>
       </View>
+      {/* Client complaints (3 Nov 2026): its own page; this is only the way in from the overview */}
+      <Pressable onPress={() => go('client-complaints')} hitSlop={8} accessibilityRole="button" style={{ flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 10, paddingHorizontal: 13, borderRadius: 13, backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: hexA(C.gold, 0.3) }}>
+        <Icon name="alert" size={14} color={C.gold} strokeWidth={2.1} />
+        <Text style={{ flex: 1, fontFamily: F.bodySemi, fontSize: 12.5, color: C.ink }}>Client complaints · {complaintsOpenLine(complaintCountsQ.data)}</Text>
+        <Icon name="chevRight" size={14} color={C.muted} strokeWidth={2.2} />
+      </Pressable>
       {teams.length > 1 ? (
         <HScroll>
           {teams.map((t) => {

@@ -87,6 +87,7 @@ export function PushTokenManager() {
     if (t === 'qhp_location_added') { go(dbRoleRef.current === 'trainer' ? 'qhp' : homeRouteFor(roleRef.current)); return; }
     // Team Wallet (2 Nov 2026): the top-up receipt opens the Wallet screen.
     if (t === 'wallet_topup' || data.route === 'wallet') { go('wallet'); return; }
+    if (t === 'client_complaint' || data.route === 'client-complaints') { go('client-complaints'); return; } // a flagged log or a client report (3 Nov 2026)
     // 7 PM team-flags push → straight into the manager chat.
     if (t === 'manager_team_flags' || data.route === 'manager-chat') { go('manager-chat'); return; }
     // Anything else that names a route/session (unknown web routes included) → home.
