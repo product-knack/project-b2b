@@ -1107,7 +1107,7 @@ export function DoctorAllClients() {
   const q = useAllClientsForDoctor(allowed);
   const [search, setSearch] = React.useState('');
   const [subFilter, setSubFilter] = React.useState('all');
-  const SUBS = ['all', 'none', 'Odds basic', 'Odds plus', 'Odds pro', 'Odds lux', 'Odds Prive', 'Odds APEX', 'Virtual Training', 'Influencer'];
+  const SUBS = ['all', 'Odds basic', 'Odds plus', 'Odds pro', 'Odds lux', 'Odds Prive', 'Odds APEX', 'Essentials', 'Virtual Training'];
 
   if (!allowed) {
     return (

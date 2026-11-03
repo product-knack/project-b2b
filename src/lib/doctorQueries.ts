@@ -886,9 +886,14 @@ export function useAllClientsForDoctor(enabled: boolean) {
         .from('clients')
         .select('id, first_name, last_name, email, subscription_type, created_at, status')
         .eq('status', 'active')
+        .not('subscription_type', 'is', null)
         .order('created_at', { ascending: false });
       if (error) throw new Error(error.message);
-      const clients = (data ?? []) as any[];
+      // 3 Nov 2026 (owner, web parity): only clients with a subscription, not Influencer or Trial / Trail.
+      const clients = ((data ?? []) as any[]).filter((c) => {
+        const sub = String(c.subscription_type ?? '').trim().toLowerCase();
+        return sub !== '' && !['influencer', 'trial', 'trail'].includes(sub);
+      });
       const clientIds = clients.map((c) => c.id);
       const crmByClient = new Map<string, string>();
       const crmName = new Map<string, string>();
