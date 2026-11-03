@@ -47,7 +47,9 @@ export type AiPlanSources = {
 /** wallet (Team Wallet, 2 Nov 2026): does the caller pay for drafts (trainers), the balance and a waiting bill;
     null while the wallet is not on the server. */
 export type AiPlanPreview = { eligible: boolean; allowed: boolean; essentials: boolean; client_name: string; sources: AiPlanSources; model: string; wallet: WalletGate | null };
-export type AiPlanResult = { draft: AiPlanDraft; dropped: string[]; sources: AiPlanSources; model: string; generated_at: string };
+/** wallet (3 Nov 2026): what the server charged for this draft (trainers after their free plans); the draft always lands. */
+export type AiDraftCharge = { charged: boolean; charged_paise: number; balance_paise: number; negative: boolean; free_left: number | null; error: string | null };
+export type AiPlanResult = { draft: AiPlanDraft; dropped: string[]; sources: AiPlanSources; model: string; generated_at: string; wallet?: AiDraftCharge | null };
 
 const str = (v: unknown) => (v == null ? '' : String(v));
 

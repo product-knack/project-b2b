@@ -14,7 +14,7 @@ import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import { useIsOnline } from '../lib/offline';
 import { useTeamWallet, useTeamWalletPage, useCreateTopup, useVerifyTopup, useWalletRealtime, walletErrorText, type TopupOrder } from '../lib/teamWalletQueries';
 import {
-  DAILY_CAP_PAISE, TEST_TOPUP_PAISE, TOPUP_PICKS, fmtWhen, freeLeftLine, groupByMonth, isPendingBill, isPendingTopup, methodLabel, parseRupeeInput, rowAmountText, rowChip, rowSecondLine, rowTitle, rupees,
+  DAILY_CAP_PAISE, TEST_TOPUP_PAISE, TOPUP_PICKS, balanceText, negativeBalanceLine, fmtWhen, freeLeftLine, groupByMonth, isPendingBill, isPendingTopup, methodLabel, parseRupeeInput, rowAmountText, rowChip, rowSecondLine, rowTitle, rupees,
   signedRupees, topupExpired, topupProblem, topupRoomLine, type Tone, type WalletRow,
 } from '../lib/teamWallet';
 import { WalletCheckout, type CheckoutMessage } from '../components/WalletCheckout';
@@ -292,6 +292,7 @@ export function Wallet() {
   if (!session) return <AccessPending />;
   const groups = groupByMonth(rows);
   const notSetUp = q.isError && /not set up/i.test(String((q.error as Error)?.message ?? ''));
+  const negative = !!data && (data.negative || data.balance_paise < 0);
 
   return (
     <Page gap={16} pt={6}>
@@ -300,18 +301,20 @@ export function Wallet() {
       <Card colors={['rgba(60,38,24,0.5)', 'rgba(18,14,14,0.55)']} radius={20} style={{ padding: 18, gap: 6 }}>
         <Mono style={{ fontSize: 9, letterSpacing: 1.2, color: C.muted3 }}>BALANCE</Mono>
         {q.isPending ? <ActivityIndicator color={C.orange} style={{ alignSelf: 'flex-start', marginVertical: 8 }} /> : (
-          <Serif style={{ fontSize: 38, color: (data?.balance_paise ?? 0) < 0 ? C.red : '#fff' }}>{rupees(data?.balance_paise ?? 0)}</Serif>
+          <Serif style={{ fontSize: 38, color: negative ? C.red : '#fff' }}>{balanceText(data?.balance_paise ?? 0)}</Serif>
         )}
+        {/* Below zero (3 Nov 2026): an AI plan took the wallet negative; the next top-up clears it first. */}
+        {negative ? <Body style={{ fontSize: 12, color: '#FF9B8F', lineHeight: 16 }}>{data?.negative_line ?? negativeBalanceLine(data?.balance_paise ?? 0)}</Body> : null}
         <Body style={{ fontSize: 11.5, color: C.muted2 }}>
           {!online ? 'Offline, last known balance' : updatedAt ? `Updated ${fmtWhen(new Date(updatedAt).toISOString())}` : notSetUp ? 'The wallet is not set up on the server yet.' : q.isError ? walletErrorText(q.error, 'Could not load the wallet. Pull to refresh.') : ''}
         </Body>
-        {data?.charges_ai ? <Body style={{ fontSize: 11, color: C.muted3, marginTop: 2 }}>{data.free_left > 0 ? `${freeLeftLine(data.free_left)}. After that Odds AI plans cost Rs 30 to 50 each, deducted here.` : 'Odds AI plans cost Rs 30 to 50 each, deducted here. Essentials clients stay free.'}</Body> : null}
+        {data?.charges_ai && !negative ? <Body style={{ fontSize: 11, color: C.muted3, marginTop: 2 }}>{data.free_left > 0 ? `${freeLeftLine(data.free_left)}. After that Odds AI plans cost Rs 30 to 50 each, deducted here after the draft.` : 'Odds AI plans cost Rs 30 to 50 each, deducted here after the draft. Essentials clients stay free.'}</Body> : null}
       </Card>
 
-      <Pressable onPress={() => { setAddErr(null); setAddOpen(true); }} disabled={!online || notSetUp} accessibilityRole="button" accessibilityLabel="Add money" style={{ borderRadius: 13, overflow: 'hidden', opacity: online && !notSetUp ? 1 : 0.5 }}>
-        <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 13 }}>
+      <Pressable onPress={() => { setAddErr(null); setAddOpen(true); }} disabled={!online || notSetUp} accessibilityRole="button" accessibilityLabel={negative ? 'Add funds' : 'Add money'} style={{ borderRadius: 13, overflow: 'hidden', opacity: online && !notSetUp ? 1 : 0.5 }}>
+        <LinearGradient colors={negative ? [C.red, '#B2402E'] : ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 13 }}>
           <Icon name="plus" size={15} color="#fff" strokeWidth={2.6} />
-          <Text style={{ fontFamily: F.bodyBold, fontSize: 13.5, color: '#fff' }}>Add money</Text>
+          <Text style={{ fontFamily: F.bodyBold, fontSize: 13.5, color: '#fff' }}>{negative ? 'Add funds' : 'Add money'}</Text>
         </LinearGradient>
       </Pressable>
       {!online ? <Body style={{ fontSize: 11.5, color: C.gold, marginTop: -8 }}>{OFFLINE_LINE}</Body> : null}

@@ -36,6 +36,9 @@ export type TeamWalletRead = {
   min_topup_paise: number;
   daily_cap_paise: number;
   ai_floor_paise: number;
+  /** 3 Nov 2026: the balance is below zero (an AI plan took it there); the owner's sentence for the screen. */
+  negative: boolean;
+  negative_line: string | null;
   charges_ai: boolean;
   free_total: number;
   free_used: number;
@@ -48,8 +51,10 @@ export type TeamWalletRead = {
     Essentials client is always free; free_this = this draft costs nothing, billed = the bill sheet will follow. */
 export type WalletGate = {
   charges: boolean; balance_paise: number; floor_paise: number;
+  /** 3 Nov 2026: the balance is below zero (only this blocks a paid draft), and the exact bill for the client asked about. */
+  negative: boolean; bill_paise: number | null; line: string | null;
   free_total: number; free_used: number; free_left: number; essentials: boolean; free_this: boolean; billed: boolean;
-  pending_bill: PendingBill | null; ok: boolean; reason: 'WALLET_FLOOR' | 'WALLET_BILL_PENDING' | null;
+  pending_bill: PendingBill | null; ok: boolean; reason: 'WALLET_FLOOR' | 'WALLET_BILL_PENDING' | 'WALLET_NEGATIVE' | null;
 };
 export const FREE_DRAFTS = 3;
 export type AiBill = { tx_id: string; bill_paise: number; balance_paise: number; blocks: string[] };
@@ -121,7 +126,9 @@ export const parseWalletRead = (d: any): TeamWalletRead => ({
   today_room_paise: num(d?.today_room_paise, DAILY_CAP_PAISE),
   min_topup_paise: num(d?.min_topup_paise, MIN_TOPUP_PAISE),
   daily_cap_paise: num(d?.daily_cap_paise, DAILY_CAP_PAISE),
-  ai_floor_paise: num(d?.ai_floor_paise, AI_FLOOR_PAISE),
+  ai_floor_paise: num(d?.ai_floor_paise, 0),
+  negative: d?.negative === true || num(d?.balance_paise) < 0,
+  negative_line: d?.negative_line ? String(d.negative_line) : num(d?.balance_paise) < 0 ? negativeBalanceLine(num(d?.balance_paise)) : null,
   charges_ai: d?.charges_ai === true,
   free_total: num(d?.free_total, FREE_DRAFTS),
   free_used: num(d?.free_used),
@@ -131,13 +138,15 @@ export const parseWalletRead = (d: any): TeamWalletRead => ({
 });
 export const parseWalletGate = (w: any): WalletGate | null => {
   if (!w || typeof w !== 'object') return null;
-  const reason = w.reason === 'WALLET_FLOOR' || w.reason === 'WALLET_BILL_PENDING' ? w.reason : null;
+  const reason = w.reason === 'WALLET_FLOOR' || w.reason === 'WALLET_BILL_PENDING' || w.reason === 'WALLET_NEGATIVE' ? w.reason : null;
   const charges = w.charges === true;
   const free_left = num(w.free_left);
   const essentials = w.essentials === true;
   const free_this = typeof w.free_this === 'boolean' ? w.free_this : !charges || essentials || free_left > 0;
+  const balance_paise = num(w.balance_paise);
   return {
-    charges, balance_paise: num(w.balance_paise), floor_paise: num(w.floor_paise, AI_FLOOR_PAISE),
+    charges, balance_paise, floor_paise: num(w.floor_paise, 0),
+    negative: w.negative === true || balance_paise < 0, bill_paise: w.bill_paise == null ? null : num(w.bill_paise), line: w.line == null ? null : String(w.line),
     free_total: num(w.free_total, FREE_DRAFTS), free_used: num(w.free_used), free_left, essentials, free_this,
     billed: typeof w.billed === 'boolean' ? w.billed : charges && !free_this,
     pending_bill: parsePendingBill(w.pending_bill), ok: w.ok !== false && !reason, reason,
@@ -240,19 +249,37 @@ export const billPreviewLine = (p: BillPreview | null | undefined): string => {
   const n = p.sections.length;
   return `${n} section${n === 1 ? '' : 's'}, ${p.exercise_count} exercise${p.exercise_count === 1 ? '' : 's'}`;
 };
-export type WalletCardState = 'free' | 'essentials' | 'free_left' | 'ok' | 'floor' | 'bill_pending' | 'unknown';
+export type WalletCardState = 'free' | 'essentials' | 'free_left' | 'ok' | 'negative' | 'bill_pending' | 'unknown';
 /** "3 free AI plans left" / "1 free AI plan left" */
 export const freeLeftLine = (n: number): string => `${n} free AI plan${n === 1 ? '' : 's'} left`;
-/** The Create Plan AI card: what the wallet allows and the line to show. */
+/** "Rs -5" in the owner's form for a balance (rupees() prints "- Rs 5" for amounts). */
+export const balanceText = (paise: number): string => (num(paise) < 0 ? `Rs -${rupees(-num(paise)).slice(3)}` : rupees(paise));
+/** The owner's sentence for a wallet below zero (3 Nov 2026). */
+export const negativeBalanceLine = (balancePaise: number): string => `Your wallet is at ${balanceText(balancePaise)}. Add funds to make the next plan with Odds AI.`;
+/** The Create Plan AI card: what the wallet allows and the line to show. Since 3 Nov 2026 only a negative balance
+    blocks; a balance below the price does not (the plan is charged after the draft and may take the wallet negative). */
 export const walletCardState = (w: WalletGate | null | undefined): { state: WalletCardState; line: string | null; action: 'wallet' | 'bill' | null } => {
   if (!w) return { state: 'unknown', line: null, action: null };
   if (!w.charges) return { state: 'free', line: null, action: null };
   if (w.essentials) return { state: 'essentials', line: 'Free for Essentials clients.', action: null };
   if (w.free_left > 0) return { state: 'free_left', line: `${freeLeftLine(w.free_left)}. After that Rs 30 to 50 a plan from your wallet.`, action: null };
   if (w.pending_bill) return { state: 'bill_pending', line: 'Settle or discard your last draft first.', action: 'bill' };
-  if (w.balance_paise < w.floor_paise) return { state: 'floor', line: `Wallet ${rupees(w.balance_paise)}. You need at least ${rupees(w.floor_paise)} in your wallet to make an AI plan.`, action: 'wallet' };
-  return { state: 'ok', line: `Free AI plans used. Wallet ${rupees(w.balance_paise)}, Rs 30 to 50 a plan.`, action: null };
+  if (w.negative) return { state: 'negative', line: w.line ?? negativeBalanceLine(w.balance_paise), action: 'wallet' };
+  const price = w.bill_paise != null ? rupees(w.bill_paise) : 'Rs 30 to 50';
+  return { state: 'ok', line: `${price} from your wallet · balance ${balanceText(w.balance_paise)}`, action: null };
 };
+/** The chooser card's chip (3 Nov 2026): "2 FREE LEFT" / "FREE FOR ESSENTIALS" / "RS 33" / "ADD FUNDS". */
+export const aiOptionChip = (w: WalletGate | null | undefined): { text: string; tone: Tone } | null => {
+  if (!w || !w.charges) return null;
+  if (w.essentials) return { text: 'FREE FOR ESSENTIALS', tone: 'green' };
+  if (w.free_left > 0) return { text: `${w.free_left} FREE LEFT`, tone: 'green' };
+  if (w.pending_bill) return { text: 'BILL WAITING', tone: 'amber' };
+  if (w.negative) return { text: 'ADD FUNDS', tone: 'red' };
+  return { text: w.bill_paise != null ? rupees(w.bill_paise).toUpperCase() : 'RS 30 TO 50', tone: 'amber' };
+};
+/** After a charged draft: "Rs 33 deducted. Wallet Rs -5." (red when negative). */
+export const afterChargeLine = (chargedPaise: number, balancePaise: number): { text: string; tone: 'red' | 'green' } =>
+  chargedPaise > 0 ? { text: `${rupees(chargedPaise)} deducted. Wallet ${balanceText(balancePaise)}.`, tone: balancePaise < 0 ? 'red' : 'green' } : { text: `Wallet ${balanceText(balancePaise)}.`, tone: balancePaise < 0 ? 'red' : 'green' };
 
 /** The sentence after "WALLET_CODE:" of a server refusal, else null. */
 export const codedWalletSentence = (e: unknown): string | null => {

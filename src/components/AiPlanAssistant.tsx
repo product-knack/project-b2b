@@ -14,7 +14,7 @@ import { trackEvent } from '../lib/amplitude';
 import { useAiPlanDraft } from '../lib/aiPlanQueries';
 import { SPLITS, splitOf, aiPromptLine, sourcesLine, draftExerciseCount, draftNewExercises, type AiPlanPreview, type AiPlanResult, type SplitKey } from '../lib/aiPlanDraft';
 import { useStore } from '../store';
-import { walletCardState, rupees } from '../lib/teamWallet';
+import { walletCardState, rupees, afterChargeLine } from '../lib/teamWallet';
 import { AiBillSheet, type AiBillTarget } from './AiBillSheet';
 
 const AI = '#A78BFA';
@@ -31,18 +31,22 @@ export function AiPlanAssistant({ clientId, clientName, preview, onApply }: {
   const draftM = useAiPlanDraft();
   const { go } = useStore();
   const [open, setOpen] = React.useState(true);
-  /* Team Wallet (2 Nov 2026): a trainer's draft is held behind a bill of Rs 30 to 50 until Deduct from wallet.
-     The panel shows the wallet line, refuses Generate under Rs 50 or while a bill waits, and opens the bill sheet
-     after the draft (or for the waiting bill the preview reports). */
+  /* Team Wallet (2 Nov 2026, charge rule revised 3 Nov 2026): after the 3 free plans a trainer's draft is charged
+     automatically the moment it is made (Rs 30 + Rs 5 per data block, cap Rs 50); the balance may go negative, and
+     only a negative balance blocks the next one. The panel shows the standing line, the Generate button names the
+     price, and after the draft a line says what was deducted. The bill sheet survives only for a bill from before
+     the rule change (the server still reports it as pending). */
   const [bill, setBill] = React.useState<AiBillTarget>(null);
   const [billNote, setBillNote] = React.useState<string | null>(null);
+  const [charged, setCharged] = React.useState<{ text: string; tone: 'red' | 'green' } | null>(null);
   const wallet = walletCardState(preview.wallet);
   const pendingBill = preview.wallet?.pending_bill ?? null;
   const openPendingBill = () => {
     if (!pendingBill || !preview.wallet) return;
     setBill({ tx_id: pendingBill.tx_id, bill_paise: pendingBill.bill_paise, balance_paise: preview.wallet.balance_paise, preview: pendingBill.preview, clientName: pendingBill.client_name ?? clientName });
   };
-  const walletBlocks = wallet.state === 'floor' || wallet.state === 'bill_pending';
+  const walletBlocks = wallet.state === 'negative' || wallet.state === 'bill_pending';
+  const priceLabel = preview.wallet?.billed && preview.wallet.bill_paise != null ? ` for ${rupees(preview.wallet.bill_paise)}` : '';
   const [split, setSplit] = React.useState<SplitKey | null>(null);
   const [note, setNote] = React.useState('');
   const [result, setResult] = React.useState<AiPlanResult | null>(null);
@@ -75,7 +79,11 @@ export function AiPlanAssistant({ clientId, clientName, preview, onApply }: {
       }
       const r = a.result;
       setResult(r);
-      trackEvent('AI Plan Generated', { client_id: clientId, split, model: r.model, exercises: draftExerciseCount(r.draft), not_in_db: draftNewExercises(r.draft).length, dropped: r.dropped.length });
+      // 3 Nov 2026: what the wallet did for this draft (charged after the draft; the draft lands either way).
+      if (r.wallet?.charged) setCharged(afterChargeLine(r.wallet.charged_paise, r.wallet.balance_paise));
+      else if (r.wallet?.error) setCharged({ text: `Not charged: ${r.wallet.error}`, tone: 'red' });
+      else setCharged(null);
+      trackEvent('AI Plan Generated', { client_id: clientId, split, model: r.model, exercises: draftExerciseCount(r.draft), not_in_db: draftNewExercises(r.draft).length, dropped: r.dropped.length, charged_paise: r.wallet?.charged_paise ?? 0 });
       onApply(r, aiPromptLine(r.draft.split_label || splitOf(split)?.label || split, note));
     } catch (e: any) {
       trackEvent('AI Plan Generate Failed', { client_id: clientId, split, error: String(e?.message ?? e).slice(0, 120) });
@@ -172,13 +180,14 @@ export function AiPlanAssistant({ clientId, clientName, preview, onApply }: {
             <LinearGradient colors={['#8B5CF6', '#6D28D9']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14 }}>
               {draftM.isPending ? <ActivityIndicator size="small" color="#fff" /> : <Icon name="sparkle" size={15} color="#fff" strokeWidth={2.2} />}
               <Text style={{ fontFamily: F.bodyBold, fontSize: 14, color: '#fff' }}>
-                {draftM.isPending ? `Drafting… ${secs}s` : !split ? 'Choose a split first' : result ? 'Generate again' : 'Generate workout plan'}
+                {draftM.isPending ? `Drafting… ${secs}s` : !split ? 'Choose a split first' : result ? `Generate again${priceLabel}` : `Generate workout plan${priceLabel}`}
               </Text>
             </LinearGradient>
           </Pressable>
           {draftM.isPending ? <Body style={{ fontSize: 11, color: AI, textAlign: 'center' }}>{STEPS[step]}…</Body> : null}
           {draftM.error && !draftM.isPending ? <Body style={{ fontSize: 11.5, color: C.red }}>{(draftM.error as Error).message.replace(/^WALLET_[A-Z_]+:\s*/, '')}</Body> : null}
-          {wallet.state === 'ok' && !result ? <Body style={{ fontSize: 10.5, color: C.muted3, textAlign: 'center' }}>Rs 30 to 50 a draft, shown after it is made. Deduct in one tap or discard it.</Body> : null}
+          {wallet.state === 'ok' && !result ? <Body style={{ fontSize: 10.5, color: C.muted3, textAlign: 'center' }}>Deducted from your wallet after the draft is made. The draft always lands.</Body> : null}
+          {charged ? <Body style={{ fontSize: 11.5, color: charged.tone === 'red' ? '#FF9B8F' : C.green, textAlign: 'center' }}>{charged.text}</Body> : null}
 
           {result && !draftM.isPending ? (
             <View style={{ gap: 9, padding: 12, borderRadius: 14, backgroundColor: hexA(C.green, 0.07), borderWidth: 1, borderColor: hexA(C.green, 0.3) }}>

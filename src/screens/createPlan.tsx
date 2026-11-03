@@ -19,7 +19,7 @@ import { useDragReorder } from '../lib/useDragReorder';
 import { AiPlanAssistant } from '../components/AiPlanAssistant';
 import { useAiPlanPreview } from '../lib/aiPlanQueries';
 import { draftToBodyParts, shouldFill, draftExerciseCount, aiChoice, planSource, type AiPlanResult, type PlanBuildMode } from '../lib/aiPlanDraft';
-import { walletCardState } from '../lib/teamWallet';
+import { walletCardState, aiOptionChip, negativeBalanceLine } from '../lib/teamWallet';
 import { trackEvent } from '../lib/amplitude';
 
 /* ============ CREATE WORKOUT PLAN ============
@@ -252,8 +252,24 @@ export function CreatePlan() {
   const aiAllowed = !isEdit && aiPreviewQ.data?.allowed === true;
   const [mode, setMode] = React.useState<PlanBuildMode | null>(isEdit ? 'manual' : null);
   const aiPick = aiChoice({ online: isOnline, clientId: selectedClientId, modality, allowed: isEdit ? false : aiPreviewQ.data ? aiPreviewQ.data.allowed : null });
-  // Team Wallet (2 Nov 2026): a trainer pays Rs 30 to 50 a draft; the card says what the wallet allows (the panel holds the buttons).
+  // Team Wallet (2 Nov 2026, rule revised 3 Nov 2026): after the 3 free plans a draft is charged automatically once it is
+  // made; the card shows the standing (free count, the exact price and balance, or ADD FUNDS); only a NEGATIVE balance
+  // blocks, with the owner's popup and a button to the Wallet. A balance below the price never blocks.
   const walletCard = walletCardState(aiPreviewQ.data?.wallet ?? null);
+  const aiChip = aiOptionChip(aiPreviewQ.data?.wallet ?? null);
+  const aiChipColor = aiChip?.tone === 'red' ? C.red : aiChip?.tone === 'amber' ? C.gold : C.green;
+  const chooseAi = () => {
+    if (!aiPick.enabled) return;
+    if (walletCard.state === 'negative') {
+      trackEvent('AI Plan Blocked Negative Wallet', { client_id: selectedClientId, balance_paise: aiPreviewQ.data?.wallet?.balance_paise ?? null });
+      Alert.alert('Add funds', walletCard.line ?? negativeBalanceLine(aiPreviewQ.data?.wallet?.balance_paise ?? 0), [
+        { text: 'Build manually', onPress: () => chooseMode('manual') },
+        { text: 'Add money', onPress: () => go('wallet') },
+      ]);
+      return;
+    }
+    chooseMode('ai');
+  };
   const chooseMode = (m: PlanBuildMode) => {
     setMode(m);
     // An AI draft is a Strength Training plan (it covers the Strength and Cardio days).
@@ -503,20 +519,27 @@ export function CreatePlan() {
               <Body style={{ fontSize: 12.5, color: C.muted, marginTop: 1 }}>How do you want to build {first}'s plan?</Body>
             </View>
           </View>
-          <Pressable onPress={() => chooseMode('ai')} disabled={!aiPick.enabled} hitSlop={6} accessibilityRole="button" accessibilityState={{ disabled: !aiPick.enabled }}
-            style={{ padding: 16, borderRadius: 20, backgroundColor: 'rgba(76,52,140,0.32)', borderWidth: 1, borderColor: hexA('#A78BFA', aiPick.enabled ? 0.55 : 0.25), opacity: aiPick.enabled ? 1 : 0.6, gap: 10 }}>
+          <Pressable onPress={chooseAi} disabled={!aiPick.enabled} hitSlop={6} accessibilityRole="button" accessibilityState={{ disabled: !aiPick.enabled }}
+            style={{ padding: 16, borderRadius: 20, backgroundColor: 'rgba(76,52,140,0.32)', borderWidth: 1, borderColor: hexA(walletCard.state === 'negative' ? C.red : '#A78BFA', aiPick.enabled ? 0.55 : 0.25), opacity: aiPick.enabled ? 1 : 0.6, gap: 10 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
               <View style={{ width: 42, height: 42, borderRadius: 13, backgroundColor: hexA('#A78BFA', 0.16), borderWidth: 1, borderColor: hexA('#A78BFA', 0.45), alignItems: 'center', justifyContent: 'center' }}>
                 <Icon name="sparkle" size={19} color="#A78BFA" strokeWidth={2} />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={{ fontFamily: F.bodyBold, fontSize: 16, color: '#fff' }}>Generate with Odds AI</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 7 }}>
+                  <Text style={{ fontFamily: F.bodyBold, fontSize: 16, color: '#fff' }}>AI generated</Text>
+                  {aiChip ? (
+                    <View style={{ paddingVertical: 2.5, paddingHorizontal: 8, borderRadius: 999, backgroundColor: hexA(aiChipColor, 0.14), borderWidth: 1, borderColor: hexA(aiChipColor, 0.45) }}>
+                      <Text style={{ fontFamily: F.bodyBold, fontSize: 9.5, color: aiChipColor }}>{aiChip.text}</Text>
+                    </View>
+                  ) : null}
+                </View>
                 <Body style={{ fontSize: 11.5, color: C.muted2, marginTop: 2, lineHeight: 16 }}>Drafts a Strength Training plan from the QHP, medical and blood reports. You edit everything before it goes for review.</Body>
               </View>
               <Icon name="chevRight" size={16} color="#A78BFA" strokeWidth={2.4} />
             </View>
             {aiPick.reason ? <Body style={{ fontSize: 11, color: C.gold }}>{aiPick.reason}</Body> : null}
-            {!aiPick.reason && walletCard.line ? <Body style={{ fontSize: 11, color: walletCard.state === 'ok' ? C.muted2 : C.gold }}>{walletCard.line}</Body> : null}
+            {!aiPick.reason && walletCard.line ? <Body style={{ fontSize: 11, color: walletCard.state === 'negative' ? '#FF9B8F' : walletCard.state === 'ok' ? C.ink3 : C.gold }}>{walletCard.line}</Body> : null}
           </Pressable>
           <Pressable onPress={() => chooseMode('manual')} hitSlop={6} accessibilityRole="button"
             style={{ padding: 16, borderRadius: 20, backgroundColor: 'rgba(50,30,19,0.45)', borderWidth: 1, borderColor: hexA(C.orange, 0.4), gap: 10 }}>
@@ -525,7 +548,7 @@ export function CreatePlan() {
                 <Icon name="dumbbell" size={19} color={C.orange} strokeWidth={2} />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={{ fontFamily: F.bodyBold, fontSize: 16, color: '#fff' }}>Build it manually</Text>
+                <Text style={{ fontFamily: F.bodyBold, fontSize: 16, color: '#fff' }}>Manual plan</Text>
                 <Body style={{ fontSize: 11.5, color: C.muted2, marginTop: 2, lineHeight: 16 }}>The plan builder as it is today: modality, sections, exercises and sets.</Body>
               </View>
               <Icon name="chevRight" size={16} color={C.orange} strokeWidth={2.4} />

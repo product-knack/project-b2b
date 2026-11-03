@@ -112,12 +112,15 @@ export function useVerifyTopup() {
 /** The ai-plan-draft answer shape, also what the settle call returns. */
 export const parseAiPlanResult = (d: any): AiPlanResult => {
   if (!d?.draft || !Array.isArray(d.draft.sections)) throw new Error('Odds AI returned no plan. Try Generate again.');
+  const w = d.wallet && typeof d.wallet === 'object' ? d.wallet : null;
   return {
     draft: d.draft,
     dropped: Array.isArray(d.dropped) ? d.dropped : [],
     sources: d.sources ?? null,
     model: String(d.model ?? ''),
     generated_at: String(d.generated_at ?? new Date().toISOString()),
+    // 3 Nov 2026: the charge made for this draft (free drafts answer charged false with the free count left)
+    wallet: w ? { charged: w.charged === true, charged_paise: Number(w.charged_paise) || 0, balance_paise: Number(w.balance_paise) || 0, negative: w.negative === true, free_left: w.free_left == null ? null : Number(w.free_left), error: w.error ? String(w.error) : null } : null,
   };
 };
 /** Deduct from wallet: the bill becomes paid and the held draft comes back. */
