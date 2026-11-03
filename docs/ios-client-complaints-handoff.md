@@ -1786,5 +1786,4 @@ SELECT step, check_name, expected, result FROM complaints_probe ORDER BY step;
    name under No team; the report sheet: Start review / Confirm (month free) / Dismiss, Reopen as new.
 4. A trainer who is no manager: no drawer item; the route (from a push) says "Manager access required".
 5. A push "Client flagged a log" opens the page.
-Server: migration 20261104100000 PGlite-tested 21 of 21 and handed to the owner on 3 Nov 2026 (the status line of the
-feature file says when it ran).
+Server: migration 20261104100000 LIVE since 3 Nov 2026 (18 of 18 live probe rows; the RPCs checked read-only as a manager and the admin).
