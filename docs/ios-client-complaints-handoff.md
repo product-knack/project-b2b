@@ -19,7 +19,7 @@ the HOD and admins see every team with a manager filter; a report about the view
 
 # Client complaints (android; the server contract is here too)
 
-Status: built 3 Nov 2026 (tsc clean, rule test 46 checks, Android bundle clean); migration 20261104100000 PGlite-tested 21 of 21 and LIVE 3 Nov 2026 (18 of 18); not in a signed build yet · Last verified: 2026-11-03 (rule tests, PGlite, live read-only RPC check as a manager and the admin) · Sibling file: none yet (web page planned, same RPCs; see section 10)
+Status: built 3 Nov 2026 (tsc clean, rule test 46 checks, Android bundle clean); migrations 20261104100000 (LIVE 3 Nov 2026, 18 of 18) and 20261104110000 live-competition-only (LIVE 3 Nov 2026, 6 of 6: a flag dated before the competition hidden from the manager and the HOD, the same flag dated today shown and counted); not in a signed build yet · Last verified: 2026-11-03 (rule tests, PGlite, live read-only RPC check as a manager and the admin) · Sibling file: none yet (web page planned, same RPCs; see section 10)
 
 ## 1. Purpose and access
 - The client app (B2C) lets a client review the expert's log after every training ("Accurately logged" / "Something's off" with issues and a note, since 21 Oct 2026) and report an expert who asked them to train, treat or pay outside Odds (since 14 Oct 2026, "Only Odds management reads your report. We never tell the expert."). This page is where managers read and handle both.
@@ -87,7 +87,7 @@ Every function SECURITY DEFINER; refusals `COMPLAINT_SIGN_IN` / `COMPLAINT_FORBI
 - Phone: as Sagar (manager) the drawer shows Client complaints; the page lists the flags about his team only; Mark handled → the card greys with the line; Reopen → back to Open. As the admin: every team, the manager chips, "No team". A trainer who is no manager has no drawer item and the route answers "Manager access required".
 
 ## 10. Change log
-- 2026-11-03 (later): live competition only (owner): ongoing teams, no fallback batch, complaints dated inside the competition, the push too; migration `20261104110000` (PGlite, the owner runs it); page sub and empty lines say "in the live competition".
+- 2026-11-03 (later): live competition only (owner): ongoing teams, no fallback batch, complaints dated inside the competition, the push too; migration `20261104110000` (PGlite, LIVE the same day 6 of 6; live counts unchanged: 3 flags + 1 report, all inside Aug 2026 to Jan 2027); page sub and empty lines say "in the live competition".
 - 2026-11-03 (live): Live 3 Nov 2026: migration 20261104100000 ran (18 of 18 probe rows). Read-only RPC check through the same calls the screen makes: Sagar (a manager) gets counts {manager, 0 flags, 1 report} and the one report about a member of his team; the admin gets all 3 flags (two about Jyoti Sharma, rehab, no exercise rows so the session notes travel as the log; one about aarti Gupta, 6 logged exercises) and the 1 report, all under team Aastha; the manager filter returns the same 3, "No team" 0; no trainer-visible leak (the reports table stays closed).
 - 2026-11-03: built (owner's plan `odds-app/docs/client-complaints-plan.md`; revised the same day to an individual page). Migration `20261104100000` PGlite 21 of 21, handed to the owner; rules + 46 checks; queries; panel; screen; drawer in every nav; Managers Overview link; push route; `COMPLAINT_` codes. Web page not built yet (same RPCs; `/trainer/client-complaints` planned). iOS handoff `odds-app/docs/ios-client-complaints-handoff.md` (card 15).
 
@@ -1812,8 +1812,13 @@ BEGIN
     -- 2. a manager of a finished team only sees nothing (manager kind, empty scope)
     IF v_old IS NOT NULL THEN
       PERFORM set_config(as_user, v_old::text, true);
-      v_names := array_append(v_names, 'a manager whose only team is over sees nothing'); v_expected := array_append(v_expected, 'logs 0, reports 0');
-      v_results := array_append(v_results, 'logs ' || jsonb_array_length(public.get_inaccurate_logs('all', NULL, 50)) || ', reports ' || jsonb_array_length(public.get_specialist_reports('all', NULL, 50)));
+      -- nothing to see: an empty list, or a refusal when that person no longer carries the managers flag
+      BEGIN
+        v_res := 'logs ' || jsonb_array_length(public.get_inaccurate_logs('all', NULL, 50)) || ', reports ' || jsonb_array_length(public.get_specialist_reports('all', NULL, 50));
+        IF v_res = 'logs 0, reports 0' THEN v_res := 'nothing'; END IF;
+      EXCEPTION WHEN others THEN v_res := CASE WHEN SQLERRM LIKE 'COMPLAINT_FORBIDDEN%' THEN 'nothing' ELSE SQLERRM END; END;
+      v_names := array_append(v_names, 'a manager whose only team is over sees nothing'); v_expected := array_append(v_expected, 'nothing');
+      v_results := array_append(v_results, v_res);
     END IF;
     -- 3. a flag dated before the live competition started is hidden from the manager and the HOD
     UPDATE public.training_sessions SET log_review = jsonb_build_object('verdict', 'inaccurate', 'at', to_char((v_start - 1)::timestamp AT TIME ZONE 'Asia/Kolkata' AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'), 'issues', jsonb_build_array('loads'), 'note', 'Probe: before the competition') WHERE id = v_session;
@@ -1859,5 +1864,5 @@ SELECT step, check_name, expected, result FROM complaints_live_probe ORDER BY st
    name under No team; the report sheet: Start review / Confirm (month free) / Dismiss, Reopen as new.
 4. A trainer who is no manager: no drawer item; the route (from a push) says "Manager access required".
 5. A push "Client flagged a log" opens the page.
-Server: migration 20261104100000 PGlite-tested 21 of 21 and handed to the owner on 3 Nov 2026 (the status line of the
-feature file says when it ran).
+Server: migrations 20261104100000 and 20261104110000 (live competition only) LIVE since 3 Nov 2026 (18 of 18 and 6 of 6
+live probe rows; the RPCs checked read-only as a manager and the admin).
