@@ -24,6 +24,7 @@ import { trackEvent } from '../lib/amplitude';
 import { getIsOnline } from '../lib/offline';
 import { claimAudioFocus, releaseAudioFocus, type AudioHolder } from '../lib/audioFocus';
 import { useNucleusPieces, useNucleusLocal, readPosition, type NucleusLocal } from '../lib/nucleusQueries';
+import { useReadingSession } from '../lib/nucleusProgress';
 import {
   type NucleusPiece, type NucleusTopic, type NucleusPosition, type KindFilter, type BodyBlock,
   TOPICS, topicMeta, heroPiece, courses, coursePlace, relatedPieces, filterPieces,
@@ -338,14 +339,19 @@ export function Nucleus() {
 /* ============================================================ the piece ============ */
 
 /** A direct video file through expo-video: resumes, stores the position every 10 s and on leave. */
-function FileVideo({ url, startAt, onPosition }: { url: string; startAt: number; onPosition: (seconds: number) => void }) {
+function FileVideo({ url, startAt, onPosition, pieceId, title }: { url: string; startAt: number; onPosition: (seconds: number) => void; pieceId: string; title: string }) {
   const player = useVideoPlayer(url, (p) => { if (startAt > 0) p.currentTime = startAt; p.play(); });
   const onPosRef = React.useRef(onPosition); onPosRef.current = onPosition;
+  const [playing, setPlaying] = React.useState(true);
   React.useEffect(() => {
     const read = () => { try { const t = player.currentTime; if (Number.isFinite(t) && t > 0) onPosRef.current(t); } catch { /* released */ } };
     const t = setInterval(read, POSITION_EVERY_MS);
-    return () => { clearInterval(t); read(); };
+    let sub: { remove: () => void } | null = null;
+    try { sub = (player as any).addListener('playingChange', (ev: any) => setPlaying(ev?.isPlaying ?? ev === true)); } catch { /* older API */ }
+    return () => { clearInterval(t); read(); try { sub?.remove(); } catch { /* gone */ } };
   }, [player]);
+  // Staff reading progress (4 Nov 2026): the open, the seconds while playing, the position over the length.
+  useReadingSession(pieceId, 'video', true, playing, () => { try { return { progress: 0, position: player.currentTime, duration: player.duration }; } catch { return { progress: 0 }; } }, `${title} · video`);
   return <VideoView player={player} style={{ width: '100%', aspectRatio: 16 / 9, backgroundColor: '#000' }} nativeControls contentFit="contain" />;
 }
 
@@ -360,6 +366,9 @@ function VideoBlock({ piece, startAt, onPosition }: { piece: NucleusPiece; start
     setStarted(true);
   };
   const online = getIsOnline();
+  // Staff reading progress (4 Nov 2026): an embedded YouTube / Vimeo player gives no position, so only the open and
+  // the seconds on screen are recorded (progress 0); a direct file records inside FileVideo.
+  useReadingSession(piece.id, 'video', started && host !== 'file' && !!embed, started && host !== 'file' && !!embed, () => ({ progress: 0 }), `${piece.title} · video`);
   if (!host) {
     return (
       <Cover piece={piece} height={190} radius={18}>
@@ -387,7 +396,7 @@ function VideoBlock({ piece, startAt, onPosition }: { piece: NucleusPiece; start
           </Cover>
         </Pressable>
       ) : host === 'file' && piece.video_url ? (
-        <FileVideo url={piece.video_url} startAt={startAt} onPosition={onPosition} />
+        <FileVideo url={piece.video_url} startAt={startAt} onPosition={onPosition} pieceId={piece.id} title={piece.title} />
       ) : embed ? (
         <WebView
           source={{ uri: embed }}
@@ -422,8 +431,11 @@ function ListenBar({ piece, startAt, onPosition, onEnd }: { piece: NucleusPiece;
   const [drag, setDrag] = React.useState<number | null>(null);
   const [barW, setBarW] = React.useState(0);
   const posRef = React.useRef(startAt); posRef.current = pos;
+  const durRef = React.useRef(dur); durRef.current = dur;
   const onPosRef = React.useRef(onPosition); onPosRef.current = onPosition;
   const onEndRef = React.useRef(onEnd); onEndRef.current = onEnd;
+  // Staff reading progress (4 Nov 2026): the audio medium, opened on the first play, seconds while playing.
+  useReadingSession(piece.id, 'audio', playedRef.current || playing, playing, () => ({ progress: 0, position: posRef.current, duration: durRef.current || piece.audio_seconds || null }), `${piece.title} · audio`);
 
   const store = () => { const p = playerRef.current; const t = p ? safeTime(p) : posRef.current; if (t > 0) onPosRef.current(t); };
   // One sound at a time (16 Oct 2026): another player starting pauses the article audio.
@@ -671,6 +683,9 @@ function PieceView({ piece, all, local, onOpen, onBack }: { piece: NucleusPiece;
       localRef.current.setPosition(piece.id, { medium: 'read', value: Math.round(furthest.current * 100) / 100, at: new Date().toISOString() });
     }
   }, [piece.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Staff reading progress (4 Nov 2026): the article text as medium 'read', the furthest scroll fraction, the
+  // seconds while the piece is on screen in the foreground; the server marks Finished at 90 percent.
+  useReadingSession(piece.id, 'read', piece.kind === 'article', piece.kind === 'article', () => ({ progress: furthest.current }), `${piece.title} · reading`);
 
   const mediaStart = posReady ? resumeFrom(pos, piece.kind === 'video' ? piece.duration_seconds : piece.audio_seconds) : 0;
   const storeMedia = (seconds: number) => {

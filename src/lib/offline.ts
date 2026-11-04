@@ -24,7 +24,7 @@ const OUTBOX_KEY = 'outbox:v1';
 export type OutboxItem = {
   id: string;
   userId?: string;        // who queued it — items never drain (or show) under another account
-  kind: 'workout-log' | 'create-plan' | 'edit-plan' | 'chat-message' | 'location-log' | 'screenshot-log' | 'session-voice-note' | 'nav-track' | 'route-ended' | 'session-otp-verify' | 'summary-listen' | 'summary-listen-progress';
+  kind: 'workout-log' | 'create-plan' | 'edit-plan' | 'chat-message' | 'location-log' | 'screenshot-log' | 'session-voice-note' | 'nav-track' | 'route-ended' | 'session-otp-verify' | 'summary-listen' | 'summary-listen-progress' | 'library-progress';
   label: string;          // human line for the pending-sync UI
   createdAt: string;      // ORIGINAL device timestamp at submit time
   status: 'pending' | 'syncing' | 'failed';
@@ -338,6 +338,11 @@ async function processItem(item: OutboxItem): Promise<{ linkPending?: boolean } 
     await submitQueuedListen(item.kind, item.payload);
     qcRef?.invalidateQueries({ queryKey: ['client-health-summary', item.payload?.clientId] });
     qcRef?.invalidateQueries({ queryKey: ['listen-status'] });
+  } else if (item.kind === 'library-progress') {
+    // Odds Nucleus staff reading progress made offline (4 Nov 2026): the same RPC call, deltas add up on the server.
+    // Lazy require: nucleusProgress imports enqueue.
+    const { submitQueuedProgress } = require('./nucleusProgress');
+    await submitQueuedProgress(item.payload);
     qcRef?.invalidateQueries({ queryKey: ['crew-listen-progress'] });
   }
 }

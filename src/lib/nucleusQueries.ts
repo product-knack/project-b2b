@@ -1,7 +1,8 @@
 /* Odds Nucleus data (16 Oct 2026): the published pieces (one small query, read only) and
    the device-side state (saved pieces, the recent list, resume positions) in AsyncStorage
-   keyed by the signed-in user. The app writes NOTHING to the database for this feature:
-   longevity_resource_progress is the member app's table and its policy refuses staff. */
+   keyed by the signed-in user. Since 4 Nov 2026 the ONE database write of the feature lives in
+   nucleusProgress.ts (record_library_staff_progress: who read what, how far, how long, for the
+   web's Engagement page); everything here stays on the phone. */
 import React from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useQuery } from '@tanstack/react-query';
