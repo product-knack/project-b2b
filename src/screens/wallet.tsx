@@ -14,7 +14,7 @@ import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import { useIsOnline } from '../lib/offline';
 import { useTeamWallet, useTeamWalletPage, useCreateTopup, useVerifyTopup, useWalletRealtime, walletErrorText, type TopupOrder } from '../lib/teamWalletQueries';
 import {
-  DAILY_CAP_PAISE, TEST_TOPUP_PAISE, TOPUP_PICKS, balanceText, negativeBalanceLine, fmtWhen, freeLeftLine, groupByMonth, isPendingBill, isPendingTopup, methodLabel, parseRupeeInput, rowAmountText, rowChip, rowSecondLine, rowTitle, rupees,
+  DAILY_CAP_PAISE, TOPUP_PICKS, balanceText, negativeBalanceLine, fmtWhen, freeLeftLine, groupByMonth, isPendingBill, isPendingTopup, methodLabel, parseRupeeInput, rowAmountText, rowChip, rowSecondLine, rowTitle, rupees,
   signedRupees, topupExpired, topupProblem, topupRoomLine, type Tone, type WalletRow,
 } from '../lib/teamWallet';
 import { WalletCheckout, type CheckoutMessage } from '../components/WalletCheckout';
@@ -68,7 +68,7 @@ function AddMoneySheet({ visible, roomPaise, busy, error, onClose, onContinue }:
   const amount = parseRupeeInput(text);
   const problem = topupProblem(amount, roomPaise);
   const ready = amount != null && !problem && online && !busy;
-  const hint = problem ?? (amount == null ? topupRoomLine(roomPaise) : amount === TEST_TOPUP_PAISE ? 'Rs 1 test top-up (testing only).' : `Adds ${rupees(amount)} to your wallet.`);
+  const hint = problem ?? (amount == null ? topupRoomLine(roomPaise) : `Adds ${rupees(amount)} to your wallet.`);
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={{ flex: 1, justifyContent: 'flex-end' }}>

@@ -7,8 +7,6 @@
    Plans: docs/team-wallet-plan.md, docs/ai-plan-charge-on-create-plan.md. */
 
 export const MIN_TOPUP_PAISE = 50000;
-/** Exactly Rs 1 is accepted as a test top-up (owner, 2 Nov 2026, while the wallet is being tested). */
-export const TEST_TOPUP_PAISE = 100;
 export const DAILY_CAP_PAISE = 500000;
 export const AI_FLOOR_PAISE = 5000;
 /** The fixed price of an Odds AI plan (3 Nov 2026); the server's price_paise replaces it when present. */
@@ -96,7 +94,6 @@ export const parseRupeeInput = (text: string): number | null => {
 export const topupProblem = (amountPaise: number | null, roomPaise: number): string | null => {
   if (roomPaise <= 0) return `You have added ${rupees(DAILY_CAP_PAISE)} today. Try again tomorrow.`;
   if (amountPaise == null) return null;
-  if (amountPaise === TEST_TOPUP_PAISE) return null;
   if (amountPaise < MIN_TOPUP_PAISE) return `The minimum is ${rupees(MIN_TOPUP_PAISE)}.`;
   if (amountPaise > roomPaise) return `You can add ${rupees(roomPaise)} more today.`;
   return null;

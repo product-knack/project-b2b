@@ -8,8 +8,8 @@ files. Copy rule: no dashes in user-facing text (the few literal dashes inside c
 
 ## 1. The rules (owner decisions, final)
 1. **Wallet in every staff account.** Add money through Razorpay (whole rupees, minimum Rs 500, up to Rs 5,000 per
-   person per IST day, at most 2 top-ups waiting, a waiting top-up expires after 30 minutes). Exactly Rs 1 is accepted
-   as a test top-up while the wallet is being tested. Everyone sees only their own history. A receipt push after a paid
+   person per IST day, at most 2 top-ups waiting, a waiting top-up expires after 30 minutes). The Rs 1 test top-up of
+   2 to 3 Nov 2026 is over (4 Nov): Rs 500 is the minimum for everyone. Everyone sees only their own history. A receipt push after a paid
    top-up ("Rs 2,000 added to your wallet", data `{type: wallet_topup, route: wallet}`) opens the Wallet screen.
 2. **The wallet pays for one thing: the Odds AI workout plan.** Trainers only (admins, super admins and coaches draft
    free). The price is FIXED per plan: one server constant, Rs 50 for now (`price_paise` in every answer; the app's
@@ -59,8 +59,7 @@ files. Copy rule: no dashes in user-facing text (the few literal dashes inside c
 ### 2.2 Add money sheet
 - "Add money" / "Minimum Rs 500. Up to Rs 5,000 a day."; chips Rs 500 / 1,000 / 2,000 / 5,000 (off above today's
   room); box "Amount in rupees" (digits only); live line: "You can add Rs 3,000 more today." / "The minimum is Rs 500."
-  / "You have added Rs 5,000 today. Try again tomorrow." / "Adds Rs 2,000 to your wallet." / "Rs 1 test top-up (testing
-  only)."; Cancel / "Continue, Rs 2,000" (on only when valid and online). While the wallet read has no data the sheet
+  / "You have added Rs 5,000 today. Try again tomorrow." / "Adds Rs 2,000 to your wallet."; Cancel / "Continue, Rs 2,000" (on only when valid and online). While the wallet read has no data the sheet
   assumes the full day's room (the server decides).
 
 ### 2.3 Checkout (full-screen WebView)
@@ -138,8 +137,6 @@ Pure rules (money text, the sheet hints, row copy, chips, the AI card standing, 
    Plans: docs/team-wallet-plan.md, docs/ai-plan-charge-on-create-plan.md. */
 
 export const MIN_TOPUP_PAISE = 50000;
-/** Exactly Rs 1 is accepted as a test top-up (owner, 2 Nov 2026, while the wallet is being tested). */
-export const TEST_TOPUP_PAISE = 100;
 export const DAILY_CAP_PAISE = 500000;
 export const AI_FLOOR_PAISE = 5000;
 /** The fixed price of an Odds AI plan (3 Nov 2026); the server's price_paise replaces it when present. */
@@ -227,7 +224,6 @@ export const parseRupeeInput = (text: string): number | null => {
 export const topupProblem = (amountPaise: number | null, roomPaise: number): string | null => {
   if (roomPaise <= 0) return `You have added ${rupees(DAILY_CAP_PAISE)} today. Try again tomorrow.`;
   if (amountPaise == null) return null;
-  if (amountPaise === TEST_TOPUP_PAISE) return null;
   if (amountPaise < MIN_TOPUP_PAISE) return `The minimum is ${rupees(MIN_TOPUP_PAISE)}.`;
   if (amountPaise > roomPaise) return `You can add ${rupees(roomPaise)} more today.`;
   return null;
@@ -494,7 +490,7 @@ eq('parse 0', W.parseRupeeInput('0'), null);
 // 3. the sheet's hints
 eq('problem: below the minimum', W.topupProblem(40000, 300000), 'The minimum is Rs 500.');
 eq('problem: exactly the minimum', W.topupProblem(50000, 300000), null);
-eq('problem: Rs 1 test top-up passes', W.topupProblem(100, 300000), null);
+eq('problem: Rs 1 is refused (the test top-up ended 4 Nov 2026)', W.topupProblem(100, 300000), 'The minimum is Rs 500.');
 eq('problem: Rs 2 does not', W.topupProblem(200, 300000), 'The minimum is Rs 500.');
 eq('problem: over the room', W.topupProblem(350000, 300000), 'You can add Rs 3,000 more today.');
 eq('problem: no room at all', W.topupProblem(50000, 0), 'You have added Rs 5,000 today. Try again tomorrow.');
@@ -926,7 +922,7 @@ import { useKeyboardHeight } from '../lib/useKeyboardHeight';
 import { useIsOnline } from '../lib/offline';
 import { useTeamWallet, useTeamWalletPage, useCreateTopup, useVerifyTopup, useWalletRealtime, walletErrorText, type TopupOrder } from '../lib/teamWalletQueries';
 import {
-  DAILY_CAP_PAISE, TEST_TOPUP_PAISE, TOPUP_PICKS, balanceText, negativeBalanceLine, fmtWhen, freeLeftLine, groupByMonth, isPendingBill, isPendingTopup, methodLabel, parseRupeeInput, rowAmountText, rowChip, rowSecondLine, rowTitle, rupees,
+  DAILY_CAP_PAISE, TOPUP_PICKS, balanceText, negativeBalanceLine, fmtWhen, freeLeftLine, groupByMonth, isPendingBill, isPendingTopup, methodLabel, parseRupeeInput, rowAmountText, rowChip, rowSecondLine, rowTitle, rupees,
   signedRupees, topupExpired, topupProblem, topupRoomLine, type Tone, type WalletRow,
 } from '../lib/teamWallet';
 import { WalletCheckout, type CheckoutMessage } from '../components/WalletCheckout';
@@ -980,7 +976,7 @@ function AddMoneySheet({ visible, roomPaise, busy, error, onClose, onContinue }:
   const amount = parseRupeeInput(text);
   const problem = topupProblem(amount, roomPaise);
   const ready = amount != null && !problem && online && !busy;
-  const hint = problem ?? (amount == null ? topupRoomLine(roomPaise) : amount === TEST_TOPUP_PAISE ? 'Rs 1 test top-up (testing only).' : `Adds ${rupees(amount)} to your wallet.`);
+  const hint = problem ?? (amount == null ? topupRoomLine(roomPaise) : `Adds ${rupees(amount)} to your wallet.`);
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={{ flex: 1, justifyContent: 'flex-end' }}>
@@ -1736,176 +1732,191 @@ export function AiPlanAssistant({ clientId, clientName, preview, onApply }: {
 
 ```diff
 diff --git a/src/Router.tsx b/src/Router.tsx
-index d41c465..53af08b 100644
+index d41c465..565ae3e 100644
 --- a/src/Router.tsx
 +++ b/src/Router.tsx
-@@ -23,8 +23,9 @@ import { Referrals } from './screens/referrals';
+@@ -23,8 +23,10 @@ import { Referrals } from './screens/referrals';
  import { Incentives } from './screens/incentives';
  import { EssentialsAuction } from './screens/essentialsAuction';
  import { EssentialsManager } from './screens/essentialsManager';
  import { Nucleus, NucleusPiece } from './screens/nucleus';
 +import { Wallet } from './screens/wallet';
++import { ClientComplaints } from './screens/clientComplaints';
  import { QhpNavigation } from './screens/qhpNavigation';
  import { WorkoutAnalyst } from './screens/workoutAnalyst';
  import { Messenger, ChatNotifications } from './screens/messenger';
  import { ClientThreads } from './screens/clientThreads';
-@@ -128,8 +129,10 @@ const SCREENS: Record<string, React.ComponentType> = {
+@@ -128,8 +130,11 @@ const SCREENS: Record<string, React.ComponentType> = {
    'essentials-manager': EssentialsManager,
    // Odds Nucleus (16 Oct 2026): published education pieces, every role; NOT in SENSITIVE_ROUTES (no client data).
    nucleus: Nucleus,
    'nucleus-piece': NucleusPiece,
 +  // Team Wallet (2 Nov 2026): every role; money on screen, so it is in SENSITIVE_ROUTES.
 +  wallet: Wallet,
++  'client-complaints': ClientComplaints,
    'qhp-navigate': QhpNavigation,
    qhp: Qhp,
    'qhp-manager': QhpManager,
    'qhp-stats': QhpStats,
-@@ -281,8 +284,10 @@ const SENSITIVE_ROUTES = new Set([
+@@ -281,8 +286,10 @@ const SENSITIVE_ROUTES = new Set([
    'academy-dashboard', 'academy-management', 'academy-qhp-analyser', 'academy-daily-goals', 'academy-weekly-summary', 'academy-senior-analyst',
    'academy-teacher', 'academy-student',
    // Chats \u2014 client health details are routinely discussed in messages
    'messenger', 'client-threads', 'manager-chat',
 +  // Team Wallet (2 Nov 2026): balances, payment ids and the Razorpay checkout
-+  'wallet',
++  'wallet', 'client-complaints',
  ]);
  
  /* Memoised on (route, role): ScreenHost re-renders on every transition frame
     end, swipe offset reset and store change, and each of those used to re-create
 diff --git a/src/components/PushTokenManager.tsx b/src/components/PushTokenManager.tsx
-index 2e70d1f..4f9b5d8 100644
+index 2e70d1f..1d2cf66 100644
 --- a/src/components/PushTokenManager.tsx
 +++ b/src/components/PushTokenManager.tsx
-@@ -84,8 +84,10 @@ export function PushTokenManager() {
+@@ -84,8 +84,11 @@ export function PushTokenManager() {
      // QHP client location (2 Nov 2026): "no client location" lands ops on the Leads page and a QHP manager on their
      // page; "location added" lands the assessor on the QHP page (Start navigation), anyone else on home.
      if (t === 'qhp_location_missing') { go(dbRoleRef.current === 'ops' ? 'ops-leads' : 'qhp-manager'); return; }
      if (t === 'qhp_location_added') { go(dbRoleRef.current === 'trainer' ? 'qhp' : homeRouteFor(roleRef.current)); return; }
 +    // Team Wallet (2 Nov 2026): the top-up receipt opens the Wallet screen.
 +    if (t === 'wallet_topup' || data.route === 'wallet') { go('wallet'); return; }
++    if (t === 'client_complaint' || data.route === 'client-complaints') { go('client-complaints'); return; } // a flagged log or a client report (3 Nov 2026)
      // 7 PM team-flags push → straight into the manager chat.
      if (t === 'manager_team_flags' || data.route === 'manager-chat') { go('manager-chat'); return; }
      // Anything else that names a route/session (unknown web routes included) → home.
      // plan_expiry lands on the trainer's home too: the roster cards there carry the
 diff --git a/src/data.ts b/src/data.ts
-index b0a71a4..16d9d49 100644
+index b0a71a4..094f9b4 100644
 --- a/src/data.ts
 +++ b/src/data.ts
-@@ -309,8 +309,9 @@ export const trainerNav: NavGroup[] = [
+@@ -309,8 +309,10 @@ export const trainerNav: NavGroup[] = [
      { label: 'Sessions', icon: 'dumbbell', route: 'sessions' },
      { label: 'Essentials Auction', icon: 'gavel', route: 'essentials-auction' },
      { label: 'Essentials Manager', icon: 'gavel', route: 'essentials-manager' },
      { label: 'Payouts', icon: 'rupee', route: 'payouts' },
 +    { label: 'Wallet', icon: 'rupee', route: 'wallet' },
++    { label: 'Client complaints', icon: 'alert', route: 'client-complaints' },
      { label: 'Referrals', icon: 'userPlus', route: 'referrals' },
      { label: 'Incentive', icon: 'gift', route: 'incentives' },
    ] },
    { label: 'QHP', items: [
-@@ -340,8 +341,9 @@ export const crmNav: NavGroup[] = [
+@@ -340,8 +342,10 @@ export const crmNav: NavGroup[] = [
      { label: 'Dashboard', icon: 'grid', route: 'crm-dashboard' },
      { label: 'Odds AI', icon: 'sparkle', route: 'crm-ai' },
      { label: 'My Clients', icon: 'users', route: 'crm-clients' },
      { label: 'Revenue Forecast', icon: 'rupee', route: 'crm-revenue-forecast' },
 +    { label: 'Wallet', icon: 'rupee', route: 'wallet' },
++    { label: 'Client complaints', icon: 'alert', route: 'client-complaints' },
      { label: 'Messenger', icon: 'chat', route: 'messenger' },
      { label: 'Client Threads', icon: 'atSign', route: 'client-threads' },
    ] },
    { label: 'Client Insights', items: [
-@@ -371,8 +373,9 @@ export const coachNav: NavGroup[] = [
+@@ -371,8 +375,10 @@ export const coachNav: NavGroup[] = [
    { label: 'Overview', items: [
      { label: 'Dashboard', icon: 'grid', route: 'coach-dashboard' },
      { label: 'Trainers', icon: 'crown', route: 'coach-trainers' },
      { label: 'Assessments', icon: 'heart', route: 'coach-assessments' },
 +    { label: 'Wallet', icon: 'rupee', route: 'wallet' },
++    { label: 'Client complaints', icon: 'alert', route: 'client-complaints' },
    ] },
    { label: 'Clients', items: [
      { label: 'My Clients', icon: 'users', route: 'coach-clients' },
      { label: 'Client Threads', icon: 'atSign', route: 'client-threads' },
-@@ -403,8 +406,9 @@ export const opsNav: NavGroup[] = [
+@@ -403,8 +409,10 @@ export const opsNav: NavGroup[] = [
    { label: 'Workspace', items: [
      { label: 'Dashboard', icon: 'grid', route: 'ops-dashboard' },
      { label: 'Leads', icon: 'users', route: 'ops-leads' },
      { label: 'Clients', icon: 'layers', route: 'ops-clients' },
 +    { label: 'Wallet', icon: 'rupee', route: 'wallet' },
++    { label: 'Client complaints', icon: 'alert', route: 'client-complaints' },
      { label: 'Messenger', icon: 'chat', route: 'messenger' },
      { label: 'Client Threads', icon: 'atSign', route: 'client-threads' },
    ] },
    { label: 'Sales', items: [
-@@ -432,8 +436,9 @@ export const adminNav: NavGroup[] = [
+@@ -432,8 +440,10 @@ export const adminNav: NavGroup[] = [
      { label: 'Dashboard', icon: 'grid', route: 'admin-dashboard' },
      { label: 'Clients', icon: 'users', route: 'admin-clients' },
      { label: 'Renewals', icon: 'swap', route: 'admin-renewals' },
      { label: 'Revenue Forecast', icon: 'rupee', route: 'admin-revenue-forecast' },
 +    { label: 'Wallet', icon: 'rupee', route: 'wallet' },
++    { label: 'Client complaints', icon: 'alert', route: 'client-complaints' },
      { label: 'Requests', icon: 'inbox', route: 'admin-requests' },
      { label: 'Incidents', icon: 'alert', route: 'admin-incidents' },
      { label: 'Users', icon: 'userCircle', route: 'admin-users' },
      { label: 'Performance', icon: 'trend', route: 'admin-performance' },
-@@ -458,8 +463,9 @@ export const marketingNav: NavGroup[] = [
+@@ -458,8 +468,10 @@ export const marketingNav: NavGroup[] = [
      { label: 'Dashboard', icon: 'grid', route: 'marketing-dashboard' },
      { label: 'Influencer Clients', icon: 'users', route: 'marketing-clients' },
      { label: 'Leads', icon: 'userPlus', route: 'marketing-leads' },
      { label: 'Lead Analytics', icon: 'chart', route: 'marketing-lead-analytics' },
 +    { label: 'Wallet', icon: 'rupee', route: 'wallet' },
++    { label: 'Client complaints', icon: 'alert', route: 'client-complaints' },
      { label: 'Messenger', icon: 'chat', route: 'messenger' },
    ] },
    { label: 'Learn', items: [
      { label: 'Odds Nucleus', icon: 'nucleus', route: 'nucleus' },
-@@ -480,8 +486,9 @@ export const academyNav: NavGroup[] = [
+@@ -480,8 +492,10 @@ export const academyNav: NavGroup[] = [
      { label: 'Workout Plans Analyst', icon: 'activity', route: 'plans-analyst' },
      { label: 'Progression', icon: 'chart', route: 'coach-progression' },
      { label: 'Academy Management', icon: 'award', route: 'academy-management' },
      { label: 'B2C Reports', icon: 'file', route: 'b2c-reports' },
 +    { label: 'Wallet', icon: 'rupee', route: 'wallet' },
++    { label: 'Client complaints', icon: 'alert', route: 'client-complaints' },
      { label: 'Messenger', icon: 'chat', route: 'messenger' },
      { label: 'Client Threads', icon: 'atSign', route: 'client-threads' },
    ] },
    { label: 'Learn', items: [
-@@ -505,8 +512,9 @@ export const doctorNav: NavGroup[] = [
+@@ -505,8 +519,10 @@ export const doctorNav: NavGroup[] = [
      { label: 'Messenger', icon: 'chat', route: 'messenger' },
      { label: 'Client Threads', icon: 'atSign', route: 'client-threads' },
      { label: 'Referrals', icon: 'userPlus', route: 'referrals' },
      { label: 'Reimbursement', icon: 'rupee', route: 'doctor-reimbursements' },
 +    { label: 'Wallet', icon: 'rupee', route: 'wallet' },
++    { label: 'Client complaints', icon: 'alert', route: 'client-complaints' },
    ] },
    { label: 'Head Doctor', items: [
      { label: 'All Clients', icon: 'layers', route: 'doctor-all-clients' },
      { label: 'Roster', icon: 'calendar', route: 'doctor-roster' },
-@@ -527,8 +535,9 @@ export const doctorNav: NavGroup[] = [
+@@ -527,8 +543,10 @@ export const doctorNav: NavGroup[] = [
  export const consultantNav: NavGroup[] = [
    { label: 'Workspace', items: [
      { label: 'Consultant Dashboard', icon: 'home', route: 'doctor-dashboard' },
      { label: 'All Calls', icon: 'calendar', route: 'doctor-consultant-calls' },
 +    { label: 'Wallet', icon: 'rupee', route: 'wallet' },
++    { label: 'Client complaints', icon: 'alert', route: 'client-complaints' },
    ] },
    { label: 'Learn', items: [
      { label: 'Odds Nucleus', icon: 'nucleus', route: 'nucleus' },
    ] },
-@@ -538,8 +547,9 @@ export const therapistNav: NavGroup[] = [
+@@ -538,8 +556,10 @@ export const therapistNav: NavGroup[] = [
    { label: 'Workspace', items: [
      { label: 'Dashboard', icon: 'grid', route: 'therapist-dashboard' },
      { label: 'My Clients', icon: 'users', route: 'therapist-clients' },
      { label: 'Sessions', icon: 'calendar', route: 'therapist-sessions' },
 +    { label: 'Wallet', icon: 'rupee', route: 'wallet' },
++    { label: 'Client complaints', icon: 'alert', route: 'client-complaints' },
      { label: 'Messenger', icon: 'chat', route: 'messenger' },
      { label: 'Client Threads', icon: 'atSign', route: 'client-threads' },
    ] },
    { label: 'Learn', items: [
-@@ -553,8 +563,9 @@ export const therapistNav: NavGroup[] = [
+@@ -553,8 +573,10 @@ export const therapistNav: NavGroup[] = [
  /* Essentials manager (22 Oct 2026): profiles.role = essential_manager sees only this page (plus Learn). */
  export const essentialManagerNav: NavGroup[] = [
    { label: 'Workspace', items: [
      { label: 'Essentials Manager', icon: 'gavel', route: 'essentials-manager' },
 +    { label: 'Wallet', icon: 'rupee', route: 'wallet' },
++    { label: 'Client complaints', icon: 'alert', route: 'client-complaints' },
    ] },
    { label: 'Learn', items: [
      { label: 'Odds Nucleus', icon: 'nucleus', route: 'nucleus' },
    ] },
-@@ -562,8 +573,9 @@ export const essentialManagerNav: NavGroup[] = [
+@@ -562,8 +584,10 @@ export const essentialManagerNav: NavGroup[] = [
  
  export const techNav: NavGroup[] = [
    { label: 'Workspace', items: [
      { label: 'Tech Desk', icon: 'activity', route: 'tech-desk-inbox' },
 +    { label: 'Wallet', icon: 'rupee', route: 'wallet' },
++    { label: 'Client complaints', icon: 'alert', route: 'client-complaints' },
    ] },
    { label: 'Learn', items: [
      { label: 'Odds Nucleus', icon: 'nucleus', route: 'nucleus' },
@@ -2010,7 +2021,7 @@ index 843c5f8..57c4523 100644
  }
  
 diff --git a/src/lib/approvalRequests.ts b/src/lib/approvalRequests.ts
-index ad4945b..c6758f9 100644
+index ad4945b..bae989d 100644
 --- a/src/lib/approvalRequests.ts
 +++ b/src/lib/approvalRequests.ts
 @@ -110,12 +110,12 @@ export const sessionCodeStatusLine = (r: ApprovalRequest | null | undefined): {
@@ -2023,7 +2034,7 @@ index ad4945b..c6758f9 100644
  export const codedSentence = (e: unknown): string | null => {
    const msg = String((e as { message?: unknown } | null)?.message ?? '').trim();
 -  const m = msg.match(/^(?:OTP|APPROVAL|LOCATION)_[A-Z_]+:\s*(.+)$/s);
-+  const m = msg.match(/^(?:OTP|APPROVAL|LOCATION|WALLET)_[A-Z_]+:\s*(.+)$/s);
++  const m = msg.match(/^(?:OTP|APPROVAL|LOCATION|WALLET|COMPLAINT)_[A-Z_]+:\s*(.+)$/s);
    return m && m[1].trim() ? m[1].trim() : null;
  };
  
@@ -3845,6 +3856,103 @@ SELECT 22, 'probe rows left behind', '0', (SELECT count(*)::text FROM public.tea
 SELECT step, check_name, expected, result FROM plan_charge_probe ORDER BY step;
 ```
 
+#### `supabase/migrations/20261104120000_team_wallet_no_test_topup.sql`
+
+```sql
+-- ============================================================================
+-- Team Wallet: the Rs 1 test top-up is over (4 Nov 2026, owner: "remove the Rs 1 add money testing option")
+-- team_wallet_create_topup refuses anything under Rs 500 again, for every account, and the table check
+-- team_wallet_topup_limits no longer admits a 100 paise top-up. Rows already paid at Rs 1 stay as history (the check
+-- is added NOT VALID for them). The function text is 20261102160000's with the one Rs 1 clause removed.
+-- ============================================================================
+
+BEGIN;
+
+CREATE OR REPLACE FUNCTION public.team_wallet_create_topup(p_user uuid, p_amount_paise bigint)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_role text;
+  v_status text;
+  v_day date := (now() AT TIME ZONE 'Asia/Kolkata')::date;
+  v_today bigint;
+  v_room bigint;
+  v_pending integer;
+  v_row public.team_wallet;
+BEGIN
+  SELECT p.role::text, lower(COALESCE(p.status, 'active')) INTO v_role, v_status FROM public.profiles p WHERE p.id = p_user;
+  IF v_role IS NULL THEN RAISE EXCEPTION 'WALLET_FORBIDDEN: Only staff accounts have a wallet.' USING ERRCODE = '42501'; END IF;
+  IF v_status <> 'active' THEN RAISE EXCEPTION 'WALLET_FORBIDDEN: This account is not active, so money cannot be added.' USING ERRCODE = '42501'; END IF;
+  IF p_amount_paise IS NULL OR p_amount_paise % 100 <> 0 THEN RAISE EXCEPTION 'WALLET_MIN_AMOUNT: Enter whole rupees, at least Rs 500.'; END IF;
+  IF p_amount_paise < public.team_wallet_min_topup_paise() THEN
+    RAISE EXCEPTION 'WALLET_MIN_AMOUNT: The minimum top-up is Rs 500.';
+  END IF;
+  PERFORM public.team_wallet_lock(p_user);
+  -- older pending top-ups that ran out make room
+  UPDATE public.team_wallet SET status = 'expired', meta = meta || jsonb_build_object('failure_reason', 'Payment was not completed in 30 minutes', 'failed_at', now())
+   WHERE user_id = p_user AND kind = 'topup' AND status = 'pending' AND created_at < now() - interval '30 minutes';
+  SELECT COALESCE(SUM(w.amount_paise), 0), count(*) FILTER (WHERE w.status = 'pending') INTO v_today, v_pending
+    FROM public.team_wallet w
+   WHERE w.user_id = p_user AND w.kind = 'topup' AND w.status IN ('pending', 'paid')
+     AND (w.created_at AT TIME ZONE 'Asia/Kolkata')::date = v_day;
+  v_room := public.team_wallet_daily_cap_paise() - v_today;
+  IF v_room <= 0 THEN
+    RAISE EXCEPTION 'WALLET_DAILY_CAP: You have added Rs % today. The limit is Rs % a day. Try again tomorrow.', (v_today / 100), (public.team_wallet_daily_cap_paise() / 100);
+  END IF;
+  IF p_amount_paise > v_room THEN
+    RAISE EXCEPTION 'WALLET_DAILY_CAP: You can add Rs % more today. The limit is Rs % a day.', (v_room / 100), (public.team_wallet_daily_cap_paise() / 100);
+  END IF;
+  IF v_pending >= 2 THEN
+    RAISE EXCEPTION 'WALLET_PENDING_LIMIT: Two top-ups are already waiting for payment. Finish or cancel one first.';
+  END IF;
+  INSERT INTO public.team_wallet (user_id, role, kind, amount_paise, status, meta)
+  VALUES (p_user, v_role, 'topup', p_amount_paise, 'pending', jsonb_build_object('note', 'Add money', 'created_by', p_user))
+  RETURNING * INTO v_row;
+  RETURN public.team_wallet_public(v_row);
+END;
+$$;
+REVOKE ALL ON FUNCTION public.team_wallet_create_topup(uuid, bigint) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.team_wallet_create_topup(uuid, bigint) TO service_role;
+
+-- The table check: new top-ups Rs 500 to Rs 5,000 only; the Rs 1 rows of the test days stay (NOT VALID skips them).
+ALTER TABLE public.team_wallet DROP CONSTRAINT IF EXISTS team_wallet_topup_limits;
+ALTER TABLE public.team_wallet ADD CONSTRAINT team_wallet_topup_limits
+  CHECK (kind <> 'topup' OR amount_paise BETWEEN 50000 AND 500000) NOT VALID;
+
+COMMIT;
+
+-- Probe (rolled back): Rs 1 refused, Rs 499 refused, Rs 500 accepted, and the function text carries no 100.
+CREATE TEMP TABLE IF NOT EXISTS topup_probe (step int, check_name text, expected text, result text);
+TRUNCATE topup_probe;
+DO $probe$
+DECLARE v_user uuid; x jsonb; v1 text; v2 text; v3 text;
+BEGIN
+  SELECT p.id INTO v_user FROM public.profiles p WHERE p.role::text = 'trainer' AND p.email = 'sagaroddsfitness@gmail.com' LIMIT 1;
+  IF v_user IS NULL THEN SELECT p.id INTO v_user FROM public.profiles p WHERE p.role::text = 'trainer' AND p.status = 'active' LIMIT 1; END IF;
+  BEGIN
+    BEGIN x := public.team_wallet_create_topup(v_user, 100); v1 := 'accepted'; EXCEPTION WHEN others THEN v1 := split_part(SQLERRM, ':', 1); END;
+    BEGIN x := public.team_wallet_create_topup(v_user, 49900); v2 := 'accepted'; EXCEPTION WHEN others THEN v2 := split_part(SQLERRM, ':', 1); END;
+    BEGIN x := public.team_wallet_create_topup(v_user, 50000); v3 := CASE WHEN x->>'status' = 'pending' THEN 'accepted' ELSE 'odd: ' || COALESCE(x::text, 'null') END; EXCEPTION WHEN others THEN v3 := split_part(SQLERRM, ':', 1); END;
+    RAISE EXCEPTION 'PROBE_DONE'; -- rolls the pending Rs 500 row back
+  EXCEPTION WHEN others THEN
+    IF SQLERRM <> 'PROBE_DONE' THEN v3 := 'could not run: ' || SQLERRM; END IF;
+  END;
+  -- written after the rolled-back block (an insert inside it would roll back too)
+  INSERT INTO topup_probe VALUES (1, 'Rs 1 is refused', 'WALLET_MIN_AMOUNT', COALESCE(v1, 'not run')), (2, 'Rs 499 is refused', 'WALLET_MIN_AMOUNT', COALESCE(v2, 'not run')), (3, 'Rs 500 is accepted (pending row, rolled back)', 'accepted', COALESCE(v3, 'not run'));
+END
+$probe$;
+INSERT INTO topup_probe
+SELECT 20, 'function text has no Rs 1 clause', 'clean', CASE WHEN position('<> 100' in prosrc) > 0 THEN 'still there' ELSE 'clean' END FROM pg_proc WHERE proname = 'team_wallet_create_topup'
+UNION ALL
+SELECT 21, 'table check', 'kind <> topup OR 50000 to 500000', CASE WHEN pg_get_constraintdef(oid) LIKE '%50000%500000%' AND pg_get_constraintdef(oid) NOT LIKE '%= 100%' THEN 'kind <> topup OR 50000 to 500000' ELSE pg_get_constraintdef(oid) END FROM pg_constraint WHERE conname = 'team_wallet_topup_limits'
+UNION ALL
+SELECT 22, 'probe rows left behind', '0', (SELECT count(*)::text FROM public.team_wallet WHERE kind = 'topup' AND status = 'pending' AND created_at > now() - interval '1 minute' AND amount_paise = 50000 AND meta->>'created_by' = (SELECT p.id::text FROM public.profiles p WHERE p.email = 'sagaroddsfitness@gmail.com'));
+SELECT step, check_name, expected, result FROM topup_probe ORDER BY step;
+```
+
 #### `supabase/functions/_shared/teamWallet.ts`
 
 ```ts
@@ -4658,13 +4766,13 @@ ${list}`;
 
 ## 6. Check on the iPhone
 1. `node tests/rules/team_wallet_test.js`, `node tests/rules/wallet_checkout_html_test.js`, `node tests/rules/ai_plan_rules_test.js`: ALL PASS.
-2. Wallet: Rs 0, "No movements yet"; Add money Rs 400 refused in the sheet; Rs 1 opens the Razorpay sheet (test); pay by
-   UPI: "Rs 1 added", a PAID row, the push.
+2. Wallet: Rs 0, "No movements yet"; Add money Rs 400 refused in the sheet; Rs 500 opens the Razorpay sheet; pay by
+   UPI: "Rs 500 added", a PAID row, the push.
 3. As Sagar (trainer): Plan tab > Create Plan: chip "N FREE LEFT" or "RS 50"; Generate twice: the Wallet shows no new
    row; the button reads "Create Plan · Rs 50"; press it: "Rs 50 deducted. Wallet Rs -50." in red, the Wallet shows one
    "Odds AI plan, <name>" row of - Rs 50 and "Rs -50" with Add funds; Create Plan again: the popup "Add funds"
    (Build manually / Add money) at the card, and again at the button if a draft is already in the form; Add Rs 500:
    Wallet Rs 450, the card reads "RS 50 · balance Rs 450"; Save & Resubmit of the plan: no new row; a manual plan: no row.
 4. As an admin: Create Plan shows no chip, drafts free, no wallet line, plain "Create Plan".
-Server: migrations 20261102160000 and 20261103110000 live since 2 and 3 Nov 2026; 20261103120000 (this rule) LIVE 3 Nov 2026
-(13 of 13; end-to-end tested as Sagar through the same calls); ai-plan-draft, wallet-verify-payment and razorpay-webhook redeployed 3 Nov 2026.
+Server: migrations 20261102160000 and 20261103110000 live since 2 and 3 Nov 2026; 20261103120000 (this rule) PGlite-tested
+16 of 16 and handed to the owner to run; ai-plan-draft, wallet-verify-payment and razorpay-webhook redeployed 3 Nov 2026.

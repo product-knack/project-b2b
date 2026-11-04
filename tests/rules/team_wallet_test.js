@@ -33,7 +33,7 @@ eq('parse 0', W.parseRupeeInput('0'), null);
 // 3. the sheet's hints
 eq('problem: below the minimum', W.topupProblem(40000, 300000), 'The minimum is Rs 500.');
 eq('problem: exactly the minimum', W.topupProblem(50000, 300000), null);
-eq('problem: Rs 1 test top-up passes', W.topupProblem(100, 300000), null);
+eq('problem: Rs 1 is refused (the test top-up ended 4 Nov 2026)', W.topupProblem(100, 300000), 'The minimum is Rs 500.');
 eq('problem: Rs 2 does not', W.topupProblem(200, 300000), 'The minimum is Rs 500.');
 eq('problem: over the room', W.topupProblem(350000, 300000), 'You can add Rs 3,000 more today.');
 eq('problem: no room at all', W.topupProblem(50000, 0), 'You have added Rs 5,000 today. Try again tomorrow.');
