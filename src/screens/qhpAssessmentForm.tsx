@@ -22,6 +22,9 @@ import { Icon } from '../icons';
 import { Serif, Body, Mono } from '../components/primitives';
 import { supabase } from '../lib/supabase';
 import { friendlyError } from '../lib/friendlyError';
+import { RehabEntries } from '../components/rehabEntries';
+import { carryRehabForward, painNotesFromMedical, painTextProjection, recoveryRehabFromJson, recoveryRehabJson } from '../lib/recoveryRehab';
+import { qhpDayOfRow } from '../lib/qhpGuidanceQueries';
 
 /* ---------- shared helpers ---------- */
 type FD = Record<string, any>;
@@ -77,7 +80,7 @@ function initialFd(clientName: string, location: string, assessorName: string): 
     assessorName, assessmentDate: today, location,
     chronicConditions: [], chronicConditionsOther: '', currentMedications: [], currentMedicationsOther: '',
     pastInjuriesUpper: [], pastInjuriesUpperOther: '', pastInjuriesLower: [], pastInjuriesLowerOther: '',
-    painDiscomfortAreas: '', surgicalHistory: '',
+    painDiscomfortAreas: '', recoveryRehab: [], surgicalHistory: '',
     pastActivities: [], pastActivitiesOther: '', currentActivities: [], lifestyleType: '', dailyStepCount: '',
     workGetupFrequency: '', habits: [], habitsOther: '', habitFrequencies: {},
     bedtime: '', wakeTime: '', sleepDuration: '', sleepQuality: '', sleepNotes: '', goals: [], goalsNotes: '',
@@ -138,7 +141,7 @@ function hydrateFromRow(row: any): Partial<FD> {
     currentMedications: arr(med.currentMedications), currentMedicationsOther: s(med.currentMedicationsOther),
     pastInjuriesUpper: arr(med.pastInjuriesUpper), pastInjuriesUpperOther: s(med.pastInjuriesUpperOther),
     pastInjuriesLower: arr(med.pastInjuriesLower), pastInjuriesLowerOther: s(med.pastInjuriesLowerOther),
-    painDiscomfortAreas: s(med.painDiscomfortAreas), surgicalHistory: s(med.surgicalHistory),
+    painDiscomfortAreas: painNotesFromMedical(med), recoveryRehab: recoveryRehabFromJson(med.recoveryRehab), surgicalHistory: s(med.surgicalHistory),
     pastActivities: arr(life.pastActivities), pastActivitiesOther: s(life.pastActivitiesOther),
     currentActivities: arr(life.currentActivities), lifestyleType: s(life.lifestyleType), dailyStepCount: s(life.dailyStepCount),
     workGetupFrequency: s(life.workGetupFrequency), habits: arr(life.habits), habitsOther: s(life.habitsOther),
@@ -515,7 +518,12 @@ function buildAssessmentData(fd: FD, isExistingClient: boolean) {
       currentMedications: fd.currentMedications, currentMedicationsOther: fd.currentMedicationsOther,
       pastInjuriesUpper: fd.pastInjuriesUpper, pastInjuriesUpperOther: fd.pastInjuriesUpperOther,
       pastInjuriesLower: fd.pastInjuriesLower, pastInjuriesLowerOther: fd.pastInjuriesLowerOther,
-      painDiscomfortAreas: fd.painDiscomfortAreas, surgicalHistory: fd.surgicalHistory,
+      // Recovery and rehab (11 Nov 2026): the entries, the assessor's free text, and painDiscomfortAreas as the
+      // text every older reader uses (open area names, then the notes; unchanged when there are no entries).
+      recoveryRehab: recoveryRehabJson(fd.recoveryRehab ?? []),
+      painDiscomfortNotes: fd.painDiscomfortAreas,
+      painDiscomfortAreas: painTextProjection(fd.painDiscomfortAreas ?? '', fd.recoveryRehab ?? []),
+      surgicalHistory: fd.surgicalHistory,
     },
     lifestyleActivity: {
       pastActivities: fd.pastActivities, pastActivitiesOther: fd.pastActivitiesOther, currentActivities: fd.currentActivities,
@@ -575,7 +583,7 @@ function buildAssessmentData(fd: FD, isExistingClient: boolean) {
         longevity: fd.selectedGoal === 'Longevity' ? { vo2MaxLongevity: fd.vo2MaxLongevity, rightLegBalanceMax30Sec: fd.rightLegBalanceMax30Sec, leftLegBalanceMax30Sec: fd.leftLegBalanceMax30Sec, sitToStandScore: fd.sitToStandScore, standToSitScore: fd.standToSitScore, gripStrengthLongevity: fd.gripStrengthLongevity, longevityTestsNotes: fd.longevityTestsNotes } : null,
         hyrox: fd.selectedGoal === 'Hyrox' ? { hyroxVo2Max: fd.hyroxVo2Max, hyroxVo2MaxMethod: fd.hyroxVo2MaxMethod, hyroxVo2MaxHeartRate: fd.hyroxVo2MaxHeartRate, hyroxVo2MaxTimeDuration: fd.hyroxVo2MaxTimeDuration, hyroxVo2MaxCooperDistance: fd.hyroxVo2MaxCooperDistance, hyroxGripStrength: fd.hyroxGripStrength, hyroxWallBalls: fd.hyroxWallBalls, hyroxHandReleasePushups: fd.hyroxHandReleasePushups, hyroxRowTime1000m: fd.hyroxRowTime1000m, hyroxBurpeeBroadJumps: fd.hyroxBurpeeBroadJumps, hyroxStationaryLungesTime: fd.hyroxStationaryLungesTime, hyroxTestsNotes: fd.hyroxTestsNotes } : null,
       },
-      bodyMeasurements: { waistNarrow: fd.waistNarrow, waistWide: fd.waistWide, hip: fd.hip, chest: fd.chest, midArmRight: fd.midArmRight, midArmLeft: fd.midArmLeft, midThighRight: fd.midThighRight, midThighLeft: fd.midThighLeft, patellaDistanceRight: fd.patellaDistanceRight, patellaDistanceLeft: fd.patellaDistanceLeft, measurementImageUrls: [] },
+      bodyMeasurements: { ...(String(fd.waistNarrow ?? '').trim() ? { waistNarrow: fd.waistNarrow } : {}), waistWide: fd.waistWide, hip: fd.hip, chest: fd.chest, midArmRight: fd.midArmRight, midArmLeft: fd.midArmLeft, midThighRight: fd.midThighRight, midThighLeft: fd.midThighLeft, patellaDistanceRight: fd.patellaDistanceRight, patellaDistanceLeft: fd.patellaDistanceLeft, measurementImageUrls: [] },
       posturalAssessment: { anteriorPelvicTilt: fd.anteriorPelvicTilt, upperCrossSyndrome: fd.upperCrossSyndrome, lowerCrossSyndrome: fd.lowerCrossSyndrome, forwardHeadPosture: fd.forwardHeadPosture, roundedShoulders: fd.roundedShoulders, kyphosis: fd.kyphosis, lordosis: fd.lordosis, scoliosis: fd.scoliosis, posturalOther: fd.posturalOther, posturalOtherNotes: fd.posturalOtherNotes, posturalNotes: fd.posturalNotes },
       recommendations: { strengthRecommendations: fd.strengthRecommendations, cardioRecommendations: fd.cardioRecommendations, mobilityRecommendations: fd.mobilityRecommendations, lifestyleRecommendations: fd.lifestyleRecommendations, recommendationsNotes: fd.recommendationsNotes },
     };
@@ -668,7 +676,7 @@ export function QhpAssessmentForm({
     queryFn: async () => {
       const { data } = await supabase
         .from('coach_assessment')
-        .select('client_name, assessment_date, location, notes, new_client_assessment_data, existing_client_assessment_data, qhp_data')
+        .select('id, completed, client_name, assessment_date, location, notes, new_client_assessment_data, existing_client_assessment_data, qhp_data')
         .eq('client_id', clientId!)
         .neq('id', assessmentId)
         .not('completed', 'is', null)
@@ -690,6 +698,8 @@ export function QhpAssessmentForm({
     if (!visible || !isExistingClient || !prior || priorPrefilled) return;
     const patch: Partial<FD> = { ...prior };
     for (const k of STEP5_KEYS) delete patch[k];
+    // Recovery and rehab: open entries come along with the same id and a snapshot of how they stood last time.
+    patch.recoveryRehab = carryRehabForward(recoveryRehabFromJson(prior.recoveryRehab), { assessmentId: priorQ.data?.id ? String(priorQ.data.id) : null, day: priorQ.data ? qhpDayOfRow(priorQ.data) : null });
     delete patch.selectedGoal; // the assessor picks the goal fresh each time (web keeps prior goal out of step 5 exclusions, but goal drives the flow — safer to re-pick)
     setFd((prevFd) => {
       const next = { ...prevFd };
@@ -838,7 +848,13 @@ export function QhpAssessmentForm({
               {fd.pastInjuriesLower.includes('Other') ? <Inp v={fd.pastInjuriesLowerOther} on={(t) => set({ pastInjuriesLowerOther: t })} ph={ph('pastInjuriesLowerOther', 'Specify other lower body injuries')} /> : null}
             </Sec>
             <Sec title="Surgical History"><Inp v={fd.surgicalHistory} on={(t) => set({ surgicalHistory: t })} ph={ph('surgicalHistory', 'Describe any past surgeries...')} multi /></Sec>
-            <Sec title="Pain / Discomfort Areas"><Inp v={fd.painDiscomfortAreas} on={(t) => set({ painDiscomfortAreas: t })} ph={ph('painDiscomfortAreas', 'Describe current pain or discomfort areas...')} multi /></Sec>
+            <Sec title="Pain / Discomfort Areas">
+              <RehabEntries value={fd.recoveryRehab ?? []} onChange={(next) => set({ recoveryRehab: next })} />
+              <View>
+                <L>Other notes on pain or discomfort</L>
+                <Inp v={fd.painDiscomfortAreas} on={(t) => set({ painDiscomfortAreas: t })} ph={ph('painDiscomfortAreas', 'Describe current pain or discomfort areas...')} multi />
+              </View>
+            </Sec>
           </View>
         );
       case 'Lifestyle & Activity':
@@ -1107,7 +1123,8 @@ export function QhpAssessmentForm({
             ) : null}
             {goal !== 'Hyrox' ? perfCard : null}
             <Sec title="Body Measurements" tint={C.purple}>
-              {[['waistNarrow', 'Waist Narrow'], ['waistWide', 'Waist Wide'], ['hip', 'Hip'], ['chest', 'Chest'], ['midArmRight', 'Mid Arm Right'], ['midArmLeft', 'Mid Arm Left'], ['midThighRight', 'Mid Thigh Right'], ['midThighLeft', 'Mid Thigh Left'], ['patellaDistanceRight', 'Patella Distance Right'], ['patellaDistanceLeft', 'Patella Distance Left']].reduce<string[][][]>((rows, kv, i) => {
+              {/* Wide waist only since 11 Nov 2026 (NIH protocol); the narrowest waist is no longer recorded */}
+              {[['waistWide', 'Waist (Wide)'], ['hip', 'Hip'], ['chest', 'Chest'], ['midArmRight', 'Mid Arm Right'], ['midArmLeft', 'Mid Arm Left'], ['midThighRight', 'Mid Thigh Right'], ['midThighLeft', 'Mid Thigh Left'], ['patellaDistanceRight', 'Patella Distance Right'], ['patellaDistanceLeft', 'Patella Distance Left']].reduce<string[][][]>((rows, kv, i) => {
                 if (i % 2 === 0) rows.push([kv]); else rows[rows.length - 1].push(kv);
                 return rows;
               }, []).map((row, i) => (

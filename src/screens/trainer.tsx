@@ -88,7 +88,7 @@ import { useMyCapabilities } from '../lib/capabilities';
 import { fmtSlotLong } from '../lib/opsLeadQueries';
 import { QhpReports } from './qhpReports';
 import { ServicesButton } from '../components/servicesButton';
-import { SessionHandoffPopup } from '../components/sessionHandoff';
+import { QhpGuidanceCard, QhpGuidancePopup, ClientEntryPopups } from '../components/qhpGuidance';
 import { useQhpManager, useResolveQhpReschedule, useSetQhpManagerReview, useHoldQhp, useRescheduleQhpAssessment, useApproveQhpRequest, useQhpTracker, useClientLinked, useClientAssignedStaff, useQhpReviewDetail, useEditQhpRequest, useClientCredentials, useQhpAssignAssessorAlert, useAssessorPendingCount, useQhpInProgress, useQhpStats, useQhpTotals, QhpTotalsRow, useAddHeartMath, useDeleteQhp, computeQhpSlaDeadline, formatSlaRemaining, formatWaiting, waitUrgency } from '../lib/qhpManagerQueries';
 import * as Clipboard from 'expo-clipboard';
 import * as ImagePicker from 'expo-image-picker';
@@ -1802,6 +1802,23 @@ export function Dashboard() {
       setOtpFor({ scheduleId, clientId, clientName, couple: st?.couple === true, coupleGroupId: st?.coupleGroupId ?? null, proceed });
     } else proceed();
   };
+  // QHP notes before a log (11 Nov 2026): the latest QHP's recovery notes and recommendations for trainers,
+  // shown once per trainer per QHP. Nothing unread, offline or a slow lookup: straight on. Runs before the
+  // session code gate, one after the other (never two modals together).
+  const [notesFor, setNotesFor] = React.useState<{ clientId: string; proceed: () => void; n: number } | null>(null);
+  const notesSeq = React.useRef(0);
+  const notesRef = React.useRef<{ clientId: string; proceed: () => void; n: number } | null>(null);
+  const withNotesGate = (clientId: string, proceed: () => void) => {
+    const next = { clientId, proceed, n: ++notesSeq.current };
+    notesRef.current = next;
+    setNotesFor(next);
+  };
+  const notesDone = React.useCallback(() => {
+    const cur = notesRef.current;
+    notesRef.current = null;
+    setNotesFor(null);
+    cur?.proceed();
+  }, []);
   const saveOtpOffline = (code: string) => {
     const f = otpFor;
     if (!f) return;
@@ -2477,7 +2494,7 @@ export function Dashboard() {
                     onVoice={r.workout_session_id && r.client_id ? () => setVoiceFor({ workoutSessionId: r.workout_session_id!, clientId: r.client_id!, clientName: r.client_name, notes: r.voice_notes }) : undefined}
                     queued={queuedBySlot.get(r.id) ?? null}
                     onEditQueued={() => { const o = outbox.find((x) => x.id === queuedBySlot.get(r.id)?.id); if (o) openQueuedLog(o); }}
-                    onAddWorkout={() => { const o = outbox.find((x) => x.id === queuedBySlot.get(r.id)?.id); if (o) { openQueuedLog(o); return; } if (r.client_id) withOtpGate(r.client_id, r.id, r.client_name, () => openWorkout(r.client_id!, r.client_name, r.modality ?? r.session_type ?? 'strength', r.id)); }}
+                    onAddWorkout={() => { const o = outbox.find((x) => x.id === queuedBySlot.get(r.id)?.id); if (o) { openQueuedLog(o); return; } if (r.client_id) withNotesGate(r.client_id, () => withOtpGate(r.client_id!, r.id, r.client_name, () => openWorkout(r.client_id!, r.client_name, r.modality ?? r.session_type ?? 'strength', r.id))); }}
                   />
                 ))}
                 {attentionRows.length && todayRows.length ? (
@@ -2499,7 +2516,7 @@ export function Dashboard() {
                     onVoice={r.workout_session_id && r.client_id ? () => setVoiceFor({ workoutSessionId: r.workout_session_id!, clientId: r.client_id!, clientName: r.client_name, notes: r.voice_notes }) : undefined}
                     queued={queuedBySlot.get(r.id) ?? null}
                     onEditQueued={() => { const o = outbox.find((x) => x.id === queuedBySlot.get(r.id)?.id); if (o) openQueuedLog(o); }}
-                    onAddWorkout={() => { const o = outbox.find((x) => x.id === queuedBySlot.get(r.id)?.id); if (o) { openQueuedLog(o); return; } if (r.client_id) withOtpGate(r.client_id, r.id, r.client_name, () => openWorkout(r.client_id!, r.client_name, r.modality ?? r.session_type ?? 'strength', r.id)); }}
+                    onAddWorkout={() => { const o = outbox.find((x) => x.id === queuedBySlot.get(r.id)?.id); if (o) { openQueuedLog(o); return; } if (r.client_id) withNotesGate(r.client_id, () => withOtpGate(r.client_id!, r.id, r.client_name, () => openWorkout(r.client_id!, r.client_name, r.modality ?? r.session_type ?? 'strength', r.id))); }}
                   />
                 ))}
                 {attentionRows.length && !todayRows.length ? (
@@ -2822,6 +2839,7 @@ export function Dashboard() {
         onVerified={() => { const p = otpFor?.proceed; setOtpFor(null); p?.(); }}
         onSave={saveOtpOffline}
       />
+      {notesFor ? <QhpGuidancePopup key={notesFor.n} clientId={notesFor.clientId} onDone={notesDone} maxWaitMs={2500} /> : null}
     </Page>
   );
 }
@@ -5445,8 +5463,12 @@ export function ClientDetail() {
       {/* Listen before the session (9 Oct 2026): the spoken weekly + health context summaries */}
       <ClientHealthSummaryCard clientId={clientId} />
 
-      {/* Session handoff popup — auto-opens once per trainer+client per IST day */}
-      <SessionHandoffPopup clientId={clientId} />
+      {/* Recovery notes and recommendations from the latest QHP (11 Nov 2026); nothing when there are none */}
+      <QhpGuidanceCard clientId={clientId} />
+
+      {/* Popups on entry, one after the other: the QHP notes (once per trainer per QHP), then the session
+          handoff (once per trainer+client per IST day) */}
+      <ClientEntryPopups key={clientId ?? 'none'} clientId={clientId} />
 
       {/* Client info popup */}
       <Modal visible={showInfo} transparent animationType="fade" onRequestClose={() => setShowInfo(false)}>
