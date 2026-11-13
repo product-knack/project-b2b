@@ -5879,9 +5879,15 @@ export function ClientDetail() {
                           accessibilityRole="button" accessibilityLabel={`Listen to ${voiceNotes.length} shared coach notes${hasPainNote(voiceNotes) ? ', pain or discomfort reported' : ''}`}
                           style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingVertical: 11, borderRadius: 12, borderWidth: 1, borderColor: hexA(hasPainNote(voiceNotes) ? C.red : C.purple, hasPainNote(voiceNotes) ? 0.5 : 0.35), backgroundColor: voiceOpen ? hexA(C.purple, 0.14) : hexA(C.purple, 0.06) }}
                         >
-                          <Icon name="mic" size={14} color={C.purple} strokeWidth={2.2} />
-                          <Text style={{ fontFamily: F.bodySemi, fontSize: 13, color: C.purple }}>{SN.listenButton(voiceNotes.length)}</Text>
-                          {hasPainNote(voiceNotes) ? <Text style={{ fontFamily: F.bodySemi, fontSize: 11, color: C.red }}>· Pain</Text> : null}
+                          {/* 13 Nov 2026: the pain mark sits UNDER the label inside the button (three buttons share this row;
+                              "Listen · Pain" on one line ran past the border). The label never wraps or overflows. */}
+                          <View style={{ flexShrink: 1, alignItems: 'center', gap: 2 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                              <Icon name={hasPainNote(voiceNotes) ? 'alert' : 'mic'} size={14} color={hasPainNote(voiceNotes) ? C.red : C.purple} strokeWidth={2.2} />
+                              <Text numberOfLines={1} style={{ flexShrink: 1, fontFamily: F.bodySemi, fontSize: 13, color: C.purple }}>{SN.listenButton(voiceNotes.length)}</Text>
+                            </View>
+                            {hasPainNote(voiceNotes) ? <Mono numberOfLines={1} style={{ fontSize: 7.5, letterSpacing: 0.5, color: C.red }}>{SN.PAIN_TAG_ON}</Mono> : null}
+                          </View>
                         </Pressable>
                       ) : null}
                     </View>
