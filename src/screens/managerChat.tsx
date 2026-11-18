@@ -29,6 +29,7 @@ import { useClientsLatestVoiceNotes } from '../lib/sessionVoiceQueries';
 import { ListenStatusChip, ListenNowSheet, type ListenNowInfo } from '../components/clientHealthSummaryCard';
 import { listenChipShown } from '../lib/clientHealthSummary';
 import { useMyListenStatuses, useCrewListenProgress, prefetchClientHealthSummaries } from '../lib/clientHealthSummaryQueries';
+import { gateFromStatus, rosterPopupKind, nextRosterPopup, rosterPopupText, type RosterPopupKind } from '../lib/clientHealthSummary';
 import { useLocalListensMap } from '../lib/listenLocal';
 import { useIsOnline } from '../lib/offline';
 import { friendlyError } from '../lib/friendlyError';
@@ -1452,21 +1453,51 @@ function TomorrowPlanSheet({ visible, onClose, onSend, sending, existing, addOnl
   // The client's latest session voice notes (30 Sep 2026): hear what was said after her last workout.
   const latestVoiceQ = useClientsLatestVoiceNotes(rows.map((r) => r.clientId), visible);
   // The listen rule on each row (27 Oct 2026): one batched read, the chip opens the Listen now sheet.
-  const listenQ = useMyListenStatuses(rows.map((r) => r.clientId), visible);
+  // Since 18 Nov 2026 the status, the Play rows and the listens are those of the PLAN's day (the short summary
+  // is built every evening for the next day), so a listen here counts when the session is logged. A server from
+  // before migration 20261118100000 answers with today's row and no day: then everything stays as it was.
+  const planDay = composeQ.data?.date ?? null;
+  const listenQ = useMyListenStatuses(rows.map((r) => r.clientId), visible, planDay);
   const listenById = listenQ.data ?? {};
-  const [listenFor, setListenFor] = React.useState<ListenNowInfo>(null);
+  const dayAware = Object.values(listenById).some((s) => !!s.briefing_date);
+  const listenDay = dayAware ? planDay : null;
+  const [listenFor, setListenFor] = React.useState<{ id: string; name: string; popup: RosterPopupKind | null } | null>(null);
   // Listen progress (3 Nov 2026): the phone's own records (offline listens count at once), everyone's percent for the
   // Who listened block, and the rows prefetched while online so tomorrow's summaries can be heard offline.
   const listenLocal = useLocalListensMap(rows.map((r) => r.clientId));
-  const crewListenQ = useCrewListenProgress(rows.map((r) => r.clientId), visible);
+  const crewListenQ = useCrewListenProgress(rows.map((r) => r.clientId), visible, listenDay);
   const qcListen = useQueryClient();
   const onlineForPrefetch = useIsOnline();
   const crewTeamQ = useMyManagerTeam(); // cached: the chat screen reads the same query
   const crewMembers = (crewTeamQ.data?.members ?? []).map((m) => ({ id: m.id, name: m.name }));
   React.useEffect(() => {
     if (!visible || !onlineForPrefetch || !rows.length) return;
-    prefetchClientHealthSummaries(qcListen, rows.map((r) => r.clientId));
-  }, [visible, onlineForPrefetch, rows.map((r) => r.clientId).join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
+    prefetchClientHealthSummaries(qcListen, rows.map((r) => r.clientId), listenDay);
+  }, [visible, onlineForPrefetch, listenDay, rows.map((r) => r.clientId).join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
+  /* The roster popup (18 Nov 2026, owner): when a client is added to the plan and the short summary of that day
+     is unheard, or newer than the version this trainer heard, a popup says so and offers to listen now. Not
+     blocking: Minimize closes it and the plan goes on; while the new version is still being made it says so, and
+     minimizing does not stop the making (it happens on the server). The chip on the row reopens the Play rows.
+     A client restored from an already shared plan opens it only for a NEWER version (new details), never just
+     for being unheard, so reopening a plan of eight clients is not eight popups. Once per client and version; and
+     after the trainer saw (and minimized) the "making" state, the finished version does not open it again by itself:
+     the chip on the row reopens it (owner: "when it is ready, the trainer can reopen it from the Play row"). */
+  const popupShown = React.useRef<Map<string, string>>(new Map()); // client id -> the popup key last shown
+  const [askFor, setAskFor] = React.useState<string[]>([]); // client ids just added by the trainer, waiting for their status
+  React.useEffect(() => { if (!visible) { popupShown.current = new Map(); setAskFor([]); setListenFor(null); } }, [visible]);
+  React.useEffect(() => {
+    if (!visible || !dayAware || listenFor) return;
+    const d = nextRosterPopup({
+      added: askFor,
+      selected: [...sel.keys()],
+      statuses: listenById,
+      kindOf: (cid) => rosterPopupKind(listenById[cid], gateFromStatus(listenById[cid], Date.now(), listenLocal[cid])),
+      lastShown: Object.fromEntries(popupShown.current),
+    });
+    for (const [cid, key] of Object.entries(d.shown)) popupShown.current.set(cid, key);
+    if (d.consumed.length) setAskFor((list) => list.filter((x) => !d.consumed.includes(x)));
+    if (d.open) setListenFor({ id: d.open.clientId, name: rows.find((r) => r.clientId === d.open!.clientId)?.name ?? '', popup: d.open.kind });
+  }, [visible, dayAware, listenFor, askFor, sel, listenById, listenLocal]); // eslint-disable-line react-hooks/exhaustive-deps
   const latestVoice = latestVoiceQ.data ?? {};
   const [voiceFor, setVoiceFor] = React.useState<LatestVoiceInfo>(null);
   // Expired-plan gate (27 Oct 2026): one batched read; a selected row whose plan for the picked modality is
@@ -1509,6 +1540,7 @@ function TomorrowPlanSheet({ visible, onClose, onSend, sending, existing, addOnl
       else { next.set(cid, { time: slotTime ?? '07:00', modality: lastModality }); if (!slotTime) setTimeFor(cid); }
       return next;
     });
+    if (!sel.has(cid)) setAskFor((a) => (a.includes(cid) ? a : [...a, cid])); // just added: the roster popup looks at this client
   };
   const send = () => {
     if (!composeQ.data || !count || sending) return;
@@ -1607,7 +1639,7 @@ function TomorrowPlanSheet({ visible, onClose, onSend, sending, existing, addOnl
         {hasChips ? (
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, paddingLeft: 42, paddingRight: 11, paddingBottom: 10 }}>
               {latestVoice[r.clientId] ? <LatestVoiceChip compact latest={latestVoice[r.clientId]} onPress={() => setVoiceFor({ name: r.name, latest: latestVoice[r.clientId] })} /> : null}
-              <ListenStatusChip compact status={listenById[r.clientId]} local={listenLocal[r.clientId]} onPress={() => setListenFor({ id: r.clientId, name: r.name })} />
+              <ListenStatusChip compact status={listenById[r.clientId]} local={listenLocal[r.clientId]} onPress={() => setListenFor({ id: r.clientId, name: r.name, popup: null })} />
               {cycles[r.clientId] ? <CycleChip cycle={cycles[r.clientId]} onPress={() => setCycleFor({ name: r.name, cycle: cycles[r.clientId] })} /> : null}
               {essentials[r.clientId] ? <EssentialsBadge status={essentials[r.clientId]} compact /> : null}
               {protocols[r.clientId] ? <ProtocolChip onPress={() => setProtoFor({ name: r.name, proto: protocols[r.clientId] })} /> : null}
@@ -1701,7 +1733,9 @@ function TomorrowPlanSheet({ visible, onClose, onSend, sending, existing, addOnl
       <ProtocolPopup info={protoFor} onClose={() => setProtoFor(null)} />
       <CyclePopup info={cycleFor} onClose={() => setCycleFor(null)} />
       <LatestVoicePopup info={voiceFor} onClose={() => setVoiceFor(null)} />
-      <ListenNowSheet info={listenFor} onClose={() => { setListenFor(null); listenQ.refetch(); crewListenQ.refetch(); }}
+      <ListenNowSheet
+        info={listenFor ? { id: listenFor.id, name: listenFor.name, date: listenDay, headline: listenFor.popup ? rosterPopupText(listenFor.popup, listenById[listenFor.id], listenFor.name) : null } : null}
+        onClose={() => { setListenFor(null); listenQ.refetch(); crewListenQ.refetch(); }}
         crewRows={crewListenQ.data ?? []} crewLoading={crewListenQ.isLoading} members={crewMembers} />
     </Modal>
   );

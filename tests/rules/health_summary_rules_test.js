@@ -30,8 +30,9 @@ eq('heard today + context up to date -> done', R.listenGate(row({ listen_history
 eq('gateDue false when done', R.gateDue({ weekly: 'done', context: 'done' }), false);
 // weekly heard yesterday (before the nightly build) -> due
 eq('weekly heard before nightly build -> due', R.gateStateFor(row({ listen_history: [{ at: '2026-10-08T10:00:00Z', by: ME, which: 'weekly' }] }), 'weekly', ME, NOW), 'due');
-// weekly heard yesterday 11:59:30 PM IST (after build) but not today -> due (daily rule)
-eq('weekly heard after build but yesterday -> due', R.gateStateFor(row({ listen_history: [{ at: '2026-10-08T18:29:30Z', by: ME, which: 'weekly' }] }), 'weekly', ME, NOW), 'due');
+// 18 Nov 2026: the short summary is heard once per version. A listen after the build counts on a later day too
+// (the evening before, from My Crew's Tomorrow's Plan); until then it had to be on the same IST day.
+eq('weekly heard after the build, the evening before -> done', R.gateStateFor(row({ listen_history: [{ at: '2026-10-08T18:29:30Z', by: ME, which: 'weekly' }] }), 'weekly', ME, NOW), 'done');
 // context heard before its rebuild -> due; another person's listen never counts
 eq('context heard before rebuild -> due', R.gateStateFor(row({ listen_history: [{ at: '2026-10-04T10:00:00Z', by: ME, which: 'context' }] }), 'context', ME, NOW), 'due');
 eq('someone else heard -> still due for me', R.gateStateFor(row({ listen_history: [{ at: '2026-10-09T02:00:00Z', by: OTHER, which: 'weekly' }] }), 'weekly', ME, NOW), 'due');
@@ -44,13 +45,14 @@ eq('carried listen never satisfies the weekly', R.gateStateFor(row({ listen_hist
 eq('context rebuilt after the carried listen -> due', R.gateStateFor(row({ listen_history: [carried], context_generated_at: '2026-10-08T10:00:00Z' }), 'context', ME, NOW), 'due');
 // 27 Oct 2026: the rule written once, shown everywhere
 eq('rule line context due', R.listenRuleLine('context', 'due', 'Aarav Mehra'), 'Listen to this at least once. It changed since you last heard it. You cannot log a workout for Aarav until you do.');
-eq('rule line weekly due', R.listenRuleLine('weekly', 'due', null), "Listen to this at least once today. You cannot log this client's workout until you do.");
+eq('rule line weekly due', R.listenRuleLine('weekly', 'due', null), "Listen to this once after its latest update. You cannot log this client's workout until you do.");
 eq('rule line done / none', [R.listenRuleLine('weekly', 'done', 'A'), R.listenRuleLine('context', 'none', 'A')], ['Heard after the latest update. You can log.', null]);
 eq('header text', [R.listenHeaderText({ weekly: 'due', context: 'done' }), R.listenHeaderText({ weekly: 'done', context: 'none' })], ['NOT HEARD · LISTEN NOW', 'CLIENT SUMMARIES']);
 eq('listen now line', R.listenNowLine('Aarav Mehra'), "You have not heard Aarav's summaries. You cannot log tomorrow's session without this. Listen now.");
 const st = { client_id: 'c', has_weekly: true, has_context: true, weekly_generated_at: '2026-10-08T18:29:00Z', context_generated_at: '2026-10-05T04:00:00Z', my_last_weekly_at: '2026-10-09T02:00:00Z', my_last_context_at: '2026-10-06T02:00:00Z' };
 eq('gate from status: both done', R.gateFromStatus(st, NOW), { weekly: 'done', context: 'done' });
-eq('gate from status: weekly heard yesterday -> due, context never -> due', R.gateFromStatus({ ...st, my_last_weekly_at: '2026-10-08T18:29:30Z', my_last_context_at: null }, NOW), { weekly: 'due', context: 'due' });
+eq('gate from status: weekly heard the evening before (after the build) -> done, context never -> due', R.gateFromStatus({ ...st, my_last_weekly_at: '2026-10-08T18:29:30Z', my_last_context_at: null }, NOW), { weekly: 'done', context: 'due' });
+eq('gate from status: weekly heard before the build -> due', R.gateFromStatus({ ...st, my_last_weekly_at: '2026-10-08T10:00:00Z' }, NOW).weekly, 'due');
 eq('gate from status: nothing built -> none', R.gateFromStatus({ ...st, has_weekly: false, has_context: false }, NOW), { weekly: 'none', context: 'none' });
 eq('gate from status: missing row -> none', R.gateFromStatus(null, NOW), { weekly: 'none', context: 'none' });
 eq('no weekly script -> none', R.gateStateFor(row({ weekly_summary: null, weekly_generated_at: null }), 'weekly', ME, NOW), 'none');
@@ -143,5 +145,76 @@ eq('crew lines: every member listed, others separate', [lines.crew.map((l) => l.
 eq('crew line text: Sagar', R.crewLineText(lines.crew[1]), 'This week 100 percent · Health context 40 percent');
 eq('crew line text: Priya never played this client', R.crewLineText(lines.crew[0]), 'This week 0 percent · Health context 0 percent');
 eq('crew line text: 97 reads as 100 (heard)', R.crewLineText(lines.others[0]), 'This week 100 percent · Health context 0 percent');
+
+/* ---------- 18 Nov 2026: the short summary every evening, new details, the roster popup ---------- */
+{
+  // built 5:00 PM IST on 8 Oct for the session of 9 Oct; heard at 6 PM the same evening; logged next morning
+  const evening = row({ weekly_generated_at: '2026-10-08T11:30:00Z', briefing_date: '2026-10-09', listen_history: [{ at: '2026-10-08T12:30:00Z', by: ME, which: 'weekly', version: 2, percent: 100, heard: true, heard_at: '2026-10-08T12:32:00Z', briefing_date: '2026-10-09' }] });
+  eq('evening listen counts on the session day', R.gateStateFor(evening, 'weekly', ME, NOW), 'done');
+  // new details at 8 PM: version 3; the evening listen is of the older version
+  const rebuilt = { ...evening, weekly_generated_at: '2026-10-08T14:30:00Z' };
+  eq('a newer version after the listen -> due again', R.gateStateFor(rebuilt, 'weekly', ME, NOW), 'due');
+  eq('and its percent starts from 0', R.myProgress(rebuilt, 'weekly', ME), 0);
+  eq('a part listen of the new version shows its own percent', R.myProgress({ ...rebuilt, listen_history: [...evening.listen_history, { at: '2026-10-08T15:00:00Z', by: ME, which: 'weekly', version: 3, percent: 40, heard: false }] }, 'weekly', ME), 40);
+  eq('60 percent of the current version is not heard', R.gateStateFor({ ...evening, listen_history: [{ at: '2026-10-08T12:30:00Z', by: ME, which: 'weekly', version: 2, percent: 60, heard: false }] }, 'weekly', ME, NOW), 'due');
+
+  // the wrong green line (found live 18 Nov 2026): the long summary rebuilt on 15 Nov, the only listen is the one
+  // of 1 Nov that the server carries forward. The bar said 100 percent, the rule line said listen again.
+  const ctx = row({ context_generated_at: '2026-11-15T00:57:00Z', listen_history: [{ at: '2026-11-01T16:52:00Z', by: ME, which: 'context', version: 1, carried: true, briefing_date: '2026-11-01' }] });
+  const NOV18 = new Date('2026-11-18T05:40:00Z').getTime();
+  eq('carried listen of an older version: the gate says due', R.gateStateFor(ctx, 'context', ME, NOV18), 'due');
+  eq('carried listen of an older version: the percent is 0, not 100', [R.myProgress(ctx, 'context', ME), R.mergedProgress(ctx, 'context', ME, null)], [0, 0]);
+  eq('so the line under the bar no longer says you can log', R.progressLine(R.mergedProgress(ctx, 'context', ME, null)), 'You: 0 percent heard');
+  // a listen carried from an earlier day of the SAME version still counts (heard once per update)
+  const same = row({ context_generated_at: '2026-11-15T00:57:00Z', listen_history: [{ at: '2026-11-15T04:00:00Z', by: ME, which: 'context', version: 3, carried: true, percent: 100, heard: true, heard_at: '2026-11-15T04:02:00Z', briefing_date: '2026-11-15' }] });
+  eq('carried listen of the same version: done and 100', [R.gateStateFor(same, 'context', ME, NOV18), R.myProgress(same, 'context', ME)], ['done', 100]);
+  eq('legacy carried play after the build counts as 100', R.myProgress(row({ context_generated_at: '2026-11-15T00:57:00Z', listen_history: [{ at: '2026-11-16T04:00:00Z', by: ME, which: 'context', carried: true }] }), 'context', ME), 100);
+
+  // the roster popup
+  const s0 = { client_id: 'c', has_weekly: true, has_context: true, weekly_generated_at: '2026-10-08T11:30:00Z', context_generated_at: '2026-10-05T04:00:00Z', my_last_weekly_at: null, my_last_context_at: null,
+    weekly_version: 3, my_weekly_heard: false, my_weekly_percent: 0, my_context_heard: true, my_context_heard_at: '2026-10-06T02:00:00Z', briefing_date: '2026-10-09', weekly_rebuilding: false, weekly_rebuild_reason: null, weekly_changed: null, my_weekly_heard_version: null };
+  const kind = (s) => R.rosterPopupKind(s, R.gateFromStatus(s, NOW));
+  eq('popup: never heard', kind(s0), 'unheard');
+  eq('popup: heard version 2, version 3 is out', kind({ ...s0, my_weekly_heard_version: 2 }), 'new_version');
+  const heard3 = { ...s0, my_weekly_heard: true, my_weekly_heard_at: '2026-10-08T12:32:00Z', my_weekly_percent: 100, my_weekly_heard_version: 3 };
+  eq('popup: heard the current version -> none', kind(heard3), 'none');
+  eq('popup: heard the current one, a newer one is being made', kind({ ...heard3, weekly_rebuilding: true, weekly_rebuild_reason: 'a session was completed' }), 'new_version');
+  eq('popup: never heard and one is being made', kind({ ...s0, weekly_rebuilding: true }), 'unheard');
+  eq('popup: no short summary at all -> none', [kind({ ...s0, has_weekly: false, weekly_generated_at: null }), kind(null)], ['none', 'none']);
+  eq('popup: only the long summary is due -> none (the chip and the log sheet cover it)', kind({ ...heard3, my_context_heard: false, my_context_heard_at: null }), 'none');
+  eq('popup: the phone heard it offline -> none', R.rosterPopupKind(s0, R.gateFromStatus(s0, NOW, { weekly: { clientId: 'c', which: 'weekly', version: 3, generatedAt: s0.weekly_generated_at, briefingDate: '2026-10-09', percent: 100, heard: true, heardAt: '2026-10-08T12:40:00Z', at: '2026-10-08T12:38:00Z', synced: false } })), 'none');
+  eq('popup key: one per client, day and version; a rebuild has its own', [R.rosterPopupKey(s0), R.rosterPopupKey({ ...s0, weekly_version: 4 }), R.rosterPopupKey({ ...s0, weekly_rebuilding: true }), R.rosterPopupKey(null)], ['c|2026-10-09|3', 'c|2026-10-09|4', 'c|2026-10-09|making', '']);
+
+  eq('changed sentence', [R.changedSentence('a session was completed, a trainer added a note'), R.changedSentence('  nutrition, steps or water was entered. '), R.changedSentence(null), R.changedSentence('')], ['A session was completed, a trainer added a note.', 'Nutrition, steps or water was entered.', '', '']);
+  eq('popup text: new version with what changed', R.rosterPopupText('new_version', { ...s0, weekly_changed: 'a session was completed' }, 'Asha Kapoor'), { title: 'New details for Asha', body: 'Since you listened: A session was completed. We made a new summary. Listen to it now.', making: false });
+  eq('popup text: new version, the evening build (no reason)', R.rosterPopupText('new_version', s0, 'Asha').body, 'The summary was updated since you listened. We made a new summary. Listen to it now.');
+  eq('popup text: being made, with the reason', R.rosterPopupText('new_version', { ...s0, weekly_rebuilding: true, weekly_rebuild_reason: 'a session was cancelled', weekly_changed: 'old reason' }, 'Asha'), { title: 'New details for Asha', body: 'Since you listened: A session was cancelled. We are making a new summary.', making: true });
+  eq('popup text: being made, no reason', R.rosterPopupText('new_version', { ...s0, weekly_rebuilding: true }, 'Asha').body, 'New details came in since you listened. We are making a new summary.');
+  eq('popup text: never heard, tomorrow and today', [R.rosterPopupText('unheard', s0, 'Asha').body, R.rosterPopupText('unheard', s0, null, 'today').body, R.rosterPopupText('unheard', s0, 'Asha').title], ["You have not heard Asha's summary for tomorrow yet. Listen to it now, so you do not have to when you log the session.", "You have not heard this client's summary for today yet. Listen to it now, so you do not have to when you log the session.", "Listen to Asha's summary"]);
+  eq('popup text: none', R.rosterPopupText('none', s0, 'Asha'), { title: '', body: '', making: false });
+  // which popup opens next in the plan sheet
+  {
+    const due = { ...s0, client_id: 'a' }, upd = { ...s0, client_id: 'b', my_weekly_heard_version: 2 }, ok = { ...heard3, client_id: 'd' };
+    const statuses = { a: due, b: upd, d: ok };
+    const kindOf = (cid) => R.rosterPopupKind(statuses[cid], R.gateFromStatus(statuses[cid], NOW));
+    const next = (o) => R.nextRosterPopup({ added: [], selected: [], statuses, kindOf, lastShown: {}, ...o });
+    eq('next popup: a client just added and never heard', next({ added: ['a'], selected: ['a'] }), { open: { clientId: 'a', kind: 'unheard' }, consumed: ['a'], shown: { a: 'a|2026-10-09|3' } });
+    eq('next popup: added, already heard -> nothing, and done with', next({ added: ['d'], selected: ['d'] }), { open: null, consumed: ['d'], shown: {} });
+    eq('next popup: added, its status not here yet -> waits', next({ added: ['z'], selected: ['z'] }), { open: null, consumed: [], shown: {} });
+    eq('next popup: added then taken off the plan again -> nothing', next({ added: ['a'], selected: [] }).open, null);
+    eq('next popup: a restored plan opens only for a newer version, never just for unheard', next({ selected: ['a', 'b', 'd'] }).open, { clientId: 'b', kind: 'new_version' });
+    eq('next popup: eight restored unheard clients, no popup', next({ selected: ['a'] }).open, null);
+    eq('next popup: the same version is not shown twice', next({ selected: ['b'], lastShown: { b: 'b|2026-10-09|3' } }).open, null);
+    eq('next popup: a later version opens it again', R.nextRosterPopup({ added: [], selected: ['b'], statuses: { b: { ...upd, weekly_version: 4 } }, kindOf: () => 'new_version', lastShown: { b: 'b|2026-10-09|3' } }).open, { clientId: 'b', kind: 'new_version' });
+    const making = { ...heard3, client_id: 'm', weekly_rebuilding: true };
+    eq('next popup: a rebuild starts while the plan is open', R.nextRosterPopup({ added: [], selected: ['m'], statuses: { m: making }, kindOf: () => 'new_version', lastShown: {} }), { open: { clientId: 'm', kind: 'new_version' }, consumed: [], shown: { m: 'm|2026-10-09|making' } });
+    eq('next popup: minimized while it was being made, the finished one does not pop up by itself', R.nextRosterPopup({ added: [], selected: ['m'], statuses: { m: { ...making, weekly_rebuilding: false, weekly_version: 4, my_weekly_heard: false } }, kindOf: () => 'new_version', lastShown: { m: 'm|2026-10-09|making' } }), { open: null, consumed: [], shown: { m: 'm|2026-10-09|4' } });
+    eq('next popup: one at a time, the added client first', next({ added: ['a'], selected: ['a', 'b'] }).open, { clientId: 'a', kind: 'unheard' });
+    eq('next popup: then the other one', next({ added: [], selected: ['a', 'b'], lastShown: { a: 'a|2026-10-09|3' } }).open, { clientId: 'b', kind: 'new_version' });
+  }
+  eq('popup words', [R.ROSTER_POPUP_MINIMIZE, /minimize this and carry on/.test(R.ROSTER_POPUP_MAKING)], ['Minimize', true]);
+  const dash = String.fromCharCode(0x2014);
+  eq('no long dash in the popup copy', [R.ROSTER_POPUP_MAKING, R.rosterPopupText('new_version', s0, 'A').body, R.rosterPopupText('unheard', s0, 'A').body].some((x) => x.includes(dash)), false);
+}
 console.log(fails ? `${fails} FAILED` : 'ALL PASS');
 process.exit(fails ? 1 : 0);

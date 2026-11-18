@@ -78,17 +78,15 @@ export function useLogSummaryListen(clientId: string | null | undefined) {
 
 /** My Crew (3 Nov 2026): everyone's best percent per client and summary (get_crew_listen_progress), one call per plan.
     Before the migration (PGRST202) the list is empty. */
-export function useCrewListenProgress(clientIds: string[], enabled: boolean) {
+export function useCrewListenProgress(clientIds: string[], enabled: boolean, date?: string | null) {
   const ids = [...new Set(clientIds.filter(Boolean))].sort();
   return useQuery({
-    queryKey: ['crew-listen-progress', ids.join(',')],
+    queryKey: ['crew-listen-progress', ids.join(','), date ?? 'today'],
     enabled: enabled && ids.length > 0,
     staleTime: 60_000,
     refetchOnWindowFocus: true,
     queryFn: async (): Promise<CrewListenRow[]> => {
-      const { data, error } = await withTimeout(
-        Promise.resolve((supabase.rpc as any)('get_crew_listen_progress', { p_client_ids: ids })) as Promise<{ data: any; error: any }>,
-        NET_MS, 'Who listened');
+      const { data, error } = await rpcWithDay('get_crew_listen_progress', ids, date, 'Who listened');
       if (error) {
         if (error.code === 'PGRST202' || /could not find the function/i.test(String(error.message ?? ''))) return [];
         throw new Error(friendlyError(error, 'Could not read who listened.'));
@@ -102,25 +100,36 @@ export function useCrewListenProgress(clientIds: string[], enabled: boolean) {
 }
 
 /** Prefetch the rows of a list of clients so their scripts are on the phone for an offline listen (My Crew's
-    Tomorrow's Plan, opened online). Same key as the card and the gate (today's row). */
-export async function prefetchClientHealthSummaries(qc: QueryClient, clientIds: string[]): Promise<void> {
+    Tomorrow's Plan, opened online). Same key as the card and the gate: today's row, or since 18 Nov 2026 the
+    row of the plan's day when one is given. */
+export async function prefetchClientHealthSummaries(qc: QueryClient, clientIds: string[], date?: string | null): Promise<void> {
   const ids = [...new Set(clientIds.filter(Boolean))].slice(0, 30);
-  await Promise.all(ids.map((id) => qc.prefetchQuery({ queryKey: [HEALTH_SUMMARY_KEY, id, 'today'], queryFn: () => fetchClientHealthSummary(id, null), staleTime: 60_000 }).catch(() => {})));
+  await Promise.all(ids.map((id) => qc.prefetchQuery({ queryKey: [HEALTH_SUMMARY_KEY, id, date ?? 'today'], queryFn: () => fetchClientHealthSummary(id, date ?? null), staleTime: 60_000 }).catch(() => {})));
+}
+
+/** A day-aware read (18 Nov 2026): asks for the training day's row; a server from before migration 20261118100000
+    does not know the argument (PGRST202), then the old call answers with today's row and no briefing_date. */
+async function rpcWithDay(fn: string, ids: string[], date: string | null | undefined, label: string): Promise<{ data: any; error: any }> {
+  const call = (args: Record<string, unknown>) => withTimeout(Promise.resolve((supabase.rpc as any)(fn, args)) as Promise<{ data: any; error: any }>, NET_MS, label);
+  if (!date) return call({ p_client_ids: ids });
+  const first = await call({ p_client_ids: ids, p_date: date });
+  if (first.error && (first.error.code === 'PGRST202' || /could not find the function/i.test(String(first.error.message ?? '')))) return call({ p_client_ids: ids });
+  return first;
 }
 
 /** My Crew (27 Oct 2026): the listen gate inputs for a list of clients in one call (get_my_listen_status). A client the
     caller may not listen to is missing from the map; before the migration (PGRST202) the map is empty, no chips. */
-export function useMyListenStatuses(clientIds: string[], enabled: boolean) {
+export function useMyListenStatuses(clientIds: string[], enabled: boolean, date?: string | null) {
   const ids = [...new Set(clientIds.filter(Boolean))].sort();
   return useQuery({
-    queryKey: ['listen-status', ids.join(',')],
+    queryKey: ['listen-status', ids.join(','), date ?? 'today'],
     enabled: enabled && ids.length > 0,
     staleTime: 60_000,
     refetchOnWindowFocus: true,
+    // while a new version of a short summary is being made, look again every few seconds (18 Nov 2026)
+    refetchInterval: (q) => (Object.values((q.state.data ?? {}) as Record<string, ListenStatusRow>).some((s) => s.weekly_rebuilding) ? 8000 : false),
     queryFn: async (): Promise<Record<string, ListenStatusRow>> => {
-      const { data, error } = await withTimeout(
-        Promise.resolve(supabase.rpc('get_my_listen_status', { p_client_ids: ids })) as Promise<{ data: any; error: any }>,
-        NET_MS, 'Listen status');
+      const { data, error } = await rpcWithDay('get_my_listen_status', ids, date, 'Listen status');
       if (error) {
         if (error.code === 'PGRST202' || /could not find the function/i.test(String(error.message ?? ''))) return {};
         throw new Error(friendlyError(error, 'Could not read the listen status.'));
@@ -136,6 +145,10 @@ export function useMyListenStatuses(clientIds: string[], enabled: boolean) {
           my_weekly_percent: r.my_weekly_percent == null ? null : Number(r.my_weekly_percent), my_context_percent: r.my_context_percent == null ? null : Number(r.my_context_percent),
           my_weekly_heard: typeof r.my_weekly_heard === 'boolean' ? r.my_weekly_heard : null, my_context_heard: typeof r.my_context_heard === 'boolean' ? r.my_context_heard : null,
           my_weekly_heard_at: r.my_weekly_heard_at ?? null, my_context_heard_at: r.my_context_heard_at ?? null,
+          // the training day and the roster popup's inputs (18 Nov 2026); absent before migration 20261118100000
+          briefing_date: r.briefing_date ?? null,
+          weekly_rebuilding: r.weekly_rebuilding === true, weekly_rebuild_reason: r.weekly_rebuild_reason ?? null, weekly_changed: r.weekly_changed ?? null,
+          my_weekly_heard_version: r.my_weekly_heard_version == null ? null : Number(r.my_weekly_heard_version),
         };
       }
       return out;

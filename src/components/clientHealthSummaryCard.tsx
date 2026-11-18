@@ -29,6 +29,7 @@ import {
   type ListenGate, type HeardMap, listenStillNeeded, listenAllHeard, LISTEN_PROCEED, LISTEN_WAIT,
   mergedProgress, progressLine, LISTEN_100_ALERT, LISTEN_OFFLINE_SAVED, LISTEN_NO_SCRIPT_OFFLINE, HEARD_PERCENT, entryPercent, entryHeard,
   type LocalListens, statusPercent, listenChipText, crewListenLines, crewLineText, type CrewListenRow,
+  changedSentence, ROSTER_POPUP_MAKING, ROSTER_POPUP_MINIMIZE,
 } from '../lib/clientHealthSummary';
 
 const GOLD = C.gold;
@@ -37,7 +38,7 @@ const CONTEXT = '#8FB4FF';
 const colorOf = (which: Which) => (which === 'weekly' ? WEEKLY : CONTEXT);
 const iconOf = (which: Which): IconName => (which === 'weekly' ? 'activity' : 'stethoscope');
 const nothingYet = (which: Which) =>
-  which === 'weekly' ? 'Built nightly at 11:59 PM; nothing yet for this client.' : 'Built when a QHP, blood or medical report arrives; nothing yet.';
+  which === 'weekly' ? 'Built every evening for the next day; nothing yet for this client.' : 'Built when a QHP, blood or medical report arrives; nothing yet.';
 
 const subLine = (row: ClientHealthSummaryRow | null, which: Which): string => {
   const s = summaryOf(row, which);
@@ -361,6 +362,15 @@ export function ClientSummaryStrip({ clientId, date, accent = GOLD, latest = fal
   const gate = listenGate(row, uid, Date.now(), local);
   const due = gateDue(gate);
   React.useEffect(() => { if (!open) voice.stop(); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  // New details arrived and the server is making a new version (18 Nov 2026): read the row again every few
+  // seconds until it is there. Closing the strip or the sheet does not stop the making, only this watching.
+  const rebuilding = !!row?.weekly_summary?.rebuilding;
+  const refetchRow = q.refetch;
+  React.useEffect(() => {
+    if (!rebuilding || !online) return;
+    const t = setInterval(() => { refetchRow(); }, 8000);
+    return () => clearInterval(t);
+  }, [rebuilding, online, refetchRow]);
   if (!clientId || q.isError) return null;
   const hasWeekly = hasScript(row, 'weekly'), hasContext = hasScript(row, 'context');
   const summaryLine = q.isLoading ? 'Loading…' : !row || (!hasWeekly && !hasContext) ? (!online ? LISTEN_NO_SCRIPT_OFFLINE((clientName ?? '').split(' ')[0] || 'this client') : 'Nothing built yet for this day') : [hasWeekly ? `This week · ${durationText(row!.weekly_summary!.script)}` : null, hasContext ? `Health context · ${durationText(row!.context_summary!.script)}` : null].filter(Boolean).join('   ');
@@ -391,6 +401,12 @@ export function ClientSummaryStrip({ clientId, date, accent = GOLD, latest = fal
         {open ? (
           <View style={{ paddingHorizontal: 10, paddingBottom: 10, gap: 8 }}>
             <Body style={{ fontSize: 10.5, color: due ? '#FF9B8F' : C.muted2, lineHeight: 15 }}>{LISTEN_WHY}</Body>
+            {rebuilding ? (
+              <View accessibilityLiveRegion="polite" style={{ flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 8, paddingHorizontal: 10, borderRadius: 10, backgroundColor: hexA(GOLD, 0.08), borderWidth: 1, borderColor: hexA(GOLD, 0.3) }}>
+                <ActivityIndicator size="small" color={GOLD} />
+                <Body style={{ flex: 1, fontSize: 11, color: GOLD, lineHeight: 15.5 }}>{`${changedSentence(row?.weekly_summary?.rebuild_reason) || 'New details came in.'} A new version of this week's training is being made. The one below is the earlier version.`}</Body>
+              </View>
+            ) : null}
             {(['weekly', 'context'] as Which[]).map((which) => (
               <SummaryRow key={which} which={which} row={row} uid={uid} {...rowVoiceProps(voice, which)} transcriptOpen={transcript === which}
                 rule={listenRuleLine(which, gate[which], clientName)} ruleDue={gate[which] === 'due'}
@@ -419,8 +435,8 @@ export function ClientSummaryStrip({ clientId, date, accent = GOLD, latest = fal
 const gateStatus = (which: Which, state: GateState, heardNow: boolean, row: ClientHealthSummaryRow | null): { text: string; color: string } => {
   if (state === 'none') return { text: 'Nothing to hear yet', color: C.muted2 };
   if (heardNow) return { text: 'Heard just now', color: C.green };
-  if (state === 'done') return { text: which === 'weekly' ? 'Heard today' : 'Up to date', color: C.green };
-  if (which === 'weekly') return { text: 'Due today', color: C.red };
+  if (state === 'done') return { text: which === 'weekly' ? 'Heard' : 'Up to date', color: C.green };
+  if (which === 'weekly') return { text: 'Not heard yet', color: C.red };
   const built = fmtStamp(generatedAtOf(row, 'context'));
   return { text: built ? `New report · ${built}` : 'Not heard yet', color: C.red };
 };
@@ -492,7 +508,7 @@ export function ListenGateSheet({ visible, clientId, clientName, onContinue }: {
             </View>
             <View style={{ flex: 1 }}>
               <Serif style={{ fontSize: 20 }}>Listen before you log</Serif>
-              <Body style={{ fontSize: 11.5, color: C.muted2, marginTop: 3, lineHeight: 16 }}>{LISTEN_WHY} This week's training changes every day; the health context changes when a new report arrives. Hear each one to the end, then tap Proceed to workout.</Body>
+              <Body style={{ fontSize: 11.5, color: C.muted2, marginTop: 3, lineHeight: 16 }}>{LISTEN_WHY} This week's training is made new every evening and when new details come in; the health context changes when a new report arrives. Hear each one to the end, then tap Proceed to workout.</Body>
             </View>
           </View>
           <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 9, paddingBottom: 8 }}>
@@ -545,7 +561,9 @@ export function ListenStatusChip({ status, onPress, compact = false, local }: { 
   );
 }
 
-export type ListenNowInfo = { id: string; name: string; when?: 'tomorrow' | 'today' } | null;
+/** date (18 Nov 2026): the training day whose summaries are played (My Crew's plan day); none = today's.
+    headline: the roster popup's words in place of "Listen now"; making = the new version is still being made. */
+export type ListenNowInfo = { id: string; name: string; when?: 'tomorrow' | 'today'; date?: string | null; headline?: { title: string; body: string; making: boolean } | null } | null;
 
 /** My Crew's "Who listened" block (3 Nov 2026): every crew member's percent for both summaries of this client. */
 export function CrewListenBlock({ clientId, rows, members, loading }: { clientId: string; rows: CrewListenRow[]; members: { id: string; name: string }[]; loading?: boolean }) {
@@ -593,8 +611,8 @@ export function ListenNowSheet({ info, onClose, crewRows, members, crewLoading }
                 <Icon name="headphones" size={18} color="#FF9B8F" strokeWidth={2.1} />
               </View>
               <View style={{ flex: 1 }}>
-                <Serif style={{ fontSize: 19 }}>Listen now</Serif>
-                <Body style={{ fontSize: 11.5, color: C.muted2, marginTop: 2, lineHeight: 16 }}>{info ? listenNowLine(info.name, info.when ?? 'tomorrow') : ''}</Body>
+                <Serif style={{ fontSize: 19 }}>{info?.headline?.title || 'Listen now'}</Serif>
+                <Body style={{ fontSize: 11.5, color: C.muted2, marginTop: 2, lineHeight: 16 }}>{info ? (info.headline?.body || listenNowLine(info.name, info.when ?? 'tomorrow')) : ''}</Body>
               </View>
               <Pressable onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel="Close" style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center', justifyContent: 'center' }}>
                 <Icon name="close" size={14} color={C.muted} strokeWidth={2.3} />
@@ -602,8 +620,20 @@ export function ListenNowSheet({ info, onClose, crewRows, members, crewLoading }
             </View>
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 12, paddingBottom: 6 }}>
               {info && crewRows ? <CrewListenBlock clientId={info.id} rows={crewRows} members={members ?? []} loading={crewLoading} /> : null}
-              {info ? <ClientSummaryStrip clientId={info.id} clientName={info.name} accent={GOLD} defaultOpen /> : null}
+              {info?.headline?.making ? (
+                <View accessibilityLiveRegion="polite" style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 12, backgroundColor: hexA(GOLD, 0.08), borderWidth: 1, borderColor: hexA(GOLD, 0.32) }}>
+                  <ActivityIndicator size="small" color={GOLD} />
+                  <Body style={{ flex: 1, fontSize: 11.5, color: GOLD, lineHeight: 16.5 }}>{ROSTER_POPUP_MAKING}</Body>
+                </View>
+              ) : null}
+              {info ? <ClientSummaryStrip clientId={info.id} clientName={info.name} date={info.date ?? null} accent={GOLD} defaultOpen /> : null}
             </ScrollView>
+            {info?.headline ? (
+              <Pressable onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel={ROSTER_POPUP_MINIMIZE}
+                style={{ marginTop: 12, height: 46, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.07)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)' }}>
+                <Text style={{ fontFamily: F.bodySemi, fontSize: 13.5, color: '#fff' }}>{ROSTER_POPUP_MINIMIZE}</Text>
+              </Pressable>
+            ) : null}
           </View>
         </ReplayMask>
       </View>

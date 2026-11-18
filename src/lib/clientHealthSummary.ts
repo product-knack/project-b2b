@@ -31,6 +31,15 @@ export type WeeklySummary = {
   fallback?: boolean | null;
   fallback_reason?: string | null;
   facts?: Record<string, unknown> | null;
+  /** 18 Nov 2026 (server migration 20261118100000): new details arrived and a newer version is being made. */
+  rebuilding?: boolean | null;
+  /** Why it is being remade ("a session was completed, a trainer added a note"). */
+  rebuild_reason?: string | null;
+  /** What changed in THIS version compared with the one before; null for the evening build. */
+  changed?: string | null;
+  previous_version?: number | null;
+  /** When the evening build (the week up to that evening) ran for this training day. */
+  evening_at?: string | null;
 };
 
 export type ContextFinding = {
@@ -147,7 +156,10 @@ export const myProgress = (row: ClientHealthSummaryRow | null | undefined, which
   let best = 0;
   for (const h of historyOf(row)) {
     if (h.which !== which || h.by !== uid) continue;
-    if (new Date(h.at).getTime() < built && !(h.carried && entryHeard(h))) continue;
+    // 18 Nov 2026: a listen from before this build is a listen of an OLDER version, also when the server
+    // carried it forward. (It used to count, so the bar said "Heard 100 percent, you can log" on a summary
+    // rebuilt since, while the rule line under it rightly said to listen again.)
+    if (new Date(h.at).getTime() < built) continue;
     best = Math.max(best, entryPercent(h));
   }
   return best;
@@ -169,8 +181,11 @@ export const isNewSince = (row: ClientHealthSummaryRow | null | undefined, which
 
 /* ---------- Listen gate (user, 9 Oct 2026) ----------
    A session logged from Today's Roster first needs the summaries heard:
-   - This week's training ("daily wala daily"): heard on the same IST day as
-     today AND after its latest build (it is rebuilt every night).
+   - This week's training: heard after its latest build. Since 18 Nov 2026 it is built every evening for the
+     next day's sessions and again when new details arrive (a session completed, cancelled or missed, a
+     trainer's note, nutrition / steps / water entered), so the rule is once per version: a listen the
+     evening before, from My Crew's Tomorrow's Plan, counts on the session day. (Until then: heard on the
+     same IST day as today, because it was rebuilt every night.)
    - Health context ("weekly wala jab bhi new report se update ho"): heard after
      its latest build, whenever a new report rebuilt it.
    A summary that does not exist cannot be required ('none').
@@ -188,9 +203,7 @@ export const gateStateFor = (row: ClientHealthSummaryRow | null | undefined, whi
   const mine = myLastHeard(historyOf(row), which, uid);
   const ok = (atIso: string): boolean => {
     const heardAt = new Date(atIso).getTime();
-    if (!isFinite(heardAt) || heardAt < built) return false;
-    if (which === 'weekly' && istDayOf(atIso) !== istDayOf(nowMs)) return false;
-    return true;
+    return isFinite(heardAt) && heardAt >= built;
   };
   if (mine && ok(entryHeardAt(mine))) return 'done';
   const v = summaryOf(row, which)?.version ?? null;
@@ -250,7 +263,7 @@ export const listenRuleLine = (which: Which, state: GateState, clientFirstName?:
   if (state === 'done') return 'Heard after the latest update. You can log.';
   return which === 'context'
     ? `Listen to this at least once. It changed since you last heard it. You cannot log a workout for ${name} until you do.`
-    : `Listen to this at least once today. You cannot log ${name}'s workout until you do.`;
+    : `Listen to this once after its latest update. You cannot log ${name}'s workout until you do.`;
 };
 
 /** My Crew: the chip on a client row and the sentence in the Listen now sheet. */
@@ -260,6 +273,89 @@ export const LISTEN_CHIP_OK = 'HEARD';
 export const LISTEN_CHIP_DUE_SHORT = 'NOT HEARD';
 export const listenNowLine = (clientFirstName: string | null | undefined, when: 'tomorrow' | 'today' = 'tomorrow'): string =>
   `You have not heard ${(clientFirstName ?? '').trim().split(/\s+/)[0] || 'this client'}'s summaries. You cannot log ${when}'s session without this. Listen now.`;
+
+/* ---------- The roster popup (18 Nov 2026) ----------
+   Owner: "when a trainer makes the roster from My Crew show a popup: some new details were found, so we made
+   a new summary and you have to listen to this now"; shown in both cases, a newer version than the one heard
+   and a short summary never heard, with different words; NOT blocking: a Minimize button, a "making it" state
+   while the new version is being built that minimizing does not stop, reopened from the Play row; the listen
+   sheet before logging stays the backstop on the session day. Only the short summary opens it. */
+export type RosterPopupKind = 'none' | 'new_version' | 'unheard';
+export const rosterPopupKind = (s: ListenStatusRow | null | undefined, gate: ListenGate): RosterPopupKind => {
+  if (!s) return 'none';
+  const heardEarlier = s.my_weekly_heard_version != null;
+  if (s.weekly_rebuilding) return heardEarlier || gate.weekly === 'done' ? 'new_version' : s.has_weekly ? 'unheard' : 'none';
+  if (!s.has_weekly || gate.weekly !== 'due') return 'none';
+  return heardEarlier ? 'new_version' : 'unheard';
+};
+/** One popup per client, per day and per version: the same version never opens it twice by itself. */
+export const rosterPopupKey = (s: ListenStatusRow | null | undefined): string =>
+  !s ? '' : `${s.client_id}|${s.briefing_date ?? ''}|${s.weekly_rebuilding ? 'making' : s.weekly_version ?? ''}`;
+/** "a session was completed, a trainer added a note" -> "A session was completed, a trainer added a note." */
+export const changedSentence = (reason: string | null | undefined): string => {
+  const r = (reason ?? '').replace(/\s+/g, ' ').trim().replace(/[.]+$/, '');
+  return r ? `${r.charAt(0).toUpperCase()}${r.slice(1)}.` : '';
+};
+/** Which popup to open next in My Crew's plan sheet, if any (the sheet applies the answer; nothing here touches the screen).
+    added: clients the trainer just added to the plan, in order: either case opens it.
+    selected: every client on the plan (a restored plan too): only a NEWER version than the one heard opens it.
+    lastShown: client id -> the key of the popup last shown for that client in this sheet. The same key never opens
+    twice, and after the "making" state was shown the finished version does not open it again (the chip does).
+    consumed: the added clients whose status was there and who are done with (opened or nothing to show). */
+export const nextRosterPopup = (o: {
+  added: string[];
+  selected: string[];
+  statuses: Record<string, ListenStatusRow | null | undefined>;
+  kindOf: (clientId: string) => RosterPopupKind;
+  lastShown: Record<string, string | undefined>;
+}): { open: { clientId: string; kind: RosterPopupKind } | null; consumed: string[]; shown: Record<string, string> } => {
+  const shown: Record<string, string> = {};
+  const consumed: string[] = [];
+  const seen = (cid: string): boolean => {
+    const key = rosterPopupKey(o.statuses[cid]);
+    const last = shown[cid] ?? o.lastShown[cid];
+    if (last === key) return true;
+    if (last && last.endsWith('|making') && !key.endsWith('|making')) { shown[cid] = key; return true; }
+    return false;
+  };
+  for (const cid of o.added) {
+    if (!o.statuses[cid]) continue; // its status is not here yet: look again when it is
+    consumed.push(cid);
+    const kind = o.kindOf(cid);
+    if (kind !== 'none' && o.selected.includes(cid) && !seen(cid)) {
+      shown[cid] = rosterPopupKey(o.statuses[cid]);
+      return { open: { clientId: cid, kind }, consumed, shown };
+    }
+  }
+  for (const cid of o.selected) {
+    if (!o.statuses[cid] || (o.added.includes(cid) && !consumed.includes(cid))) continue;
+    if (o.kindOf(cid) === 'new_version' && !seen(cid)) {
+      shown[cid] = rosterPopupKey(o.statuses[cid]);
+      return { open: { clientId: cid, kind: 'new_version' }, consumed, shown };
+    }
+  }
+  return { open: null, consumed, shown };
+};
+export const ROSTER_POPUP_MINIMIZE = 'Minimize';
+export const ROSTER_POPUP_MAKING = 'Making the new summary. It takes about a minute. You can minimize this and carry on; it will be on the Play row when it is ready.';
+export const rosterPopupText = (kind: RosterPopupKind, s: ListenStatusRow | null | undefined, clientFirstName: string | null | undefined, when: 'tomorrow' | 'today' = 'tomorrow'): { title: string; body: string; making: boolean } => {
+  const name = (clientFirstName ?? '').trim().split(/\s+/)[0] || 'this client';
+  const making = !!s?.weekly_rebuilding;
+  if (kind === 'new_version') {
+    const what = changedSentence(making ? s?.weekly_rebuild_reason : s?.weekly_changed);
+    return {
+      title: `New details for ${name}`,
+      body: making
+        ? `${what ? `Since you listened: ${what}` : 'New details came in since you listened.'} We are making a new summary.`
+        : `${what ? `Since you listened: ${what}` : 'The summary was updated since you listened.'} We made a new summary. Listen to it now.`,
+      making,
+    };
+  }
+  if (kind === 'unheard') {
+    return { title: `Listen to ${name}'s summary`, body: `You have not heard ${name}'s summary for ${when} yet. Listen to it now, so you do not have to when you log the session.`, making };
+  }
+  return { title: '', body: '', making: false };
+};
 
 /** One row of get_my_listen_status (a batched read for My Crew): the same gate, computed from flat fields.
     Since 3 Nov 2026 the heard columns decide; the old my_last_*_at columns stay for older builds. */
@@ -279,6 +375,14 @@ export type ListenStatusRow = {
   my_context_heard?: boolean | null;
   my_weekly_heard_at?: string | null;
   my_context_heard_at?: string | null;
+  /** 18 Nov 2026: the training day the status is for (My Crew asks for the plan's day). */
+  briefing_date?: string | null;
+  weekly_rebuilding?: boolean | null;
+  weekly_rebuild_reason?: string | null;
+  /** What changed in the current version of the short summary (null for the evening build). */
+  weekly_changed?: string | null;
+  /** The newest version of this day's short summary I heard to the end; null when none. */
+  my_weekly_heard_version?: number | null;
 };
 /** True when the listen chip has something to say (a summary exists for at least one kind). */
 export const listenChipShown = (s: ListenStatusRow | null | undefined, nowMs: number = Date.now()): boolean => {
@@ -294,9 +398,7 @@ export const gateFromStatus = (s: ListenStatusRow | null | undefined, nowMs: num
     const built = new Date(g).getTime();
     const ok = (atIso: string): boolean => {
       const t = new Date(atIso).getTime();
-      if (!isFinite(t) || t < built) return false;
-      if (which === 'weekly' && istDayOf(atIso) !== istDayOf(nowMs)) return false;
-      return true;
+      return isFinite(t) && t >= built;
     };
     // The server before this rule had no heard columns: fall back to the last play, as before.
     const heardKnown = which === 'weekly' ? s.my_weekly_heard : s.my_context_heard;
