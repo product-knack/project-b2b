@@ -63,6 +63,7 @@ import { OpsDashboard, OpsClients, OpsCrmPending, OpsCrmActivity, OpsBaseline, O
 import { OpsSalesTracker } from './screens/opsSalesTracker';
 import { OpsLeads } from './screens/opsLeads';
 import { OpsEscalations } from './screens/opsEscalations';
+import { OpsWhatsApp } from './screens/opsWhatsApp';
 import { AdminDashboard } from './screens/admin';
 import { AdminRevenueForecast } from './screens/adminRevenueForecast';
 import { CrmRevenueForecast } from './screens/crmRevenueForecast';
@@ -197,6 +198,8 @@ const SCREENS: Record<string, React.ComponentType> = {
   'ops-sales-tracker': OpsSalesTracker,
   'ops-qhp-hold': OpsQhpHold,
   'ops-escalations': OpsEscalations,
+  // WhatsApp inbox (19 Nov 2026): ops + admin; in SENSITIVE_ROUTES (client chats)
+  'ops-whatsapp': OpsWhatsApp,
   'admin-dashboard': AdminDashboard,
   'therapist-dashboard': TherapistDashboard,
   'therapist-clients': TherapistClients,
@@ -287,6 +290,8 @@ const SENSITIVE_ROUTES = new Set([
   'academy-teacher', 'academy-student',
   // Chats — client health details are routinely discussed in messages
   'messenger', 'client-threads', 'manager-chat',
+  // WhatsApp inbox (19 Nov 2026): members' own WhatsApp messages, names and numbers
+  'ops-whatsapp',
   // Team Wallet (2 Nov 2026): balances, payment ids and the Razorpay checkout
   'wallet', 'client-complaints',
 ]);
@@ -590,7 +595,7 @@ export function Router() {
         </View>
         {/* Floating launcher — overlays the content so the background stays continuous
             (no opaque bottom strip). Hidden on forms with their own submit bar. */}
-        {route !== 'workout' && route !== 'create-plan' && route !== 'messenger' && route !== 'manager-chat'
+        {route !== 'workout' && route !== 'create-plan' && route !== 'messenger' && route !== 'manager-chat' && route !== 'ops-whatsapp'
           && route !== 'tech-desk-ticket' && route !== 'tech-desk-inbox-ticket' && !threadViewOpen
           // The consultant pages carry their own bottom pill; the call screen must stay clear.
           && route !== 'doctor-consultant-calls' && route !== 'doctor-consultant-dashboard' && route !== 'doctor-consultation-join' && route !== 'qhp-navigate' && !consultant ? (

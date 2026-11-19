@@ -8,6 +8,7 @@ import { Serif, Body, Mono, Card, Avatar, CountUp, ProgressBar } from '../compon
 import { Page, TitleBlock, GreetingHeader, Badge, HScroll, BackLink } from './common';
 import { FeatureTour, OPS_TOUR, TourLauncher } from '../components/featureTour';
 import { ClientThreadsUnreadBanner } from '../components/clientThreadsCard';
+import { OpsWhatsAppCard } from './opsWhatsApp';
 import { useStore } from '../store';
 import { useSidebarProfile } from '../lib/navQueries';
 import { useLeadStats, useColdLeads, useOpsFollowUpReminders, useMyOpsProfile } from '../lib/opsLeadQueries';
@@ -212,6 +213,9 @@ export function OpsDashboard() {
       {/* Client Threads unread — the Ops Head is a standing member of every client
           thread; renders nothing at 0 unread. */}
       <ClientThreadsUnreadBanner />
+
+      {/* WhatsApp inbox (19 Nov 2026): the clinic number's chats, unread count, opens the page */}
+      <OpsWhatsAppCard />
 
       {/* Urgent banners — animated, with previews */}
       {overdueFollowUps.length > 0 ? (

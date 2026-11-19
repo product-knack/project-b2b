@@ -410,6 +410,8 @@ export const opsNav: NavGroup[] = [
     { label: 'Dashboard', icon: 'grid', route: 'ops-dashboard' },
     { label: 'Leads', icon: 'users', route: 'ops-leads' },
     { label: 'Clients', icon: 'layers', route: 'ops-clients' },
+    // WhatsApp inbox (19 Nov 2026): the clinic number's chats, as on the web /ops/whatsapp
+    { label: 'WhatsApp', icon: 'bubble', route: 'ops-whatsapp' },
     { label: 'Wallet', icon: 'rupee', route: 'wallet' },
     { label: 'Client complaints', icon: 'alert', route: 'client-complaints' },
     { label: 'Messenger', icon: 'chat', route: 'messenger' },
@@ -450,6 +452,7 @@ export const adminNav: NavGroup[] = [
     { label: 'Certifications', icon: 'award', route: 'admin-certifications' },
     { label: 'Tools', icon: 'grid', route: 'admin-tools' },
     { label: 'Academy', icon: 'award', route: 'academy-dashboard' },
+    { label: 'WhatsApp', icon: 'bubble', route: 'ops-whatsapp' },
     { label: 'Messenger', icon: 'chat', route: 'messenger' },
     { label: 'Client Threads', icon: 'atSign', route: 'client-threads' },
   ] },

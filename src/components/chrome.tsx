@@ -15,6 +15,7 @@ import { useSidebarProfile, useNavBadges } from '../lib/navQueries';
 import { useMyCapabilities } from '../lib/capabilities';
 import { useMyAcademyLink } from '../lib/academyAttendanceQueries';
 import { canUseTechDesk, useTechDeskBadge } from '../lib/techDeskQueries';
+import { canSeeWhatsApp } from '../lib/whatsapp';
 
 /* A consultant doctor's workspace is the web's light indigo look; the header
    and the drawer follow it (user request, 23 Sep 2026) while every other role
@@ -204,6 +205,8 @@ export function Drawer() {
     if (it.route === 'b2c-reports') return session?.user?.id === '196ec824-a093-4944-ae3d-3c4919ebf0df' || role === 'academy' || role === 'admin';
     if (it.route === 'mgr-dash' || it.label === 'Managers Overview' || it.label === 'QHP Overview') return caps.data.isManager;
     // Client complaints (3 Nov 2026): managers (their teams), the physio HOD and admins (every team), the server rule complaint_viewer_kind
+    // WhatsApp inbox (19 Nov 2026): ops, admin, super_admin, the same rule as the database (is_whatsapp_staff)
+    if (it.route === 'ops-whatsapp') return canSeeWhatsApp(dbRole);
     if (it.route === 'client-complaints') return caps.data.isManager || caps.data.isPhysioHod || dbRole === 'admin' || dbRole === 'super_admin' || session?.user?.id === '30df5c2b-0f40-4736-9f41-7cbc830a191a';
     if (it.label === 'Trainers Tracker') return caps.data.isTrainerManager;
     if (it.route === 'crm-esc') return caps.data.isCrmManager; // web: crm_manager spec only
