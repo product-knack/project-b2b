@@ -64,6 +64,7 @@ import { OpsSalesTracker } from './screens/opsSalesTracker';
 import { OpsLeads } from './screens/opsLeads';
 import { OpsEscalations } from './screens/opsEscalations';
 import { OpsWhatsApp } from './screens/opsWhatsApp';
+import { CrmSessionLogs } from './screens/crmSessionLogs';
 import { AdminDashboard } from './screens/admin';
 import { AdminRevenueForecast } from './screens/adminRevenueForecast';
 import { CrmRevenueForecast } from './screens/crmRevenueForecast';
@@ -200,6 +201,8 @@ const SCREENS: Record<string, React.ComponentType> = {
   'ops-escalations': OpsEscalations,
   // WhatsApp inbox (19 Nov 2026): ops + admin; in SENSITIVE_ROUTES (client chats)
   'ops-whatsapp': OpsWhatsApp,
+  // CRM Session Logs (19 Nov 2026): the day's sessions + paid cancellation codes; in SENSITIVE_ROUTES (codes)
+  'crm-session-logs': CrmSessionLogs,
   'admin-dashboard': AdminDashboard,
   'therapist-dashboard': TherapistDashboard,
   'therapist-clients': TherapistClients,
@@ -292,6 +295,8 @@ const SENSITIVE_ROUTES = new Set([
   'messenger', 'client-threads', 'manager-chat',
   // WhatsApp inbox (19 Nov 2026): members' own WhatsApp messages, names and numbers
   'ops-whatsapp',
+  // CRM Session Logs (19 Nov 2026): paid cancellation codes are on screen
+  'crm-session-logs',
   // Team Wallet (2 Nov 2026): balances, payment ids and the Razorpay checkout
   'wallet', 'client-complaints',
 ]);

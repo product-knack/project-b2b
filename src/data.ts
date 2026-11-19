@@ -342,6 +342,8 @@ export const crmNav: NavGroup[] = [
     { label: 'Dashboard', icon: 'grid', route: 'crm-dashboard' },
     { label: 'Odds AI', icon: 'sparkle', route: 'crm-ai' },
     { label: 'My Clients', icon: 'users', route: 'crm-clients' },
+    // Session Logs (19 Nov 2026): the day's sessions + paid cancellation codes, as on the web
+    { label: 'Session Logs', icon: 'clipboard', route: 'crm-session-logs' },
     { label: 'Revenue Forecast', icon: 'rupee', route: 'crm-revenue-forecast' },
     { label: 'Wallet', icon: 'rupee', route: 'wallet' },
     { label: 'Client complaints', icon: 'alert', route: 'client-complaints' },

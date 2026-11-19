@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from './supabase';
 import { withTimeout, NET_MS } from './withTimeout';
-import { paidCancelCodeRows } from './paidCancelCodes';
+import { parseSessionLogs } from './crmSessionLogs';
 
 /* ============ CRM Dashboard — mirrors the web CRM home data contracts ============
    Scoping: a CRM's clients live in trainer_clients exactly like a trainer's
@@ -513,21 +513,20 @@ export function useSetClientDob() {
   });
 }
 
-/* Paid cancellation codes (19 Nov 2026): the sessions of one IST day for the signed-in CRM's actively assigned
-   clients, from the same definer function as the web Daily Task page (crm_daily_sessions). Only Session-code
-   members' sessions that can still be cancelled (or whose code was used) are kept; see lib/paidCancelCodes.ts.
-   The key starts with 'crm-paid-cancel-codes', which is not in App.tsx PERSIST_PREFIXES, so the codes are never
-   written to the phone's storage. */
-export function useCrmPaidCancelCodes(crmId: string | null, dateKey: string) {
+/* Session Logs (19 Nov 2026): the sessions of one IST day for the signed-in CRM's actively assigned clients, from the
+   same definer function as the web Session Logs page (crm_daily_sessions), with the paid cancellation code of
+   Session-code members; see lib/crmSessionLogs.ts. The key starts with 'crm-daily-sessions', which is not in
+   App.tsx PERSIST_PREFIXES, so the codes are never written to the phone's storage. */
+export function useCrmDailySessions(crmId: string | null, dateKey: string) {
   return useQuery({
-    queryKey: ['crm-paid-cancel-codes', crmId, dateKey],
+    queryKey: ['crm-daily-sessions', crmId, dateKey],
     enabled: !!crmId,
     staleTime: 30_000,
     refetchInterval: 60_000,
     queryFn: async () => {
-      const { data, error } = await withTimeout(Promise.resolve(supabase.rpc('crm_daily_sessions', { _date: dateKey })), NET_MS, 'Paid cancellation codes');
+      const { data, error } = await withTimeout(Promise.resolve(supabase.rpc('crm_daily_sessions', { _date: dateKey })), NET_MS, 'Session logs');
       if (error) throw error;
-      return paidCancelCodeRows(data);
+      return parseSessionLogs(data);
     },
   });
 }

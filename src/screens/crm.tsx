@@ -1,6 +1,5 @@
 import { CrmRevenueForecastBanner } from './crmRevenueForecast';
 import { ConsultFollowUpBanner } from '../components/consultCrmUi';
-import { CrmPaidCancelCodesCard } from '../components/crmPaidCancelCodes';
 import React from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Alert, Animated, Easing, Modal, ActivityIndicator } from 'react-native';
 import { useKeyboardHeight } from '../lib/useKeyboardHeight';
@@ -340,9 +339,6 @@ export function CrmDashboard() {
       <ConsultFollowUpBanner crmId={crmId} />
       {/* Pause-ended alert — clients whose pause lapsed and are active again */}
       <PauseEndedBanner crmId={crmId} />
-      {/* Paid cancellation codes (19 Nov 2026): today's and tomorrow's codes of Session-code members, same data as the
-          web Daily Task badge; not drawn when there is none */}
-      <CrmPaidCancelCodesCard crmId={crmId} />
       {/* Client Threads — one team chat per client (trainers + CRMs + doctors) */}
       <ClientThreadsCard onPress={() => go('client-threads')} unread={threadUnread} />
       {/* Odds AI — ask anything about your assigned clients (on-device data + Gemini) */}
