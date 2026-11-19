@@ -28,7 +28,7 @@ import { LatestVoiceChip, LatestVoicePopup, LatestVoiceInfo } from '../component
 import { useClientsLatestVoiceNotes } from '../lib/sessionVoiceQueries';
 import { ListenStatusChip, ListenNowSheet, type ListenNowInfo } from '../components/clientHealthSummaryCard';
 import { listenChipShown } from '../lib/clientHealthSummary';
-import { useMyListenStatuses, useCrewListenProgress, prefetchClientHealthSummaries } from '../lib/clientHealthSummaryQueries';
+import { useMyListenStatuses, prefetchClientHealthSummaries } from '../lib/clientHealthSummaryQueries';
 import { gateFromStatus, rosterPopupKind, nextRosterPopup, rosterPopupText, type RosterPopupKind } from '../lib/clientHealthSummary';
 import { useLocalListensMap } from '../lib/listenLocal';
 import { useIsOnline } from '../lib/offline';
@@ -1462,14 +1462,12 @@ function TomorrowPlanSheet({ visible, onClose, onSend, sending, existing, addOnl
   const dayAware = Object.values(listenById).some((s) => !!s.briefing_date);
   const listenDay = dayAware ? planDay : null;
   const [listenFor, setListenFor] = React.useState<{ id: string; name: string; popup: RosterPopupKind | null } | null>(null);
-  // Listen progress (3 Nov 2026): the phone's own records (offline listens count at once), everyone's percent for the
-  // Who listened block, and the rows prefetched while online so tomorrow's summaries can be heard offline.
+  // Listen progress (3 Nov 2026): the phone's own records (offline listens count at once) and the rows prefetched
+  // while online so tomorrow's summaries can be heard offline. (Everyone's percent, the "Who listened" block, was
+  // taken out on 19 Nov 2026.)
   const listenLocal = useLocalListensMap(rows.map((r) => r.clientId));
-  const crewListenQ = useCrewListenProgress(rows.map((r) => r.clientId), visible, listenDay);
   const qcListen = useQueryClient();
   const onlineForPrefetch = useIsOnline();
-  const crewTeamQ = useMyManagerTeam(); // cached: the chat screen reads the same query
-  const crewMembers = (crewTeamQ.data?.members ?? []).map((m) => ({ id: m.id, name: m.name }));
   React.useEffect(() => {
     if (!visible || !onlineForPrefetch || !rows.length) return;
     prefetchClientHealthSummaries(qcListen, rows.map((r) => r.clientId), listenDay);
@@ -1735,8 +1733,7 @@ function TomorrowPlanSheet({ visible, onClose, onSend, sending, existing, addOnl
       <LatestVoicePopup info={voiceFor} onClose={() => setVoiceFor(null)} />
       <ListenNowSheet
         info={listenFor ? { id: listenFor.id, name: listenFor.name, date: listenDay, headline: listenFor.popup ? rosterPopupText(listenFor.popup, listenById[listenFor.id], listenFor.name) : null } : null}
-        onClose={() => { setListenFor(null); listenQ.refetch(); crewListenQ.refetch(); }}
-        crewRows={crewListenQ.data ?? []} crewLoading={crewListenQ.isLoading} members={crewMembers} />
+        onClose={() => { setListenFor(null); listenQ.refetch(); }} />
     </Modal>
   );
 }

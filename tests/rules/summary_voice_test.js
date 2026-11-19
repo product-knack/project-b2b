@@ -107,10 +107,10 @@ const last = (log) => log.states[log.states.length - 1];
     let done = 0;
     ctl.play('context', { ...REQ, which: 'context' }, { onDone: () => done++ });
     await tick(); await tick();
-    eq('device fallback after cloud failure', { phase: last(log).phase, source: last(log).source, notice: last(log).notice }, { phase: 'playing', source: 'device', notice: "Cloud voice unavailable (Sarvam 500); using this device's voice." });
+    eq('device fallback after cloud failure', { phase: last(log).phase, source: last(log).source, notice: last(log).notice }, { phase: 'playing', source: 'device', notice: "The recorded voice is not available right now. Reading with this phone's voice." });
     eq('device got the script', log.device[0].text, REQ.script);
     log.device[0].cb.onDone();
-    eq('device done -> onDone, notice kept', { done, phase: last(log).phase, notice: last(log).notice }, { done: 1, phase: 'idle', notice: "Cloud voice unavailable (Sarvam 500); using this device's voice." });
+    eq('device done -> onDone, notice kept', { done, phase: last(log).phase, notice: last(log).notice }, { done: 1, phase: 'idle', notice: "The recorded voice is not available right now. Reading with this phone's voice." });
   }
 
   /* 3. empty url list counts as a cloud failure */
@@ -118,7 +118,7 @@ const last = (log) => log.states[log.states.length - 1];
     const { ctl, log } = build({ getAudio: async () => [] });
     ctl.play('weekly', REQ);
     await tick(); await tick();
-    eq('no urls -> device', { source: last(log).source, notice: last(log).notice }, { source: 'device', notice: "Cloud voice unavailable (No recording came back); using this device's voice." });
+    eq('no urls -> device', { source: last(log).source, notice: last(log).notice }, { source: 'device', notice: "The recorded voice is not available right now. Reading with this phone's voice." });
   }
 
   /* 4. player error status -> device voice; player released */
@@ -127,7 +127,7 @@ const last = (log) => log.states[log.states.length - 1];
     ctl.play('weekly', REQ);
     await tick(); await tick();
     handles[0]._status({ error: 'decode failed' });
-    eq('player error -> device', { source: last(log).source, notice: last(log).notice, removed: handles[0]._p.removed }, { source: 'device', notice: "The recording could not play (decode failed); using this device's voice.", removed: true });
+    eq('player error -> device', { source: last(log).source, notice: last(log).notice, removed: handles[0]._p.removed }, { source: 'device', notice: "The recorded voice is not available right now. Reading with this phone's voice.", removed: true });
     // later statuses from the dead player are ignored
     handles[0]._status({ playing: true }); handles[0]._status({ playing: false, didJustFinish: true });
     eq('dead player statuses ignored', last(log).source, 'device');
@@ -369,7 +369,11 @@ const last = (log) => log.states[log.states.length - 1];
   }
 
   /* 16. message helpers */
-  eq('CLOUD_UNAVAILABLE text', V.CLOUD_UNAVAILABLE('x'), "Cloud voice unavailable (x); using this device's voice.");
+  eq('voice notice: any other failure, plain words', V.CLOUD_UNAVAILABLE('x'), "The recorded voice is not available right now. Reading with this phone's voice.");
+  eq('voice notice: out of credit, plain words', V.CLOUD_UNAVAILABLE('Sarvam 402: {"error":{"message":"No credits available.","code":"insufficient_quota_error"}}'), "Voice credit is low. Reading with this phone's voice.");
+  eq('voice notice: the server\'s plain sentence for credit is recognised too', V.CLOUD_UNAVAILABLE('Voice credit is low.'), V.VOICE_CREDIT_LOW);
+  eq('voice notice: the provider\'s text is never shown', /sarvam|402|quota|\{/i.test(V.CLOUD_UNAVAILABLE('Sarvam 402: {"code":"insufficient_quota_error"}') + V.CLOUD_UNAVAILABLE('Sarvam 500: boom') + V.RECORDING_FAILED('decode failed: Sarvam')), false);
+  eq('voice notice: a failed recording never names the reason', V.RECORDING_FAILED('decode failed'), V.VOICE_UNAVAILABLE);
   eq('STALL_MS', V.STALL_MS, 15000);
   eq('SPEAK_FN_MS', V.SPEAK_FN_MS, 45000);
 

@@ -28,7 +28,7 @@ import {
   listenRuleLine, LISTEN_WHY, listenNowLine, gateFromStatus, type ListenStatusRow,
   type ListenGate, type HeardMap, listenStillNeeded, listenAllHeard, LISTEN_PROCEED, LISTEN_WAIT,
   mergedProgress, progressLine, LISTEN_100_ALERT, LISTEN_OFFLINE_SAVED, LISTEN_NO_SCRIPT_OFFLINE, HEARD_PERCENT, entryPercent, entryHeard,
-  type LocalListens, statusPercent, listenChipText, crewListenLines, crewLineText, type CrewListenRow,
+  type LocalListens, statusPercent, listenChipText,
   changedSentence, ROSTER_POPUP_MAKING, ROSTER_POPUP_MINIMIZE,
 } from '../lib/clientHealthSummary';
 
@@ -565,39 +565,10 @@ export function ListenStatusChip({ status, onPress, compact = false, local }: { 
     headline: the roster popup's words in place of "Listen now"; making = the new version is still being made. */
 export type ListenNowInfo = { id: string; name: string; when?: 'tomorrow' | 'today'; date?: string | null; headline?: { title: string; body: string; making: boolean } | null } | null;
 
-/** My Crew's "Who listened" block (3 Nov 2026): every crew member's percent for both summaries of this client. */
-export function CrewListenBlock({ clientId, rows, members, loading }: { clientId: string; rows: CrewListenRow[]; members: { id: string; name: string }[]; loading?: boolean }) {
-  const { crew, others } = crewListenLines(rows, clientId, members);
-  const Line = ({ l }: { l: ReturnType<typeof crewListenLines>['crew'][number] }) => {
-    const all = l.weeklyHeard && l.contextHeard;
-    return (
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6 }}>
-        <Icon name={all ? 'checks' : 'alert'} size={11} color={all ? C.green : GOLD} strokeWidth={2.2} />
-        <Text numberOfLines={1} style={{ width: 92, fontFamily: F.bodySemi, fontSize: 12, color: '#fff' }}>{l.name.split(' ')[0]}</Text>
-        <Mono style={{ flex: 1, fontSize: 8.5, letterSpacing: 0.4, color: all ? C.green : C.ink3 }} numberOfLines={1}>{crewLineText(l).toUpperCase()}</Mono>
-      </View>
-    );
-  };
-  return (
-    <View style={{ padding: 11, borderRadius: 13, backgroundColor: 'rgba(0,0,0,0.3)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', gap: 4 }}>
-      <Mono style={{ fontSize: 9, letterSpacing: 1.2, color: C.muted3 }}>WHO LISTENED · PERCENT OF THE CURRENT BUILD</Mono>
-      {loading && !rows.length ? <ActivityIndicator size="small" color={GOLD} style={{ alignSelf: 'flex-start', marginVertical: 6 }} /> : null}
-      {crew.map((l) => <Line key={l.by} l={l} />)}
-      {others.length ? (
-        <>
-          <Mono style={{ fontSize: 8, letterSpacing: 0.8, color: C.muted3, marginTop: 4 }}>OTHERS</Mono>
-          {others.map((l) => <Line key={l.by} l={l} />)}
-        </>
-      ) : null}
-      {!crew.length && !others.length && !loading ? <Body style={{ fontSize: 11.5, color: C.muted2 }}>Nobody has listened yet.</Body> : null}
-      <Body style={{ fontSize: 10.5, color: C.muted3, lineHeight: 14, marginTop: 2 }}>A listen counts from 95 percent. A phone that listened offline shows here after it syncs.</Body>
-    </View>
-  );
-}
-
-/** The sheet behind the chip: the rule sentence, the Who listened block (when the caller passes the crew) and the two
-    Play rows (the strip, open). */
-export function ListenNowSheet({ info, onClose, crewRows, members, crewLoading }: { info: ListenNowInfo; onClose: () => void; crewRows?: CrewListenRow[]; members?: { id: string; name: string }[]; crewLoading?: boolean }) {
+/** The sheet behind the chip: the rule sentence and the two Play rows (the strip, open). The "Who listened" block
+    that sat above them from 3 Nov 2026 was taken out on 19 Nov 2026 (owner: "not want to see this who listen
+    section"); get_crew_listen_progress stays on the server, unused by this app. */
+export function ListenNowSheet({ info, onClose }: { info: ListenNowInfo; onClose: () => void }) {
   const insets = useSafeAreaInsets();
   return (
     <Modal visible={!!info} transparent animationType="slide" onRequestClose={onClose}>
@@ -619,7 +590,6 @@ export function ListenNowSheet({ info, onClose, crewRows, members, crewLoading }
               </Pressable>
             </View>
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 12, paddingBottom: 6 }}>
-              {info && crewRows ? <CrewListenBlock clientId={info.id} rows={crewRows} members={members ?? []} loading={crewLoading} /> : null}
               {info?.headline?.making ? (
                 <View accessibilityLiveRegion="polite" style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 12, backgroundColor: hexA(GOLD, 0.08), borderWidth: 1, borderColor: hexA(GOLD, 0.32) }}>
                   <ActivityIndicator size="small" color={GOLD} />

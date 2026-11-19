@@ -88,8 +88,14 @@ export type SummaryVoiceDeps = {
 
 const msgOf = (e: any): string => String(e?.message ?? e ?? 'unknown error');
 
-export const CLOUD_UNAVAILABLE = (why: string) => `Cloud voice unavailable (${why}); using this device's voice.`;
-export const RECORDING_FAILED = (why: string) => `The recording could not play (${why}); using this device's voice.`;
+/* Why the phone's own voice is reading. Never the voice provider's own error text (owner, 19 Nov 2026: the screen
+   showed "Cloud voice unavailable (Sarvam 402: {...})" when the account ran out of credit). The reason is read only
+   to choose between the two plain lines; it is never shown. */
+export const VOICE_CREDIT_LOW = "Voice credit is low. Reading with this phone's voice.";
+export const VOICE_UNAVAILABLE = "The recorded voice is not available right now. Reading with this phone's voice.";
+export const isVoiceCreditError = (why: string): boolean => /\b402\b|credit|quota/i.test(String(why ?? ''));
+export const CLOUD_UNAVAILABLE = (why: string) => (isVoiceCreditError(why) ? VOICE_CREDIT_LOW : VOICE_UNAVAILABLE);
+export const RECORDING_FAILED = (_why: string) => VOICE_UNAVAILABLE;
 export const STALL_MS = 15_000;
 
 /* Every card, strip and gate owns a controller. One sound at a time is the shared audio
