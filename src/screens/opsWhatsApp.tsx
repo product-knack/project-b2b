@@ -26,14 +26,14 @@ import { friendlyError } from '../lib/friendlyError';
 import {
   blankLabel, bubbleTime, buildThread, canRetrySend, chatForKey, chatInitials, chatKey, chatMatches, chatTitle, composerMode,
   composerProblem, emptyTemplateValues, failedLabel, firstUnread, formatWaNumber, isEdited, lastTickOf, listTime, localSendBubbles,
-  mediaOf, messagePreview, newClientRef, parseChatKey, parseNewChatNumber, placeholderChat, replyWindow, sentFromLabel,
+  mediaOf, messagePreview, newClientRef, numberLine, parseChatKey, parseNewChatNumber, placeholderChat, replyWindow, sendingNumberId, sentFromLabel,
   templateCategoryLabel, templateKey, templateLanguageOf, templateMatches, templateNameOf, templatePreview, templateProblem,
   templateSentText, tickOf, windowLeftText, WA_NEW_CHAT_HINT, WA_SEND_FAILED, WA_TEXT_MAX,
   type WaChat, type WaLocalSend, type WaMediaKind, type WaMessage, type WaReactionShown, type WaSendCheck, type WaTemplate,
   type WaTemplateValues, type WaTick,
 } from '../lib/whatsapp';
 import {
-  useCanSeeWhatsApp, useMarkWhatsAppChatSeen, useSendWhatsApp, useSendWhatsAppTemplate, useWhatsAppChats, useWhatsAppRealtime,
+  useCanSeeWhatsApp, useMarkWhatsAppChatSeen, useMyWhatsAppNumbers, useSendWhatsApp, useSendWhatsAppTemplate, useWhatsAppChats, useWhatsAppRealtime,
   useWhatsAppSendCheck, useWhatsAppTemplates, useWhatsAppThread, useWhatsAppUnreadCount, WA_PAGE_SIZE,
 } from '../lib/whatsappQueries';
 
@@ -85,7 +85,11 @@ const MEDIA_ICON: Record<WaMediaKind, { name?: any; path?: string }> = {
 /* ======================================================================================= */
 
 export function OpsWhatsApp() {
+  // Numbers per person (20 Nov 2026): the page is for whoever one of our numbers belongs to (the clinic number:
+  // ops, admin, super admin; a CRM's own business number: that CRM only). The database returns only my chats.
   const allowed = useCanSeeWhatsApp();
+  const numbersQ = useMyWhatsAppNumbers();
+  const myNumbers = numbersQ.data ?? null;
   const insets = useSafeAreaInsets();
   const { go, back, canGoBack, role } = useStore();
   const chatsQ = useWhatsAppChats(allowed);
@@ -105,16 +109,21 @@ export function OpsWhatsApp() {
   const chats = chatsQ.data ?? [];
   const listLoaded = chatsQ.isSuccess;
   const selectedChat = React.useMemo(() => chatForKey(chats, selected, listLoaded), [chats, selected, listLoaded]);
-  // our own number: the one every chat is on
-  const ourNumberId = chats[0]?.phone_number_id ?? parseChatKey(selected)?.phoneNumberId ?? null;
+  // the number a new chat goes out from: mine (never "the number of the newest chat")
+  const ourNumberId = sendingNumberId(myNumbers, chats[0]?.phone_number_id ?? parseChatKey(selected)?.phoneNumberId ?? null);
+  const whose = numberLine(myNumbers?.[0]);
 
   if (!allowed) {
     return (
       <View style={{ flex: 1, backgroundColor: WA.bg, paddingTop: insets.top }}>
         <ListTopBar onBack={leave} />
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 28, gap: 10 }}>
-          <Icon name="lock" size={26} color={WA.sub} />
-          <Text style={t(15, '600', WA.text, { textAlign: 'center' })}>WhatsApp is for the Ops team</Text>
+          {numbersQ.isLoading ? <ActivityIndicator color={WA.green} /> : (
+            <>
+              <Icon name="lock" size={26} color={WA.sub} />
+              <Text style={t(15, '600', WA.text, { textAlign: 'center' })}>No WhatsApp number is linked to your account</Text>
+            </>
+          )}
         </View>
       </View>
     );
@@ -144,6 +153,7 @@ export function OpsWhatsApp() {
         onOpen={(c) => setSelected(chatKey(c))}
         onNewChat={ourNumberId ? () => setNewChatOpen(true) : undefined}
         onBack={leave}
+        whose={whose}
       />
       <NewChatSheet open={newChatOpen} onClose={() => setNewChatOpen(false)} onStart={startChat} />
     </>
@@ -152,14 +162,18 @@ export function OpsWhatsApp() {
 
 /* ---------------------------------- the chat list ---------------------------------- */
 
-/** The list's top bar: back arrow and the title, as the WhatsApp home screen. */
-function ListTopBar({ onBack, right }: { onBack: () => void; right?: React.ReactNode }) {
+/** The list's top bar: back arrow and the title, as the WhatsApp home screen; under the title, whose number the
+    chats are on ("Pallavi Mishra · +91 99900 01111"). */
+function ListTopBar({ onBack, right, whose }: { onBack: () => void; right?: React.ReactNode; whose?: string }) {
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', height: 56, paddingLeft: 6, paddingRight: 16 }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', height: 58, paddingLeft: 6, paddingRight: 16 }}>
       <Pressable onPress={onBack} hitSlop={10} accessibilityRole="button" accessibilityLabel="Back" style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center' }}>
         <Icon name="arrowLeft" size={23} color={WA.text} strokeWidth={2.2} />
       </Pressable>
-      <Text style={t(23, '700', WA.text, { flex: 1, marginLeft: 4, letterSpacing: 0.1 })}>WhatsApp</Text>
+      <View style={{ flex: 1, minWidth: 0, marginLeft: 4 }}>
+        <Text style={t(23, '700', WA.text, { letterSpacing: 0.1 })}>WhatsApp</Text>
+        {whose ? <Text numberOfLines={1} style={t(12, '400', WA.sub, { marginTop: -1 })}>{whose}</Text> : null}
+      </View>
       {right}
     </View>
   );
@@ -193,9 +207,9 @@ const typeIconOf = (type: string | null): { name?: any; path?: string } | null =
   return null;
 };
 
-function ChatListView({ chats, loading, error, refreshing, onRefresh, onOpen, onNewChat, onBack }: {
+function ChatListView({ chats, loading, error, refreshing, onRefresh, onOpen, onNewChat, onBack, whose }: {
   chats: WaChat[]; loading: boolean; error: unknown; refreshing: boolean; onRefresh: () => void;
-  onOpen: (c: WaChat) => void; onNewChat?: () => void; onBack: () => void;
+  onOpen: (c: WaChat) => void; onNewChat?: () => void; onBack: () => void; whose?: string;
 }) {
   const insets = useSafeAreaInsets();
   const [query, setQuery] = React.useState('');
@@ -242,7 +256,7 @@ function ChatListView({ chats, loading, error, refreshing, onRefresh, onOpen, on
 
   return (
     <View style={{ flex: 1, backgroundColor: WA.bg, paddingTop: insets.top }}>
-      <ListTopBar onBack={onBack} />
+      <ListTopBar onBack={onBack} whose={whose} />
 
       {loading ? (
         <>{header}<View style={{ paddingTop: 40 }}><ActivityIndicator color={WA.green} /></View></>
@@ -508,7 +522,7 @@ function ThreadView({ chat, onBack }: { chat: WaChat; onBack: () => void }) {
       </View>
 
       <Composer chat={chat} check={checkQ.data ?? null} onSend={(text) => sendReply(text)} onOpenTemplates={() => { Keyboard.dismiss(); setTemplatesOpen(true); }} bottomInset={kb > 0 ? 0 : insets.bottom} />
-      <TemplateSheet open={templatesOpen} onClose={() => setTemplatesOpen(false)} contactTitle={title}
+      <TemplateSheet open={templatesOpen} onClose={() => setTemplatesOpen(false)} contactTitle={title} phoneNumberId={chat.phone_number_id}
         onSend={(tp, values) => { setTemplatesOpen(false); sendTemplate({ name: tp.name, language: tp.language, values, text: templateSentText(tp, values) }); }} />
     </View>
   );
@@ -714,8 +728,8 @@ function SheetShell({ open, onClose, title, children, onBack }: { open: boolean;
   );
 }
 
-function TemplateSheet({ open, onClose, contactTitle, onSend }: { open: boolean; onClose: () => void; contactTitle: string; onSend: (tp: WaTemplate, values: WaTemplateValues) => void }) {
-  const q = useWhatsAppTemplates(open);
+function TemplateSheet({ open, onClose, contactTitle, phoneNumberId, onSend }: { open: boolean; onClose: () => void; contactTitle: string; phoneNumberId: string; onSend: (tp: WaTemplate, values: WaTemplateValues) => void }) {
+  const q = useWhatsAppTemplates(open, phoneNumberId);
   const templates = q.data ?? [];
   const [query, setQuery] = React.useState('');
   const [pickedKey, setPickedKey] = React.useState<string | null>(null);

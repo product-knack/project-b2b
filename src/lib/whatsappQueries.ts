@@ -11,8 +11,8 @@ import { useAuth } from '../auth';
 import { withTimeout, invokeWithTimeout, NET_MS } from './withTimeout';
 import { invalidateDebounced } from './invalidateDebounced';
 import {
-  canSeeWhatsApp, missingQuoted, WA_MESSAGE_COLUMNS, WA_SEND_FAILED, WA_SEND_UNKNOWN,
-  type WaChat, type WaMessage, type WaSendCheck, type WaTemplate, type WaTemplateValues,
+  canSeeWhatsAppWith, missingQuoted, WA_MESSAGE_COLUMNS, WA_SEND_FAILED, WA_SEND_UNKNOWN,
+  type WaChat, type WaMessage, type WaNumber, type WaSendCheck, type WaTemplate, type WaTemplateValues,
 } from './whatsapp';
 
 export const WA_QK = {
@@ -24,10 +24,35 @@ export const WA_QK = {
 
 export const WA_PAGE_SIZE = 50;
 
-/** May this signed-in person see WhatsApp chats at all? (The database rule says the same.) */
+/** The numbers of ours the signed-in person may read and send from (20 Nov 2026), as the database lists them
+    (whatsapp_my_numbers). `null` = the database does not have that function yet: the old role rule holds. Asked
+    once per sign-in and kept for five minutes; a person who owns no number gets an empty list. */
+export function useMyWhatsAppNumbers() {
+  const { session } = useAuth();
+  const uid = session?.user?.id ?? null;
+  return useQuery({
+    queryKey: ['whatsapp-my-numbers', uid],
+    enabled: !!uid,
+    staleTime: 5 * 60_000,
+    retry: 1,
+    queryFn: async (): Promise<WaNumber[] | null> => {
+      const { data, error } = await withTimeout(Promise.resolve(supabase.rpc('whatsapp_my_numbers')), NET_MS, 'WhatsApp numbers');
+      if (error) {
+        const code = String((error as { code?: string }).code ?? '');
+        if (code === 'PGRST202' || code === '42883') return null; // not on the database yet
+        throw error;
+      }
+      return (data ?? []) as WaNumber[];
+    },
+  });
+}
+
+/** May this signed-in person see WhatsApp chats at all? (The database rule says the same.) While the list of
+    numbers is still being asked, the old role rule answers, so the team sees the page at once. */
 export function useCanSeeWhatsApp(): boolean {
   const { dbRole } = useAuth();
-  return canSeeWhatsApp(dbRole);
+  const q = useMyWhatsAppNumbers();
+  return canSeeWhatsAppWith(dbRole, q.isError ? null : q.data);
 }
 
 /** The chat list: one row per contact, newest first. Refetched every 30 seconds as a fallback to the live updates. */
@@ -199,16 +224,17 @@ export function useWhatsAppSendCheck(phoneNumberId: string | null, contactWaId: 
   });
 }
 
-/** The approved templates of our WhatsApp account, asked when the picker opens. */
-export function useWhatsAppTemplates(enabled: boolean) {
+/** The approved templates of the WhatsApp account of ONE of our numbers (two numbers can sit in two accounts),
+    asked when the picker opens. */
+export function useWhatsAppTemplates(enabled: boolean, phoneNumberId?: string | null) {
   const allowed = useCanSeeWhatsApp();
   return useQuery({
-    queryKey: ['whatsapp-templates'],
+    queryKey: ['whatsapp-templates', phoneNumberId ?? ''],
     enabled: allowed && enabled,
     staleTime: 3 * 60_000,
     retry: 1,
     queryFn: async (): Promise<WaTemplate[]> => {
-      const res = await invokeSend({ action: 'templates' });
+      const res = await invokeSend({ action: 'templates', ...(phoneNumberId ? { phone_number_id: phoneNumberId } : {}) });
       if (res?.ok && Array.isArray(res.templates)) return res.templates as WaTemplate[];
       throw new Error(res?.message ?? 'The templates could not be loaded. Check your connection and try again.');
     },

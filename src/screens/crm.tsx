@@ -1,5 +1,6 @@
 import { CrmRevenueForecastBanner } from './crmRevenueForecast';
 import { ConsultFollowUpBanner } from '../components/consultCrmUi';
+import { OpsWhatsAppCard } from './opsWhatsApp';
 import React from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Alert, Animated, Easing, Modal, ActivityIndicator } from 'react-native';
 import { useKeyboardHeight } from '../lib/useKeyboardHeight';
@@ -339,6 +340,8 @@ export function CrmDashboard() {
       <ConsultFollowUpBanner crmId={crmId} />
       {/* Pause-ended alert — clients whose pause lapsed and are active again */}
       <PauseEndedBanner crmId={crmId} />
+      {/* WhatsApp (20 Nov 2026): only for a CRM whose own business number is connected; draws nothing otherwise */}
+      <OpsWhatsAppCard />
       {/* Client Threads — one team chat per client (trainers + CRMs + doctors) */}
       <ClientThreadsCard onPress={() => go('client-threads')} unread={threadUnread} />
       {/* Odds AI — ask anything about your assigned clients (on-device data + Gemini) */}

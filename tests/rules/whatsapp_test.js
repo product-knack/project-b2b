@@ -19,6 +19,21 @@ eq('trainer may not', W.canSeeWhatsApp('trainer'), false);
 eq('crm may not', W.canSeeWhatsApp('crm'), false);
 eq('nothing may not', W.canSeeWhatsApp(null), false);
 
+// numbers per person (20 Nov 2026)
+const hers = { phone_number_id: '1251322281387776', label: 'Pallavi Mishra', team: false, display_number: '919990001111' };
+const clinic = { phone_number_id: '1255780014281666', label: 'Odds Longevity', team: true, display_number: null };
+eq('old database (no list): the role rule, ops', W.canSeeWhatsAppWith('ops', null), true);
+eq('old database (no list): the role rule, crm', W.canSeeWhatsAppWith('crm', undefined), false);
+eq('a CRM with her own number sees it', W.canSeeWhatsAppWith('crm', [hers]), true);
+eq('a CRM with no number does not', W.canSeeWhatsAppWith('crm', []), false);
+eq('ops with no number in the list does not (the list decides)', W.canSeeWhatsAppWith('ops', []), false);
+eq('whose line', W.numberLine(hers), 'Pallavi Mishra · +91 99900 01111');
+eq('whose line without a display number', W.numberLine(clinic), 'Odds Longevity');
+eq('whose line of nothing', W.numberLine(null), '');
+eq('a new chat goes from my number, not from the newest chat', W.sendingNumberId([hers], '1255780014281666'), '1251322281387776');
+eq('no list yet: the number the chats are on', W.sendingNumberId(null, '1255780014281666'), '1255780014281666');
+eq('no list and no chat', W.sendingNumberId([], null), null);
+
 // names
 eq('indian number', W.formatWaNumber('919466855655'), '+91 94668 55655');
 eq('other number', W.formatWaNumber('13323458424'), '+13323458424');

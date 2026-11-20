@@ -71,6 +71,22 @@ export const WHATSAPP_ROLES = ['ops', 'admin', 'super_admin'] as const;
 export const canSeeWhatsApp = (role: string | null | undefined): boolean =>
   (WHATSAPP_ROLES as readonly string[]).includes(String(role ?? ''));
 
+/* Numbers per person (20 Nov 2026). More than one WhatsApp number of ours is connected now, and each belongs to its
+   own people: a team number (the clinic) to ops, admin and super admin, a personal business number (a CRM) to that
+   person only. The database function whatsapp_my_numbers() lists the numbers of the signed-in person. */
+/** One of our numbers the signed-in person may read and send from. */
+export interface WaNumber {
+  phone_number_id: string;
+  label: string;
+  /** A team number (ops, admin, super admin) or one person's own. */
+  team: boolean;
+  /** The number as people know it, digits with the country code; empty until its first event arrived. */
+  display_number: string | null;
+}
+/** May this person open WhatsApp? `numbers` null = the database does not list numbers yet: the old role rule. */
+export const canSeeWhatsAppWith = (role: string | null | undefined, numbers: WaNumber[] | null | undefined): boolean =>
+  numbers == null ? canSeeWhatsApp(role) : numbers.length > 0;
+
 export const chatKey = (c: Pick<WaChat, 'phone_number_id' | 'contact_wa_id'>): string =>
   `${c.phone_number_id}:${c.contact_wa_id}`;
 
@@ -83,6 +99,16 @@ export const formatWaNumber = (waId: string | null | undefined): string => {
 };
 
 const cleanName = (name: string | null | undefined): string => String(name ?? '').trim();
+
+/** "Pallavi Mishra · +91 99900 01111": whose chats these are, for the line under the page title. */
+export const numberLine = (n: Pick<WaNumber, 'label' | 'display_number'> | null | undefined): string => {
+  if (!n) return '';
+  const shown = n.display_number ? formatWaNumber(n.display_number) : '';
+  return [String(n.label ?? '').trim(), shown].filter(Boolean).join(' · ');
+};
+/** The number a new chat is sent from: the first of mine (a team number first), else the one the chats are on. */
+export const sendingNumberId = (numbers: WaNumber[] | null | undefined, fallback: string | null | undefined): string | null =>
+  numbers && numbers.length ? numbers[0].phone_number_id : fallback ?? null;
 
 /** The name WhatsApp gave us, or the number when no name has arrived yet. */
 export const chatTitle = (c: Pick<WaChat, 'contact_name' | 'contact_wa_id'>): string =>

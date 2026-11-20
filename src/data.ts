@@ -344,6 +344,8 @@ export const crmNav: NavGroup[] = [
     { label: 'My Clients', icon: 'users', route: 'crm-clients' },
     // Session Logs (19 Nov 2026): the day's sessions + paid cancellation codes, as on the web
     { label: 'Session Logs', icon: 'clipboard', route: 'crm-session-logs' },
+    // WhatsApp (20 Nov 2026): only for a CRM whose own business number is connected (chrome.tsx hides it otherwise)
+    { label: 'WhatsApp', icon: 'bubble', route: 'ops-whatsapp' },
     { label: 'Revenue Forecast', icon: 'rupee', route: 'crm-revenue-forecast' },
     { label: 'Wallet', icon: 'rupee', route: 'wallet' },
     { label: 'Client complaints', icon: 'alert', route: 'client-complaints' },

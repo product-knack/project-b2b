@@ -15,7 +15,7 @@ import { useSidebarProfile, useNavBadges } from '../lib/navQueries';
 import { useMyCapabilities } from '../lib/capabilities';
 import { useMyAcademyLink } from '../lib/academyAttendanceQueries';
 import { canUseTechDesk, useTechDeskBadge } from '../lib/techDeskQueries';
-import { canSeeWhatsApp } from '../lib/whatsapp';
+import { useCanSeeWhatsApp } from '../lib/whatsappQueries';
 
 /* A consultant doctor's workspace is the web's light indigo look; the header
    and the drawer follow it (user request, 23 Sep 2026) while every other role
@@ -188,6 +188,7 @@ export function Drawer() {
   const badges = useNavBadges();
   const caps = useMyCapabilities();
   const techBadge = useTechDeskBadge();
+  const canSeeWhatsAppNow = useCanSeeWhatsApp();
   // Trainer sub-role gating — mirrors the web sidebar:
   //  QHP Manager & Stats → can_schedule_assessments_for_others; QHP → assessor/view-all;
   //  Managers Dashboard/Overview & QHP Overview → profile.managers;
@@ -205,8 +206,9 @@ export function Drawer() {
     if (it.route === 'b2c-reports') return session?.user?.id === '196ec824-a093-4944-ae3d-3c4919ebf0df' || role === 'academy' || role === 'admin';
     if (it.route === 'mgr-dash' || it.label === 'Managers Overview' || it.label === 'QHP Overview') return caps.data.isManager;
     // Client complaints (3 Nov 2026): managers (their teams), the physio HOD and admins (every team), the server rule complaint_viewer_kind
-    // WhatsApp inbox (19 Nov 2026): ops, admin, super_admin, the same rule as the database (is_whatsapp_staff)
-    if (it.route === 'ops-whatsapp') return canSeeWhatsApp(dbRole);
+    // WhatsApp inbox: whoever one of our numbers belongs to (20 Nov 2026; the clinic number: ops, admin, super admin;
+    // a CRM's own business number: that CRM), the same rule as the database
+    if (it.route === 'ops-whatsapp') return canSeeWhatsAppNow;
     if (it.route === 'client-complaints') return caps.data.isManager || caps.data.isPhysioHod || dbRole === 'admin' || dbRole === 'super_admin' || session?.user?.id === '30df5c2b-0f40-4736-9f41-7cbc830a191a';
     if (it.label === 'Trainers Tracker') return caps.data.isTrainerManager;
     if (it.route === 'crm-esc') return caps.data.isCrmManager; // web: crm_manager spec only
