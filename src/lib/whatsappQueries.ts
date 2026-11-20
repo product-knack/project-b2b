@@ -48,10 +48,12 @@ export function useMyWhatsAppNumbers() {
 }
 
 /** May this signed-in person see WhatsApp chats at all? (The database rule says the same.) While the list of
-    numbers is still being asked, the old role rule answers, so the team sees the page at once. */
+    numbers is still being asked the answer is no (20 Nov 2026: a number is given per person, no longer by role,
+    so answering by role made the menu item flash for an ops or admin person who holds no number). */
 export function useCanSeeWhatsApp(): boolean {
   const { dbRole } = useAuth();
   const q = useMyWhatsAppNumbers();
+  if (q.data === undefined && !q.isError) return false;
   return canSeeWhatsAppWith(dbRole, q.isError ? null : q.data);
 }
 
