@@ -547,7 +547,7 @@ export function useRequestQhpReschedule() {
         .invoke('notify-qhp-reschedule', { body: { kind: 'request', assessment_id: input.assessmentId, client_name: input.clientName } })
         .catch(() => {});
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['qhp-assessments'] }); qc.invalidateQueries({ queryKey: ['qhp-manager', 'v3'] }); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['qhp-assessments'] }); qc.invalidateQueries({ queryKey: ['qhp-manager'] }); },
   });
 }
 

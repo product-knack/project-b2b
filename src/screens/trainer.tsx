@@ -89,7 +89,8 @@ import { fmtSlotLong } from '../lib/opsLeadQueries';
 import { QhpReports } from './qhpReports';
 import { ServicesButton } from '../components/servicesButton';
 import { QhpGuidanceCard, QhpGuidancePopup, ClientEntryPopups } from '../components/qhpGuidance';
-import { useQhpManager, useResolveQhpReschedule, useSetQhpManagerReview, useHoldQhp, useRescheduleQhpAssessment, useApproveQhpRequest, useQhpTracker, useClientLinked, useClientAssignedStaff, useQhpReviewDetail, useEditQhpRequest, useClientCredentials, useQhpAssignAssessorAlert, useAssessorPendingCount, useQhpInProgress, useQhpStats, useQhpTotals, QhpTotalsRow, useAddHeartMath, useDeleteQhp, computeQhpSlaDeadline, formatSlaRemaining, formatWaiting, waitUrgency } from '../lib/qhpManagerQueries';
+import { QhpNotScheduledCard } from '../components/qhpNotScheduledCard';
+import { useQhpManagerView, useResolveQhpReschedule, useSetQhpManagerReview, useHoldQhp, useRescheduleQhpAssessment, useApproveQhpRequest, useQhpTracker, useClientLinked, useClientAssignedStaff, useQhpReviewDetail, useEditQhpRequest, useClientCredentials, useAssessorPendingCount, useQhpInProgress, useQhpStats, useQhpTotals, QhpTotalsRow, useAddHeartMath, useDeleteQhp, computeQhpSlaDeadline, formatSlaRemaining, formatWaiting, waitUrgency } from '../lib/qhpManagerQueries';
 import * as Clipboard from 'expo-clipboard';
 import * as ImagePicker from 'expo-image-picker';
 import { ic } from '../icons';
@@ -1875,7 +1876,6 @@ export function Dashboard() {
   // assign — so we gate strictly to them (deliberate fix over web parity).
   const dashCaps = useMyCapabilities();
   const isQhpMgrAlert = dashCaps.data.isQhpManager;
-  const assignAlertQ = useQhpAssignAssessorAlert(isQhpMgrAlert);
   const assessorDueQ = useAssessorPendingCount(trainerId, dashCaps.data.canConductAssessments);
   const inProgressQ = useQhpInProgress(trainerId);
   const [inProgressOpen, setInProgressOpen] = React.useState(false);
@@ -1884,18 +1884,6 @@ export function Dashboard() {
   const [qhpBreakdown, setQhpBreakdown] = React.useState<'pending' | 'completed' | 'overdue' | null>(null);
   // Client acknowledgements — this month's ack % shown on the Acknowledge Sessions quick action.
   const ackSumQ = useTrainerAckSummary(trainerId);
-  const assignAlert = assignAlertQ.data;
-  const assignMsg = React.useMemo(() => {
-    if (!assignAlert || assignAlert.count === 0) return null;
-    const { count, names } = assignAlert;
-    if (count === 1 && names[0]) return `${names[0]}'s QHP is scheduled, please assign assessor asap`;
-    if (names.length > 0) {
-      const preview = names.slice(0, 2).join(', ');
-      const extra = count - Math.min(2, names.length);
-      return `${preview}${extra > 0 ? ` +${extra} more` : ''} — QHP scheduled, please assign assessor asap`;
-    }
-    return `${count} client${count === 1 ? '' : 's'} QHP scheduled, please assign assessor asap`;
-  }, [assignAlert]);
   const mgrLbQ = useManagerLeaderboard();
   const mgrTop3 = mgrLbQ.data?.entries?.length
     ? mgrLbQ.data.entries.slice(0, 3).map((e, i) => ({ rank: e.rank, name: e.managerName.split(' ')[0], sess: e.totalSessions, mc: [C.gold, '#B8BCC4', '#C08A52'][i] }))
@@ -2196,23 +2184,9 @@ export function Dashboard() {
         </View>
       ) : null}
 
-      {/* QHP Manager — assign assessor asap (web OnboardingAlertBanner coach alert).
-          Render-gated on the capability too: cached data must never show it to non-managers. */}
-      {isQhpMgrAlert && assignMsg ? (
-        <Pressable onPress={() => go('qhp-manager')} style={{ borderRadius: 16, overflow: 'hidden', borderWidth: 1.5, borderColor: hexA(C.gold, 0.5) }}>
-          <LinearGradient colors={[hexA(C.gold, 0.14), hexA(C.orange, 0.06)]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', gap: 11, padding: 13 }}>
-            <View style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 4, backgroundColor: C.gold }} />
-            <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: hexA(C.gold, 0.18), borderWidth: 1, borderColor: hexA(C.gold, 0.4), alignItems: 'center', justifyContent: 'center', marginLeft: 4 }}>
-              <Icon name="clipboard" size={16} color={C.gold} strokeWidth={2.2} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Body style={{ fontSize: 13, fontFamily: F.bodyBold, color: '#F5D08A' }} numberOfLines={2}>{assignMsg}</Body>
-              <Body style={{ fontSize: 11, color: hexA(C.gold, 0.85), marginTop: 2 }}>Open Task Pending → Not Scheduled to assign an assessor</Body>
-            </View>
-            <Icon name="chevRight" size={15} color={C.gold} strokeWidth={2.4} />
-          </LinearGradient>
-        </Pressable>
-      ) : null}
+      {/* QHP manager: QHPs not scheduled yet (20 Nov 2026). The same card, rule and number as on the academy home; it
+          replaced the older "assign assessor asap" banner. Draws nothing without the QHP manager switch. */}
+      <QhpNotScheduledCard />
 
       {/* Assessor — my pending QHPs due (web assessor alert) */}
       {(assessorDueQ.data ?? 0) > 0 ? (
@@ -10711,13 +10685,32 @@ function JsonView({ data, depth = 0 }: { data: any; depth?: number }) {
 }
 
 /* ============ QHP MANAGER ============ */
+/** One tab's own state line (20 Nov 2026): the page is on screen at once, and the part still on its way says so
+    here instead of holding the whole page behind a spinner. */
+const qhpPartWaiting = (q: { isPending: boolean; isError: boolean; data?: unknown }): boolean => q.isPending || (q.isError && q.data === undefined);
+function QhpTabState({ q, loading }: { q: { isPending: boolean; isError: boolean; isPaused?: boolean; error: unknown; refetch: () => unknown }; loading: string }) {
+  if (q.isError) {
+    return (
+      <View style={{ alignItems: 'center', gap: 8, paddingVertical: 20 }}>
+        <Body style={{ fontSize: 12.5, color: C.muted2, textAlign: 'center' }}>{friendlyError(q.error, 'This list could not be loaded. Check your connection and try again.')}</Body>
+        <Pressable onPress={() => { q.refetch(); }} hitSlop={10} accessibilityRole="button"><Text style={{ fontFamily: F.bodyBold, fontSize: 12.5, color: C.orange }}>Try again</Text></Pressable>
+      </View>
+    );
+  }
+  return (
+    <View style={{ alignItems: 'center', gap: 8, paddingVertical: 22 }}>
+      {q.isPaused ? null : <ActivityIndicator color={C.orange} />}
+      <Body style={{ fontSize: 12, color: C.muted3, textAlign: 'center' }}>{q.isPaused ? 'You are offline. This list loads when the connection is back.' : loading}</Body>
+    </View>
+  );
+}
+
 type MgrQhp = { id: string; init: string; name: string; refresh: string; client: string; av: [string, string]; when?: string; holdReason?: string };
 type ReschedReq = { id: string; name: string; from: string; to: string; reason: string; by: string };
 
 export function QhpManager() {
   const caps = useMyCapabilities();
   const isMgr = caps.data.isQhpManager;
-  const q = useQhpManager(isMgr);
   const resolveM = useResolveQhpReschedule();
   const reviewM = useSetQhpManagerReview();
   const holdM = useHoldQhp();
@@ -10726,9 +10719,14 @@ export function QhpManager() {
   const { session } = useAuth();
   const { set, go } = useStore();
   const [tab, setTab] = React.useState<'task' | 'manager' | 'tracker' | 'requests' | 'linked' | 'review' | 'cancellations'>('task');
+  // The page's data in four parts (20 Nov 2026): Task Pending and the inbox at once, every booking only when the
+  // Manager or QHP Review tab is open, the 45-day list only for the Manager tab. `d` is never empty-handed: a part
+  // that has not arrived is an empty list, so the page shows at once and each tab has its own loading line.
+  const view = useQhpManagerView(isMgr, tab);
+  const d = view.d;
   // Client location (2 Nov 2026): the pin chip on every Task Pending card and the Add location sheet. The
   // saved pin is clients.brb_location, the one QHP navigation and the roster distance read.
-  const pinIds = React.useMemo(() => [...(q.data?.taskNotScheduled ?? []), ...(q.data?.taskScheduled ?? []), ...(q.data?.taskOnHold ?? [])].map((c) => c.clientId), [q.data]);
+  const pinIds = React.useMemo(() => [...d.taskNotScheduled, ...d.taskScheduled, ...d.taskOnHold].map((c) => c.clientId), [d]);
   const pinsQ = useClientPins(pinIds, isMgr);
   const pins = pinsQ.data ?? {};
   const [locFor, setLocFor] = React.useState<LocationTarget>(null);
@@ -10740,7 +10738,7 @@ export function QhpManager() {
   const storeMgr = useStore();
   const qhpManagerFocusTab = storeMgr.qhpManagerFocusTab;
   const setStoreMgr = storeMgr.set;
-  React.useEffect(() => { if (qhpManagerFocusTab === 'cancellations') { setTab('cancellations'); setStoreMgr({ qhpManagerFocusTab: null }); } }, [qhpManagerFocusTab]);
+  React.useEffect(() => { if (qhpManagerFocusTab === 'cancellations' || qhpManagerFocusTab === 'task') { setTab(qhpManagerFocusTab); setStoreMgr({ qhpManagerFocusTab: null }); } }, [qhpManagerFocusTab]);
   const [mgrAddOpen, setMgrAddOpen] = React.useState(false); // calendar "Add QHP"
   const [sub, setSub] = React.useState<'notsched' | 'sched' | 'hold' | 'resched'>('notsched');
   // Overdue card on the landing tab — same all-time subscribed-clients logic as the home card.
@@ -10800,7 +10798,7 @@ export function QhpManager() {
   const [mgrAssessor, setMgrAssessor] = React.useState<string>('all');
   const [mgrPick, setMgrPick] = React.useState<'client' | 'assessor' | null>(null);
   const [mgrPickSearch, setMgrPickSearch] = React.useState('');
-  const mgrAll = q.data?.assessments ?? [];
+  const mgrAll = d.assessments;
   const mgrClientOpts = React.useMemo(() => {
     const m = new Map<string, string>();
     mgrAll.forEach((a) => { if (a.clientId && !m.has(a.clientId)) m.set(a.clientId, a.clientName); });
@@ -10905,13 +10903,11 @@ export function QhpManager() {
     );
   }
 
-  const d = q.data;
-
   return (
     <Page gap={13} pt={6}>
       <TitleBlock title="QHP Manager" sub="Assessment oversight across your trainers" />
 
-      {q.isLoading || !d ? (
+      {!d ? (
         <View style={{ paddingVertical: 34, alignItems: 'center' }}><ActivityIndicator color={C.orange} /></View>
       ) : (
         <>
@@ -11001,7 +10997,7 @@ export function QhpManager() {
               ) : null}
 
               <Card colors={['rgba(74,42,24,0.4)', 'rgba(22,16,15,0.5)']} border={hexA(C.gold, 0.22)} radius={14} style={{ padding: 13 }}>
-                <Body style={{ fontSize: 13.5, fontFamily: F.bodySemi, color: C.gold }}>{d.counts.taskPending} client{d.counts.taskPending === 1 ? '' : 's'} pending QHP</Body>
+                <Body style={{ fontSize: 13.5, fontFamily: F.bodySemi, color: C.gold }}>{view.taskQ.isPending ? 'Loading the pending clients...' : `${d.counts.taskPending} client${d.counts.taskPending === 1 ? '' : 's'} pending QHP`}</Body>
                 <Body style={{ fontSize: 11.5, color: C.muted2, marginTop: 2 }}>Active clients who need their QHP scheduled or completed.</Body>
               </Card>
 
@@ -11019,7 +11015,11 @@ export function QhpManager() {
                 })}
               </View>
 
-              {sub === 'notsched' ? (
+              {sub !== 'resched' && qhpPartWaiting(view.taskQ) ? (
+                <QhpTabState q={view.taskQ} loading="Loading the pending clients..." />
+              ) : sub === 'resched' && qhpPartWaiting(view.inboxQ) ? (
+                <QhpTabState q={view.inboxQ} loading="Loading the reschedule requests..." />
+              ) : sub === 'notsched' ? (
                 d.taskNotScheduled.length === 0 ? <Body style={{ fontSize: 12.5, color: C.muted3, textAlign: 'center', paddingVertical: 18 }}>Nothing waiting to be scheduled.</Body> :
                 d.taskNotScheduled.slice(0, 120).map((c) => {
                   const sla = formatSlaRemaining(computeQhpSlaDeadline(c.joinedAt));
@@ -11153,7 +11153,7 @@ export function QhpManager() {
             /* ===== MANAGER — every QHP across trainers (list ⇄ calendar) ===== */
             <>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-                {(([['SCHEDULED', d.counts.assessScheduled, C.blue], ['COMPLETED', d.counts.completed, C.green], ['OVERDUE', d.counts.overdue, C.red], ['TOTAL', d.counts.total, '#fff']]) as [string, number, string][]).map(([lab, val, col]) => (
+                {(([['SCHEDULED', view.allQ.data ? d.counts.assessScheduled : '…', C.blue], ['COMPLETED', view.allQ.data ? d.counts.completed : '…', C.green], ['OVERDUE', view.allQ.data && view.recentQ.data ? d.counts.overdue : '…', C.red], ['TOTAL', view.allQ.data || view.inboxQ.data?.totalBookings != null ? d.counts.total : '…', '#fff']]) as [string, number | string, string][]).map(([lab, val, col]) => (
                   <View key={lab} style={{ width: '47.5%', flexGrow: 1, paddingVertical: 10, borderRadius: 12, backgroundColor: hexA(col === '#fff' ? C.orange : col, 0.07), borderWidth: 1, borderColor: hexA(col === '#fff' ? C.orange : col, 0.22), alignItems: 'center' }}>
                     <Text style={{ fontFamily: F.bodyBold, fontSize: 18, color: col }}>{val}</Text>
                     <Mono style={{ fontSize: 8, letterSpacing: 0.8, color: C.muted3, marginTop: 1 }}>{lab}</Mono>
@@ -11213,7 +11213,9 @@ export function QhpManager() {
                   );
                 })}
               </View>
-              {mgrView === 'calendar' ? (
+              {qhpPartWaiting(view.allQ) ? (
+                <QhpTabState q={view.allQ} loading="Loading the QHPs..." />
+              ) : mgrView === 'calendar' ? (
                 (() => {
                   // Month calendar of QHPs (filtered manager dataset).
                   const istDay = (iso: string) => new Date(iso).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
@@ -11330,6 +11332,8 @@ export function QhpManager() {
                     </>
                   );
                 })()
+              ) : mgrStatus === 'overdue' && qhpPartWaiting(view.recentQ) ? (
+                <QhpTabState q={view.recentQ} loading="Working out which QHPs are overdue..." />
               ) : mgrFiltered.length === 0 ? (
                 <Body style={{ fontSize: 12.5, color: C.muted3, textAlign: 'center', paddingVertical: 18 }}>No QHPs match the filters.</Body>
               ) : (
@@ -11442,6 +11446,7 @@ export function QhpManager() {
             </>
           ) : tab === 'requests' ? (
             /* ===== REQUESTS — qhp_schedule pending, Approve & Schedule (web parity) ===== */
+            qhpPartWaiting(view.inboxQ) ? <QhpTabState q={view.inboxQ} loading="Loading the scheduling requests..." /> :
             d.requests.length === 0 ? <Body style={{ fontSize: 12.5, color: C.muted3, textAlign: 'center', paddingVertical: 20 }}>No scheduling requests pending.</Body> :
             d.requests.map((r) => (
               <View key={r.id} style={{ padding: 12, borderRadius: 13, backgroundColor: 'rgba(0,0,0,0.25)', borderWidth: 1, borderColor: hexA(C.gold, 0.2), borderLeftWidth: 3, borderLeftColor: C.gold, gap: 7 }}>
@@ -11543,7 +11548,8 @@ export function QhpManager() {
                   </View>
                 ))}
               </View>
-              {d.review.all.length === 0 ? <Body style={{ fontSize: 12.5, color: C.muted3, textAlign: 'center', paddingVertical: 18 }}>No completed QHPs yet.</Body> :
+              {qhpPartWaiting(view.allQ) ? <QhpTabState q={view.allQ} loading="Loading the completed QHPs..." /> :
+                d.review.all.length === 0 ? <Body style={{ fontSize: 12.5, color: C.muted3, textAlign: 'center', paddingVertical: 18 }}>No completed QHPs yet.</Body> :
                 [...d.review.pending, ...d.review.all.filter((a) => a.managerReview !== null)].slice(0, 60).map((a) => {
                   const col = a.managerReview === 'approved' ? C.green : a.managerReview === 'not_approved' ? C.red : C.gold;
                   const lab = a.managerReview === 'approved' ? 'Approved' : a.managerReview === 'not_approved' ? 'Not approved' : 'Pending review';

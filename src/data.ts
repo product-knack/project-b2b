@@ -493,6 +493,11 @@ export const academyNav: NavGroup[] = [
     { label: 'Dashboard', icon: 'grid', route: 'academy-dashboard' },
     { label: 'QHP Report Review', icon: 'clipboard', route: 'qhp-review' },
     { label: 'QHP Analyser', icon: 'chart', route: 'academy-qhp-analyser' },
+    // QHP manager of any role (20 Nov 2026): shown by the switch profiles.can_schedule_assessments_for_others
+    // (chrome.tsx itemVisible), as on the web's academy menu. Without them the academy QHP manager could not open
+    // QHP Manager in the app at all.
+    { label: 'QHP Manager', icon: 'clipboard', route: 'qhp-manager' },
+    { label: 'QHP Stats', icon: 'chart', route: 'qhp-stats' },
     { label: 'Daily Goals', icon: 'target', route: 'academy-daily-goals' },
     { label: 'Weekly Summary', icon: 'calendar', route: 'academy-weekly-summary' },
     { label: 'Senior Analyst', icon: 'trend', route: 'academy-senior-analyst' },

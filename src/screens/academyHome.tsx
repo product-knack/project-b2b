@@ -11,6 +11,7 @@ import { ClientThreadsUnreadBanner } from '../components/clientThreadsCard';
 import { useAcademyBanners, useQhpAnalyser, qhpPdfUrl, QHP_OVERDUE_MS, QhpAnalyserRow } from '../lib/academyQueries';
 import { useMyCapabilities } from '../lib/capabilities';
 import { PendingAttendanceBanner } from './academyApproval';
+import { QhpNotScheduledCard } from '../components/qhpNotScheduledCard';
 
 /* ============================================================================
    Academy Admin home — a lightweight launcher: three data-driven action
@@ -92,6 +93,9 @@ export function AcademyHome() {
   return (
     <Page gap={13} pt={6}>
       <TitleBlock title="Academy" sub="Research and academy tools" />
+      {/* QHP manager (20 Nov 2026): QHPs not scheduled yet, first on the screen as on the web's academy dashboard.
+          Draws nothing without the QHP manager switch (today Prateek Barbora holds it on the academy side). */}
+      <QhpNotScheduledCard />
       {/* Teacher-submitted attendance waiting for review (web PendingAttendanceBanner). */}
       <PendingAttendanceBanner onPress={() => go('academy-management')} />
       <ClientThreadsUnreadBanner />

@@ -1,6 +1,14 @@
+import React from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from './supabase';
 import { useAuth } from '../auth';
+import { withTimeout, NET_MS } from './withTimeout';
+import {
+  QHP_BOOKING_COLUMNS, QHP_CLIENT_CUTOFF, QHP_HAS_DATA_FILTER, QHP_REVIEW_CUTOFF, bucketTaskPending, idChunks, markValidityOverdue, qhpBookingCounts,
+  qhpReschedulesOf, qhpReviewLists, taskPendingBookings, toQhpAssessments, type QhpAssessment, type QhpReschedule,
+} from './qhpManagerRules';
+import { QHP_NOT_SCHEDULED_ALERT_FROM, qhpNotScheduledSince, type PendingQhpBooking, type PendingQhpClient } from './qhpNotScheduled';
+export type { QhpAssessment, QhpReschedule } from './qhpManagerRules';
 
 /* ============ QHP Manager — live oversight (mirrors the web QHPManager page) ============
    Task Pending is CLIENT-centric (booked leads), exactly like the web:
@@ -13,8 +21,6 @@ import { useAuth } from '../auth';
    Manager / Review / Reschedule / Requests come from coach_assessment / qhp_schedule. */
 
 const fullName = (p: any) => `${p?.first_name ?? ''} ${p?.last_name ?? ''}`.replace(/\s+/g, ' ').trim() || '—';
-const nonEmpty = (v: any) => !!v && typeof v === 'object' && Object.keys(v).length > 0;
-const QHP_CLIENT_CUTOFF = '2026-03-04T00:00:00+00:00';
 
 /* ---- SLA (3 working hours within 07:00–22:00 IST from created_at) ---- */
 const IST_OFFSET = 5.5 * 3600 * 1000;
@@ -76,15 +82,6 @@ export type PendingClient = {
   bookedByName: string | null;
   bookedByRole: string | null;
 };
-export type QhpAssessment = {
-  id: string; clientId: string | null; clientName: string; assessorName: string;
-  scheduledAt: string | null; completed: boolean; overdue: boolean;
-  completedAt: string | null;                       // conducted timestamp
-  status: 'completed' | 'pending' | 'overdue';      // web calculateQHPStatus (documentation status)
-  validityOverdue: boolean;                         // web isValidityOverdue (45d cycle, active client, latest completed)
-  managerReview: 'approved' | 'not_approved' | null; stage: 'not_scheduled' | 'scheduled' | 'completed';
-};
-export type QhpReschedule = { id: string; clientName: string; assessorName: string; currentAt: string | null; proposedAt: string | null; requestedAt: string | null; remark: string | null };
 export type QhpRequest = { id: string; clientId: string | null; clientName: string; date: string | null; time: string | null; address: string | null; notes: string | null; scheduledByName: string | null };
 
 export type QhpManagerData = {
@@ -98,219 +95,267 @@ export type QhpManagerData = {
   counts: { taskPending: number; notScheduled: number; scheduled: number; assessScheduled: number; holds: number; reschedules: number; requests: number; reviewPending: number; total: number; completed: number; overdue: number };
 };
 
-export function useQhpManager(enabled: boolean) {
+/* ---- the page's data, in four parts (20 Nov 2026; see lib/qhpManagerRules.ts for why) ---- */
+
+/** One network call with the app's time limit. */
+const net = <T,>(p: PromiseLike<T>, label: string): Promise<T> => withTimeout(Promise.resolve(p), NET_MS, label);
+/** Every page of a list (1000 rows a page). */
+const pageAll = async (build: (page: number) => PromiseLike<{ data: any; error: any }>, label: string, maxPages = 20): Promise<any[]> => {
+  const out: any[] = [];
+  for (let p = 0; p < maxPages; p++) {
+    const { data, error } = await net(build(p), label);
+    if (error) throw error;
+    const chunk = (data ?? []) as any[];
+    out.push(...chunk);
+    if (chunk.length < 1000) break;
+  }
+  return out;
+};
+/** Profile names by id (a plain object: query data is cached, so never a Map). */
+const profileNames = async (ids: string[]): Promise<Record<string, string>> => {
+  const names: Record<string, string> = {};
+  for (const part of idChunks(ids, 200)) {
+    const { data, error } = await net(supabase.from('profiles').select('id, first_name, last_name').in('id', part), 'Names');
+    if (error) throw error;
+    (data ?? []).forEach((p: any) => { names[p.id] = fullName(p); });
+  }
+  return names;
+};
+/** Cache keys carry the signed-in person's id: the app keeps its query cache between sign-ins on one phone. */
+const useUid = (): string => useAuth().session?.user?.id ?? 'anon';
+
+/* 1. Task Pending: the first tab on screen. Small, and refreshed every 30 seconds. */
+export type QhpTaskPendingData = { taskNotScheduled: PendingClient[]; taskScheduled: PendingClient[]; taskOnHold: PendingClient[]; taskPending: number };
+export function useQhpTaskPending(enabled: boolean) {
+  const uid = useUid();
   return useQuery({
-    queryKey: ['qhp-manager', 'v5'], // v5: PendingClient gained bookedByName/Role
+    queryKey: ['qhp-manager', 'task', uid],
     enabled,
     staleTime: 30_000,
-    refetchInterval: 30_000, // web polls the reschedule requests at 30s
-    queryFn: async (): Promise<QhpManagerData> => {
-      // ---- Task Pending (client-centric) ----
-      let pending: PendingClient[] = [];
-      let holdMap = new Map<string, { reason: string | null; overdue: boolean; resolvingAt: string | null }>();
+    refetchInterval: 30_000,
+    queryFn: async (): Promise<QhpTaskPendingData> => {
+      const empty: QhpTaskPendingData = { taskNotScheduled: [], taskScheduled: [], taskOnHold: [], taskPending: 0 };
+      const { data: leadRows, error: leadErr } = await net(supabase.rpc('get_qhp_booked_client_ids'), 'QHP booked clients');
+      if (leadErr) throw leadErr;
+      const leadIds = [...new Set(((leadRows ?? []) as any[]).map((r) => (typeof r === 'string' ? r : r?.client_id)).filter(Boolean))] as string[];
+      if (!leadIds.length) return empty;
+
+      const cls: any[] = [];
+      for (const part of idChunks(leadIds)) {
+        const { data, error } = await net(
+          supabase.from('clients').select('id, first_name, last_name, phone, status, created_at').in('id', part).or('status.eq.active,status.is.null').gte('created_at', QHP_CLIENT_CUTOFF),
+          'QHP clients',
+        );
+        if (error) throw error;
+        cls.push(...((data ?? []) as any[]));
+      }
+      cls.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      const cIds = cls.map((c) => c.id);
+      if (!cIds.length) return empty;
+
+      // The bookings of these clients WITHOUT the assessment blobs, and the ids of the bookings that have data.
+      const bookings: any[] = [];
+      const idsWithData: string[] = [];
+      for (const part of idChunks(cIds)) {
+        const [b, d] = await Promise.all([
+          net(supabase.from('coach_assessment').select('id, client_id, assessment_date, assessment_time, cancelled').in('client_id', part), 'QHP bookings'),
+          net(supabase.from('coach_assessment').select('id').in('client_id', part).or(QHP_HAS_DATA_FILTER), 'QHP bookings with data'),
+        ]);
+        if (b.error) throw b.error;
+        if (d.error) throw d.error;
+        bookings.push(...((b.data ?? []) as any[]));
+        idsWithData.push(...((d.data ?? []) as any[]).map((r) => r.id));
+      }
+      const { bookingOf, doneClientIds } = taskPendingBookings(bookings, idsWithData);
+      const done = new Set(doneClientIds);
+
+      // holds (keep resolving_at: the card shows "Resolving by ...")
+      const holdMap = new Map<string, { reason: string | null; overdue: boolean; resolvingAt: string | null }>();
       try {
-        const { data: leadRows } = await supabase.rpc('get_qhp_booked_client_ids');
-        const leadIds = [...new Set(((leadRows ?? []) as any[]).map((r) => (typeof r === 'string' ? r : r?.client_id)).filter(Boolean))] as string[];
-        if (leadIds.length) {
-          const { data: clients } = await supabase
-            .from('clients')
-            .select('id, first_name, last_name, phone, status, created_at')
-            .in('id', leadIds)
-            .or('status.eq.active,status.is.null')
-            .gte('created_at', QHP_CLIENT_CUTOFF)
-            .order('created_at', { ascending: false });
-          const cls = (clients ?? []) as any[];
-          const cIds = cls.map((c) => c.id);
-          const hasData = new Map<string, boolean>();
-          const asmt = new Map<string, { id: string; date: string | null; time: string | null }>();
-          if (cIds.length) {
-            const { data: as } = await supabase
-              .from('coach_assessment')
-              .select('id, client_id, assessment_date, assessment_time, new_client_assessment_data, existing_client_assessment_data, qhp_data')
-              .in('client_id', cIds);
-            (as ?? []).forEach((a: any) => {
-              if (!a.client_id) return;
-              asmt.set(a.client_id, { id: a.id, date: a.assessment_date ?? null, time: a.assessment_time ?? null });
-              if (nonEmpty(a.new_client_assessment_data) || nonEmpty(a.existing_client_assessment_data) || nonEmpty(a.qhp_data)) hasData.set(a.client_id, true);
-            });
-          }
-          // holds (keep resolving_at — the card shows "Resolving by …")
-          try {
-            const { data: holds } = await supabase.rpc('get_qhp_holds');
-            (holds ?? []).forEach((h: any) => { if (h.client_id) holdMap.set(h.client_id, { reason: h.reason ?? null, overdue: h.is_overdue === true, resolvingAt: h.resolving_at ?? null }); });
-          } catch { /* no holds */ }
-          // Ops preferences (web "Notes from Ops" + scheduling-form prefill)
-          const prefsMap = new Map<string, OpsPrefs>();
-          if (cIds.length) {
-            try {
-              const { data: prefs } = await supabase.rpc('get_lead_qhp_prefs_for_clients', { _client_ids: cIds });
-              (prefs ?? []).forEach((row: any) => {
-                if (!row?.client_id) return;
-                prefsMap.set(row.client_id, {
-                  date: row.qhp_pref_date ?? null, timeFrom: row.qhp_pref_time_from ?? null,
-                  location: row.qhp_pref_location ?? null, notes: row.qhp_pref_notes ?? null,
-                });
-              });
-            } catch { /* prefs RPC unavailable */ }
-            /* 2nd preference: a separate additive RPC, in its own try/catch so a
-               failure here can never hide the primary preferences above. */
-            try {
-              const { data: alts } = await supabase.rpc('get_lead_qhp_pref_alt_for_clients', { _client_ids: cIds });
-              ((alts ?? []) as any[]).forEach((row: any) => {
-                const alt = row?.qhp_pref_alt;
-                if (!row?.client_id || !alt || typeof alt !== 'object' || !alt.date) return;
-                const cur = prefsMap.get(row.client_id) ?? { date: null, timeFrom: null, location: null, notes: null };
-                prefsMap.set(row.client_id, { ...cur, altDate: alt.date ?? null, altTime: alt.time ?? null });
-              });
-            } catch { /* alt RPC not deployed — cards just omit the 2nd slot */ }
-          }
-          // Ops attribution: who booked the QHP stage on the lead.
-          const bookedMap = new Map<string, { name: string | null; role: string | null }>();
-          if (cIds.length) {
-            try {
-              const { data: bb } = await supabase.rpc('get_lead_qhp_booked_by', { _client_ids: cIds });
-              ((bb ?? []) as any[]).forEach((row: any) => {
-                if (row?.client_id) bookedMap.set(row.client_id, { name: row.booked_by_name || null, role: row.booked_by_role ?? null });
-              });
-            } catch { /* RPC not deployed yet — cards just omit the line */ }
-          }
-          pending = cls
-            .filter((c) => !hasData.get(c.id)) // drop completed QHPs
-            .map((c) => {
-              const rec = asmt.get(c.id);
-              return {
-                clientId: c.id, name: fullName(c), phone: c.phone ?? null, joinedAt: c.created_at,
-                hasQHP: !!rec, assessmentId: rec?.id ?? null, assessmentDate: rec?.date ?? null, assessmentTime: rec?.time ?? null,
-                holdReason: holdMap.get(c.id)?.reason ?? null, holdOverdue: holdMap.get(c.id)?.overdue ?? false,
-                holdResolvingAt: holdMap.get(c.id)?.resolvingAt ?? null,
-                opsPrefs: prefsMap.get(c.id) ?? null,
-                bookedByName: bookedMap.get(c.id)?.name ?? null,
-                bookedByRole: bookedMap.get(c.id)?.role ?? null,
-              };
-            });
-        }
-      } catch { /* booked RPC unavailable */ }
+        const { data: holds } = await net(supabase.rpc('get_qhp_holds'), 'QHP holds');
+        ((holds ?? []) as any[]).forEach((h: any) => { if (h.client_id) holdMap.set(h.client_id, { reason: h.reason ?? null, overdue: h.is_overdue === true, resolvingAt: h.resolving_at ?? null }); });
+      } catch { /* no holds */ }
+      // Ops preferences (web "Notes from Ops" + scheduling-form prefill)
+      const prefsMap = new Map<string, OpsPrefs>();
+      try {
+        const { data: prefs } = await net(supabase.rpc('get_lead_qhp_prefs_for_clients', { _client_ids: cIds }), 'QHP preferences');
+        ((prefs ?? []) as any[]).forEach((row: any) => {
+          if (!row?.client_id) return;
+          prefsMap.set(row.client_id, {
+            date: row.qhp_pref_date ?? null, timeFrom: row.qhp_pref_time_from ?? null,
+            location: row.qhp_pref_location ?? null, notes: row.qhp_pref_notes ?? null,
+          });
+        });
+      } catch { /* prefs RPC unavailable */ }
+      /* 2nd preference: a separate additive RPC, in its own try/catch so a failure here can never hide the
+         primary preferences above. */
+      try {
+        const { data: alts } = await net(supabase.rpc('get_lead_qhp_pref_alt_for_clients', { _client_ids: cIds }), 'QHP second preference');
+        ((alts ?? []) as any[]).forEach((row: any) => {
+          const alt = row?.qhp_pref_alt;
+          if (!row?.client_id || !alt || typeof alt !== 'object' || !alt.date) return;
+          const cur = prefsMap.get(row.client_id) ?? { date: null, timeFrom: null, location: null, notes: null };
+          prefsMap.set(row.client_id, { ...cur, altDate: alt.date ?? null, altTime: alt.time ?? null });
+        });
+      } catch { /* alt RPC not deployed: cards just omit the 2nd slot */ }
+      // Ops attribution: who booked the QHP stage on the lead.
+      const bookedMap = new Map<string, { name: string | null; role: string | null }>();
+      try {
+        const { data: bb } = await net(supabase.rpc('get_lead_qhp_booked_by', { _client_ids: cIds }), 'QHP booked by');
+        ((bb ?? []) as any[]).forEach((row: any) => {
+          if (row?.client_id) bookedMap.set(row.client_id, { name: row.booked_by_name || null, role: row.booked_by_role ?? null });
+        });
+      } catch { /* RPC not deployed yet: cards just omit the line */ }
 
-      const taskScheduled = pending.filter((c) => c.hasQHP);
-      const taskOnHold = pending.filter((c) => !c.hasQHP && holdMap.has(c.clientId));
-      const taskNotScheduled = pending.filter((c) => !c.hasQHP && !holdMap.has(c.clientId));
-
-      // ---- Manager list + Review + Reschedules (all coach_assessment, fully paged) ----
-      const pageAll = async (build: (q: any) => any, maxPages = 20) => {
-        const out: any[] = [];
-        for (let p = 0; p < maxPages; p++) {
-          const { data, error } = await build(p);
-          if (error) throw new Error(error.message);
-          const chunk = (data ?? []) as any[];
-          out.push(...chunk);
-          if (chunk.length < 1000) break;
-        }
-        return out;
-      };
-      const CA_LIGHT = 'id, client_id, client_name, coach_id, assessment_date, assessment_time, assessment_scheduled, completed, qhp_manager, sla_deadline_at, reschedule_status, reschedule_data';
-      const cutoff45 = new Date(Date.now() - 45 * 86_400_000).toISOString();
-      const [rows, dataIdRows, activeClientRows, recentSessionRows] = await Promise.all([
-        pageAll((p) => supabase.from('coach_assessment').select(CA_LIGHT).order('assessment_date', { ascending: false, nullsFirst: false }).range(p * 1000, p * 1000 + 999)),
-        // ids of assessments that actually contain data (web isAssessmentCompleted, checked at the DB level)
-        pageAll((p) => supabase.from('coach_assessment').select('id').or('assessment_file_url.not.is.null,new_client_assessment_data.not.is.null,existing_client_assessment_data.not.is.null,qhp_data.not.is.null').range(p * 1000, p * 1000 + 999)),
-        // active clients ∩ recent training sessions (web activeClientIds — powers isValidityOverdue)
-        pageAll((p) => supabase.from('clients').select('id').or('status.eq.active,status.is.null').range(p * 1000, p * 1000 + 999)),
-        pageAll((p) => supabase.from('training_sessions').select('client_id').gte('scheduled_at', cutoff45).neq('status', 'cancelled').range(p * 1000, p * 1000 + 999), 12),
-      ]);
-      const hasDataSet = new Set(dataIdRows.map((r: any) => r.id));
-      const activeIds = new Set(activeClientRows.map((r: any) => r.id));
-      const recentIds = new Set(recentSessionRows.map((r: any) => r.client_id).filter(Boolean));
-      const activeClientSet = new Set([...activeIds].filter((id) => recentIds.has(id)));
-
-      const coachIds = [...new Set(rows.map((r: any) => r.coach_id).filter(Boolean))];
-      const names = new Map<string, string>();
-      if (coachIds.length) {
-        const { data: profs } = await supabase.from('profiles').select('id, first_name, last_name').in('id', coachIds);
-        (profs ?? []).forEach((p: any) => names.set(p.id, fullName(p)));
-      }
-      const now = Date.now();
-      const atOf = (r: any) => (r.assessment_date ? `${String(r.assessment_date).slice(0, 10)}T${r.assessment_time ? String(r.assessment_time) : '00:00:00'}` : null);
-      // Latest completed-with-data assessment per client (web: validity checked on the latest only)
-      const latestDonePerClient = new Map<string, any>();
-      for (const r of rows) {
-        if (!r.client_id || !hasDataSet.has(r.id) || r.completed == null) continue;
-        const prev = latestDonePerClient.get(r.client_id);
-        if (!prev || new Date(r.completed).getTime() > new Date(prev.completed).getTime()) latestDonePerClient.set(r.client_id, r);
-      }
-      const assessments: QhpAssessment[] = rows.map((r: any) => {
-        const hasData = hasDataSet.has(r.id);
-        const completedAt = r.completed ?? null;
-        // web calculateQHPStatus: data → completed; no data + not conducted → pending;
-        // conducted >45d without data → overdue; else pending.
-        const status: 'completed' | 'pending' | 'overdue' = hasData
-          ? 'completed'
-          : !completedAt
-            ? 'pending'
-            : (now - new Date(completedAt).getTime()) / 86_400_000 > 45 ? 'overdue' : 'pending';
-        // web isValidityOverdue: latest completed QHP per ACTIVE client, cycle older than 45d
-        const isLatestDone = !!r.client_id && latestDonePerClient.get(r.client_id)?.id === r.id;
-        const validityRef = completedAt ?? r.assessment_date;
-        const validityOverdue = isLatestDone && !!r.client_id && activeClientSet.has(r.client_id)
-          && !!validityRef && (now - new Date(validityRef).getTime()) / 86_400_000 > 45;
-        const slaOverdue = !completedAt && !!r.sla_deadline_at && new Date(r.sla_deadline_at).getTime() < now;
-        return {
-          id: r.id, clientId: r.client_id ?? null, clientName: r.client_name || '—',
-          assessorName: r.coach_id ? names.get(r.coach_id) ?? 'Unassigned' : 'Unassigned',
-          scheduledAt: atOf(r), completed: hasData, overdue: slaOverdue,
-          completedAt, status, validityOverdue,
-          managerReview: r.qhp_manager === 'approved' ? 'approved' : r.qhp_manager === 'not_approved' ? 'not_approved' : null,
-          stage: hasData ? 'completed' : r.assessment_scheduled === true ? 'scheduled' : 'not_scheduled',
-        };
-      });
-      // web QHPReviewTab: completed >= 2026-05-01 IST, order completed desc (timestamp-based)
-      const REVIEW_CUTOFF = new Date('2026-05-01T00:00:00+05:30').getTime();
-      const completedList = assessments
-        .filter((a) => a.completedAt && new Date(a.completedAt).getTime() >= REVIEW_CUTOFF)
-        .sort((a, b) => new Date(b.completedAt!).getTime() - new Date(a.completedAt!).getTime());
-      const reschedules: QhpReschedule[] = rows.filter((r) => r.reschedule_status === 'pending').map((r) => {
-        const rd = r.reschedule_data || {};
-        return {
-          id: r.id, clientName: r.client_name || '—', assessorName: r.coach_id ? names.get(r.coach_id) ?? '—' : '—',
-          currentAt: atOf(r), proposedAt: rd.proposed_date ? `${String(rd.proposed_date).slice(0, 10)}T${rd.proposed_time || '00:00:00'}` : null,
-          requestedAt: rd.requested_at ?? null, remark: rd.remark ?? null,
-        };
-      });
-
-      // ---- Requests (qhp_schedule pending) ----
-      let requests: QhpRequest[] = [];
-      const { data: qs } = await supabase.from('qhp_schedule').select('id, client_id, scheduled_by, date, time, address, notes').eq('status', 'pending').order('date', { ascending: true }).limit(200);
-      const reqRows = (qs ?? []) as any[];
-      if (reqRows.length) {
-        const cids = [...new Set(reqRows.map((r) => r.client_id).filter(Boolean))];
-        const sids = [...new Set(reqRows.map((r) => r.scheduled_by).filter(Boolean))];
-        const cn = new Map<string, string>();
-        const sn = new Map<string, string>();
-        if (cids.length) { const { data: cl } = await supabase.from('clients').select('id, first_name, last_name').in('id', cids); (cl ?? []).forEach((c: any) => cn.set(c.id, fullName(c))); }
-        if (sids.length) { const { data: sp } = await supabase.from('profiles').select('id, first_name, last_name').in('id', sids); (sp ?? []).forEach((p: any) => sn.set(p.id, fullName(p))); }
-        requests = reqRows.map((r) => ({ id: r.id, clientId: r.client_id ?? null, clientName: (r.client_id && cn.get(r.client_id)) || '—', date: r.date ?? null, time: r.time ?? null, address: r.address ?? null, notes: r.notes ?? null, scheduledByName: (r.scheduled_by && sn.get(r.scheduled_by)) || null }));
-      }
-
-      const docCompleted = assessments.filter((a) => a.status === 'completed');
-      const reviewPending = completedList.filter((a) => a.managerReview === null);
-      return {
-        taskNotScheduled, taskScheduled, taskOnHold, assessments, reschedules, requests,
-        review: { pending: reviewPending, all: completedList, approvedCount: completedList.filter((a) => a.managerReview === 'approved').length, notApprovedCount: completedList.filter((a) => a.managerReview === 'not_approved').length },
-        counts: {
-          taskPending: pending.length,
-          notScheduled: taskNotScheduled.length,
-          scheduled: taskScheduled.length,
-          assessScheduled: assessments.filter((a) => a.stage === 'scheduled').length,
-          holds: taskOnHold.length,
-          reschedules: reschedules.length,
-          requests: requests.length,
-          reviewPending: reviewPending.length,
-          total: assessments.length,
-          completed: docCompleted.length,
-          overdue: assessments.filter((a) => a.validityOverdue).length,
-        },
-      };
+      const pending: PendingClient[] = cls
+        .filter((c) => !done.has(c.id)) // drop completed QHPs
+        .map((c) => {
+          const rec = bookingOf[c.id];
+          const hold = holdMap.get(c.id);
+          return {
+            clientId: c.id, name: fullName(c), phone: c.phone ?? null, joinedAt: c.created_at,
+            hasQHP: !!rec, assessmentId: rec?.id ?? null, assessmentDate: rec?.date ?? null, assessmentTime: rec?.time ?? null,
+            holdReason: hold?.reason ?? null, holdOverdue: hold?.overdue ?? false, holdResolvingAt: hold?.resolvingAt ?? null,
+            opsPrefs: prefsMap.get(c.id) ?? null,
+            bookedByName: bookedMap.get(c.id)?.name ?? null,
+            bookedByRole: bookedMap.get(c.id)?.role ?? null,
+          };
+        });
+      return { ...bucketTaskPending(pending, [...holdMap.keys()]), taskPending: pending.length };
     },
   });
+}
+
+/* 2. The inbox: reschedule requests, scheduling requests and the two numbers on the tab buttons. Small, refreshed
+      every 30 seconds (the web polls the reschedule requests at 30 seconds). */
+export type QhpInboxData = { reschedules: QhpReschedule[]; requests: QhpRequest[]; totalBookings: number | null; reviewPending: number | null };
+export function useQhpManagerInbox(enabled: boolean) {
+  const uid = useUid();
+  return useQuery({
+    queryKey: ['qhp-manager', 'inbox', uid],
+    enabled,
+    staleTime: 30_000,
+    refetchInterval: 30_000,
+    queryFn: async (): Promise<QhpInboxData> => {
+      const { data: rr, error: rrErr } = await net(
+        supabase.from('coach_assessment').select('id, client_name, coach_id, assessment_date, assessment_time, reschedule_status, reschedule_data').eq('reschedule_status', 'pending').limit(300),
+        'QHP reschedule requests',
+      );
+      if (rrErr) throw rrErr;
+      const resRows = (rr ?? []) as any[];
+      const names = await profileNames([...new Set(resRows.map((r) => r.coach_id).filter(Boolean))] as string[]);
+      const reschedules = qhpReschedulesOf(resRows, names);
+
+      let requests: QhpRequest[] = [];
+      const { data: qs, error: qsErr } = await net(
+        supabase.from('qhp_schedule').select('id, client_id, scheduled_by, date, time, address, notes').eq('status', 'pending').order('date', { ascending: true }).limit(200),
+        'QHP scheduling requests',
+      );
+      if (qsErr) throw qsErr;
+      const reqRows = (qs ?? []) as any[];
+      if (reqRows.length) {
+        const cids = [...new Set(reqRows.map((r) => r.client_id).filter(Boolean))] as string[];
+        const sids = [...new Set(reqRows.map((r) => r.scheduled_by).filter(Boolean))] as string[];
+        const cn: Record<string, string> = {};
+        for (const part of idChunks(cids, 200)) {
+          const { data: cl } = await net(supabase.from('clients').select('id, first_name, last_name').in('id', part), 'QHP request clients');
+          (cl ?? []).forEach((c: any) => { cn[c.id] = fullName(c); });
+        }
+        const sn = sids.length ? await profileNames(sids) : {};
+        requests = reqRows.map((r) => ({ id: r.id, clientId: r.client_id ?? null, clientName: (r.client_id && cn[r.client_id]) || '—', date: r.date ?? null, time: r.time ?? null, address: r.address ?? null, notes: r.notes ?? null, scheduledByName: (r.scheduled_by && sn[r.scheduled_by]) || null }));
+      }
+
+      // The numbers on the Manager and QHP Review buttons, as counts only (the rows load when a tab is opened).
+      let totalBookings: number | null = null;
+      let reviewPending: number | null = null;
+      try {
+        const [t, v] = await Promise.all([
+          net(supabase.from('coach_assessment').select('id', { count: 'exact', head: true }), 'QHP count'),
+          net(supabase.from('coach_assessment').select('id', { count: 'exact', head: true }).gte('completed', new Date(QHP_REVIEW_CUTOFF).toISOString()).or('qhp_manager.is.null,qhp_manager.not.in.(approved,not_approved)'), 'QHP review count'),
+        ]);
+        if (!t.error) totalBookings = t.count ?? null;
+        if (!v.error) reviewPending = v.count ?? null;
+      } catch { /* the buttons then show no number until their tab is opened */ }
+      return { reschedules, requests, totalBookings, reviewPending };
+    },
+  });
+}
+
+/* 3. Every booking, for the Manager list / calendar and QHP Review. Asked only when one of those tabs is open and
+      NOT repeated on a timer (it is thousands of rows); any change made on this phone refreshes it. Short rows
+      only, plus the ids of the bookings that have data. */
+export type QhpAllBookingsData = { assessments: QhpAssessment[] };
+export function useQhpAllBookings(enabled: boolean) {
+  const uid = useUid();
+  return useQuery({
+    queryKey: ['qhp-manager', 'bookings', uid],
+    enabled,
+    staleTime: 60_000,
+    queryFn: async (): Promise<QhpAllBookingsData> => {
+      const [rows, dataIdRows] = await Promise.all([
+        pageAll((p) => supabase.from('coach_assessment').select(QHP_BOOKING_COLUMNS).order('assessment_date', { ascending: false, nullsFirst: false }).range(p * 1000, p * 1000 + 999), 'QHP bookings'),
+        pageAll((p) => supabase.from('coach_assessment').select('id').or(QHP_HAS_DATA_FILTER).range(p * 1000, p * 1000 + 999), 'QHP bookings with data'),
+      ]);
+      const names = await profileNames([...new Set(rows.map((r: any) => r.coach_id).filter(Boolean))] as string[]);
+      return { assessments: toQhpAssessments(rows, dataIdRows.map((r: any) => r.id), names) };
+    },
+  });
+}
+
+/* 4. Active clients who had a session in the last 45 days: only the "Overdue" tile and filter of the Manager tab
+      use it, so it is asked only while that tab is open, and kept for five minutes. */
+export function useQhpRecentActiveClients(enabled: boolean) {
+  const uid = useUid();
+  return useQuery({
+    queryKey: ['qhp-manager', 'recent-clients', uid],
+    enabled,
+    staleTime: 5 * 60_000,
+    queryFn: async (): Promise<string[]> => {
+      const cutoff45 = new Date(Date.now() - 45 * 86_400_000).toISOString();
+      const [activeRows, sessionRows] = await Promise.all([
+        pageAll((p) => supabase.from('clients').select('id').or('status.eq.active,status.is.null').range(p * 1000, p * 1000 + 999), 'Active clients'),
+        pageAll((p) => supabase.from('training_sessions').select('client_id').gte('scheduled_at', cutoff45).neq('status', 'cancelled').range(p * 1000, p * 1000 + 999), 'Recent sessions', 12),
+      ]);
+      const recent = new Set(sessionRows.map((r: any) => r.client_id).filter(Boolean));
+      return activeRows.map((r: any) => r.id).filter((id: string) => recent.has(id));
+    },
+  });
+}
+
+/** The page's data put together, in the shape the screen has always read. Every part that has not arrived yet is
+    empty, so the page is on screen at once and each tab shows its own loading line. */
+export function useQhpManagerView(enabled: boolean, tab: string) {
+  const taskQ = useQhpTaskPending(enabled);
+  const inboxQ = useQhpManagerInbox(enabled);
+  const allQ = useQhpAllBookings(enabled && (tab === 'manager' || tab === 'review'));
+  const recentQ = useQhpRecentActiveClients(enabled && tab === 'manager');
+  const d = React.useMemo((): QhpManagerData => {
+    const task = taskQ.data;
+    const inbox = inboxQ.data;
+    const assessments = markValidityOverdue(allQ.data?.assessments ?? [], recentQ.data ?? null);
+    const review = qhpReviewLists(assessments);
+    const tiles = qhpBookingCounts(assessments);
+    const reschedules = inbox?.reschedules ?? [];
+    const requests = inbox?.requests ?? [];
+    return {
+      taskNotScheduled: task?.taskNotScheduled ?? [], taskScheduled: task?.taskScheduled ?? [], taskOnHold: task?.taskOnHold ?? [],
+      assessments, reschedules, requests, review,
+      counts: {
+        taskPending: task?.taskPending ?? 0,
+        notScheduled: task?.taskNotScheduled.length ?? 0,
+        scheduled: task?.taskScheduled.length ?? 0,
+        assessScheduled: tiles.assessScheduled,
+        holds: task?.taskOnHold.length ?? 0,
+        reschedules: reschedules.length,
+        requests: requests.length,
+        reviewPending: allQ.data ? review.pending.length : inbox?.reviewPending ?? 0,
+        total: allQ.data ? tiles.total : inbox?.totalBookings ?? 0,
+        completed: tiles.completed,
+        overdue: tiles.overdue,
+      },
+    };
+  }, [taskQ.data, inboxQ.data, allQ.data, recentQ.data]);
+  return { d, taskQ, inboxQ, allQ, recentQ };
 }
 
 /* Quick-add HeartMath to a completed QHP (web AddHeartMathDialog): find the FIRST data
@@ -744,45 +789,53 @@ export function useQhpTotals(enabled: boolean) {
 
 /* ============ Dashboard alerts (web OnboardingAlertBanner + TrainerQHPInProgressAlert) ============ */
 
-/* QHP Manager: booked clients with no assessor assigned yet (assign asap).
-   leads 'QHP Booked' (gated RPC) → active clients since cutoff → drop clients
-   whose assessment has data OR already has a coach_id. */
-export type AssignAssessorAlert = { count: number; names: string[] };
-export function useQhpAssignAssessorAlert(enabled: boolean) {
-  // Key MUST be user-scoped: the persisted cache otherwise hydrates a QHP manager's
-  // cached alert for every account that later signs in on the same device (the
-  // disabled query still returns cached data).
-  const { session } = useAuth();
+/* QHP manager: QHPs that are not scheduled yet (20 Nov 2026, owner: "any QHP which is not scheduled yet, from
+   today 7 am, show its notification alert"). The same rule and the same four requests as the web card
+   (hub-track src/components/notifications/QHPNotScheduledAlert.tsx; the rule itself is lib/qhpNotScheduled.ts, the
+   web file byte for byte): the lead is in "QHP Booked" (get_qhp_booked_client_ids, because a QHP manager cannot
+   read leads directly), the client is active, the card was created from QHP_NOT_SCHEDULED_ALERT_FROM, there is no
+   booking (a cancelled one does not count) and the QHP is not on hold. Only two small columns of the bookings are
+   read: the assessment data is never downloaded.
+   It replaces useQhpAssignAssessorAlert, whose rule was older and different (start 4 Mar 2026, a cancelled booking
+   still counted, holds were not left out, the three assessment blobs were downloaded just to test for data). */
+export function useQhpNotScheduledAlert(enabled: boolean) {
+  // The key MUST carry the signed-in person's id: the persisted cache otherwise hydrates one QHP manager's alert
+  // for every account that later signs in on the same phone (a disabled query still returns cached data).
+  const uid = useUid();
   return useQuery({
-    queryKey: ['qhp-assign-assessor-alert', session?.user?.id ?? 'anon'],
+    queryKey: ['qhp-not-scheduled-alert', uid, QHP_NOT_SCHEDULED_ALERT_FROM],
     enabled,
-    staleTime: 60_000,
+    staleTime: 30_000,
     refetchInterval: 60_000,
-    queryFn: async (): Promise<AssignAssessorAlert> => {
-      const { data: leadRows } = await supabase.rpc('get_qhp_booked_client_ids');
+    refetchOnMount: 'always',
+    queryFn: async (): Promise<PendingQhpClient[]> => {
+      const { data: leadRows, error: leadErr } = await net(supabase.rpc('get_qhp_booked_client_ids'), 'QHP booked clients');
+      if (leadErr) throw leadErr;
       const leadIds = [...new Set(((leadRows ?? []) as any[]).map((r) => (typeof r === 'string' ? r : r?.client_id)).filter(Boolean))] as string[];
-      if (!leadIds.length) return { count: 0, names: [] };
-      const { data: clients } = await supabase
-        .from('clients')
-        .select('id, first_name, last_name, created_at')
-        .in('id', leadIds)
-        .or('status.eq.active,status.is.null')
-        .gte('created_at', QHP_CLIENT_CUTOFF)
-        .order('created_at', { ascending: true });
-      const cls = (clients ?? []) as any[];
-      if (!cls.length) return { count: 0, names: [] };
-      const { data: assessments } = await supabase
-        .from('coach_assessment')
-        .select('client_id, coach_id, new_client_assessment_data, existing_client_assessment_data, qhp_data')
-        .in('client_id', cls.map((c) => c.id));
-      const excluded = new Set<string>();
-      ((assessments ?? []) as any[]).forEach((a) => {
-        if (!a.client_id) return;
-        if (a.coach_id) excluded.add(a.client_id);
-        if (nonEmpty(a.new_client_assessment_data) || nonEmpty(a.existing_client_assessment_data) || nonEmpty(a.qhp_data)) excluded.add(a.client_id);
-      });
-      const pending = cls.filter((c) => !excluded.has(c.id));
-      return { count: pending.length, names: pending.map((c) => fullName(c)).filter((n) => n !== '—') };
+      if (!leadIds.length) return [];
+
+      const clients: PendingQhpClient[] = [];
+      for (const part of idChunks(leadIds)) {
+        const { data, error } = await net(
+          supabase.from('clients').select('id, first_name, last_name, created_at').in('id', part).or('status.eq.active,status.is.null').gte('created_at', new Date(QHP_NOT_SCHEDULED_ALERT_FROM).toISOString()),
+          'QHP clients',
+        );
+        if (error) throw error;
+        clients.push(...((data ?? []) as PendingQhpClient[]));
+      }
+      if (!clients.length) return [];
+
+      const bookings: PendingQhpBooking[] = [];
+      for (const part of idChunks(clients.map((c) => c.id))) {
+        const { data, error } = await net(supabase.from('coach_assessment').select('client_id, cancelled').in('client_id', part), 'QHP bookings');
+        if (error) throw error;
+        bookings.push(...((data ?? []) as PendingQhpBooking[]));
+      }
+
+      const { data: holds, error: holdErr } = await net(supabase.rpc('get_qhp_holds'), 'QHP holds');
+      if (holdErr) throw holdErr;
+
+      return qhpNotScheduledSince(clients, bookings, ((holds ?? []) as any[]).map((h) => h?.client_id));
     },
   });
 }
