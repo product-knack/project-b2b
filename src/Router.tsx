@@ -593,8 +593,9 @@ export function Router() {
         <OfflineWarmup />
         <PushTokenManager />
         {/* The navigation map is full-bleed: no header, no launcher (14 Oct 2026). */}
-        {route !== 'qhp-navigate' ? <Header /> : null}
-        <TechDeskAlertBanner />
+        {/* WhatsApp (20 Nov 2026) is full screen too: it draws its own top bar with a back arrow. */}
+        {route !== 'qhp-navigate' && route !== 'ops-whatsapp' ? <Header /> : null}
+        {route !== 'ops-whatsapp' ? <TechDeskAlertBanner /> : null}
         <View style={{ flex: 1 }}>
           <ScreenHost route={route} />
         </View>
