@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from './supabase';
 import { invokeWithTimeout } from './withTimeout';
+import { pauseDatesProblem } from './pauseDates';
 
 /* ============ CRM Client Detail — tabs + actions data layer.
    Mirrors the web CRMClientDetails contracts:
@@ -407,8 +408,11 @@ const pauseCommLog = (clientId: string, crmId: string, category: string, remarks
 export function usePauseJourney() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { clientId: string; crmId: string; pauseStart: string; pauseEnd: string | null; reason: string }) => {
+    mutationFn: async (input: { clientId: string; crmId: string; pauseStart: string; pauseEnd: string; reason: string }) => {
       if (!input.reason.trim()) throw new Error('Reason is required');
+      // A pause needs an end date (21 Nov 2026): refused here too, not only on the form.
+      const datesProblem = pauseDatesProblem(input.pauseStart, input.pauseEnd);
+      if (datesProblem) throw new Error(datesProblem);
       const { data: existing } = await supabase
         .from('client_pause_history').select('id').eq('client_id', input.clientId).eq('is_active', true).maybeSingle();
       if (existing) throw new Error('This client already has an active pause.');

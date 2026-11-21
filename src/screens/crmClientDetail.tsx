@@ -44,6 +44,7 @@ import { ServicesButton } from '../components/servicesButton';
 import { useRosterPeople } from '../lib/rosterQueries';
 import * as Clipboard from 'expo-clipboard';
 import { friendlyError } from '../lib/friendlyError';
+import { isYmd, pauseDatesProblem, pauseEndAfter } from '../lib/pauseDates';
 import { SessionCodeRow } from '../components/sessionCodeApproval';
 
 /* ============ CRM Client Detail — full web-parity page: 11 tabs + action rail.
@@ -1910,21 +1911,17 @@ function PauseSheet({ visible, onClose, clientId, crmId, activePause }: { visibl
   const [endDate, setEndDate] = React.useState('');
   const [reason, setReason] = React.useState('');
   React.useEffect(() => { if (visible && !activePause) { setStartDate(todayYmd); setEndDate(''); setReason(''); } }, [visible]);
-  const ymdRe = /^\d{4}-\d{2}-\d{2}$/;
-  const validYmd = (s: string) => ymdRe.test(s) && !isNaN(new Date(`${s}T00:00:00Z`).getTime());
-  const startOk = validYmd(startDate);
-  const endOk = !endDate.trim() || (validYmd(endDate) && endDate >= startDate);
-  const canSubmit = startOk && endOk && !!reason.trim() && !pauseM.isPending;
-  // Quick chips fill the END date relative to the chosen start date.
-  const fillEnd = (days: number | null) => {
-    if (days == null) { setEndDate(''); return; }
-    const base = validYmd(startDate) ? new Date(`${startDate}T00:00:00Z`) : new Date();
-    setEndDate(new Date(base.getTime() + days * 864e5).toISOString().slice(0, 10));
-  };
+  // A pause needs an end date (21 Nov 2026, the same rule as the web: src/lib/pauseDates.ts).
+  const startOk = isYmd(startDate);
+  const datesProblem = pauseDatesProblem(startDate, endDate);
+  const endShown = !!endDate.trim() && startOk && !!datesProblem;
+  const canSubmit = !datesProblem && !!reason.trim() && !pauseM.isPending;
+  // Quick chips fill the END date relative to the chosen start date (today when the start is not a date yet).
+  const fillEnd = (days: number) => setEndDate(pauseEndAfter(startOk ? startDate : todayYmd, days));
   const submit = async () => {
     if (!crmId || !canSubmit) return;
     try {
-      await pauseM.mutateAsync({ clientId, crmId, pauseStart: startDate, pauseEnd: endDate.trim() || null, reason });
+      await pauseM.mutateAsync({ clientId, crmId, pauseStart: startDate.trim(), pauseEnd: endDate.trim(), reason });
       setReason(''); onClose();
     } catch (e: any) { Alert.alert("Couldn't pause", friendlyError(e, 'Try again.')); }
   };
@@ -1961,17 +1958,17 @@ function PauseSheet({ visible, onClose, clientId, crmId, activePause }: { visibl
             autoCorrect={false} keyboardType="numbers-and-punctuation" maxLength={10}
             style={[INPUT, { fontFamily: F.mono }, startDate && !startOk ? { borderColor: hexA(C.red, 0.5) } : null]}
           />
-          <Mono style={{ fontSize: 8.5, letterSpacing: 0.7, color: C.muted3 }}>PAUSE END DATE (OPTIONAL)</Mono>
+          <Mono style={{ fontSize: 8.5, letterSpacing: 0.7, color: C.muted3 }}>PAUSE END DATE * (YYYY-MM-DD)</Mono>
           <TextInput
-            value={endDate} onChangeText={setEndDate} placeholder="Leave empty if unknown" placeholderTextColor={C.muted3}
+            value={endDate} onChangeText={setEndDate} placeholder="Required: the last day of the pause" placeholderTextColor={C.muted3}
             autoCorrect={false} keyboardType="numbers-and-punctuation" maxLength={10}
-            style={[INPUT, { fontFamily: F.mono }, endDate && !endOk ? { borderColor: hexA(C.red, 0.5) } : null]}
+            style={[INPUT, { fontFamily: F.mono }, endShown ? { borderColor: hexA(C.red, 0.5) } : null]}
           />
-          {endDate && validYmd(endDate) && endDate < startDate ? (
-            <Body style={{ fontSize: 10.5, color: C.red }}>End date must be on or after the start date.</Body>
+          {endShown ? (
+            <Body style={{ fontSize: 10.5, color: C.red }}>{datesProblem}</Body>
           ) : null}
           <View style={{ flexDirection: 'row', gap: 6 }}>
-            {([[7, '1 week'], [14, '2 weeks'], [30, '1 month'], [null, 'Open-ended']] as [number | null, string][]).map(([v, lbl]) => (
+            {([[7, '1 week'], [14, '2 weeks'], [30, '1 month']] as [number, string][]).map(([v, lbl]) => (
               <AnimChip key={lbl} grow active={false} onPress={() => fillEnd(v)} style={{ alignItems: 'center', paddingVertical: 9, borderRadius: 11, backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: hexA(C.purple, 0.28) }}>
                 <Text style={{ fontFamily: F.bodySemi, fontSize: 10.5, color: C.purple }}>{lbl}</Text>
               </AnimChip>
@@ -1979,7 +1976,7 @@ function PauseSheet({ visible, onClose, clientId, crmId, activePause }: { visibl
           </View>
           <Mono style={{ fontSize: 8.5, letterSpacing: 0.7, color: C.muted3 }}>REASON *</Mono>
           <TextInput value={reason} onChangeText={setReason} placeholder="Why is the journey being paused?" placeholderTextColor={C.muted3} multiline style={[INPUT, { minHeight: 60, textAlignVertical: 'top' }]} />
-          <Body style={{ fontSize: 11, color: C.muted3 }}>Pausing logs a communication entry automatically. Any sessions already on the roster stay scheduled — cancel them separately if needed.</Body>
+          <Body style={{ fontSize: 11, color: C.muted3 }}>Pausing logs a communication entry automatically. Any sessions already on the roster stay scheduled. Cancel them separately if needed.</Body>
           <GradientBtn label="Pause Journey" onPress={submit} disabled={!canSubmit} busy={pauseM.isPending} />
         </>
       )}
