@@ -34,6 +34,9 @@ export function useAdminReferrals() {
     queryFn: async (): Promise<Referral[]> => {
       const { data, error } = await supabase.from('referrals')
         .select('*, referrer:profiles!referrer_id(first_name, last_name, role)')
+        // A referral that went to the Leads page (21 Nov 2026) is settled by the lead's own flow, never by an
+        // admin approval: approving it here would credit the member a second time.
+        .is('lead_id', null)
         .order('created_at', { ascending: false });
       if (error) throw new Error(error.message);
       return (data ?? []) as any[] as Referral[];

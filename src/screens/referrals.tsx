@@ -14,6 +14,11 @@ import {
   useCreateReferral, useMyReferralClients, useMyReferrals,
 } from '../lib/referralQueries';
 import { friendlyError } from '../lib/friendlyError';
+import {
+  STAFF_REFERRAL_FLOW_ON, REFERRAL_SAVE_ERROR, referralCounts, referralDay, referralFormProblem, referralSaveResult, referralStatus,
+  MyReferral as StaffReferral, ReferralTone,
+} from '../lib/staffReferral';
+import { useMyStaffReferrals, useSubmitStaffReferral } from '../lib/staffReferralQueries';
 
 /* ============ My Referrals — submit side ============
    Port of the web's TrainerReferrals / DoctorReferrals page (one screen, both
@@ -77,6 +82,33 @@ function ReferralRow({ r }: { r: MyReferral }) {
   );
 }
 
+/* ---------- new flow (21 Nov 2026): one row per referral, the status follows the lead ---------- */
+const TONE_COLOR: Record<ReferralTone, string> = { good: C.green, progress: C.blue, wait: C.gold, muted: C.muted2 };
+
+function StaffReferralRow({ r }: { r: StaffReferral }) {
+  const s = referralStatus(r.status_key);
+  const color = TONE_COLOR[s.tone];
+  const parts = [r.referred_phone, `Added ${fmtDay(r.created_at)}`, r.through_client ? `through ${r.through_client}` : null, r.on_existing_lead ? 'already a lead when you referred' : null].filter(Boolean);
+  return (
+    <View style={{ padding: 13, borderRadius: 15, backgroundColor: 'rgba(0,0,0,0.22)', borderWidth: 1, borderColor: hexA(color, 0.26), gap: 7 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 9 }}>
+        <Body numberOfLines={1} style={{ flex: 1, fontSize: 15, fontFamily: F.bodySemi, color: '#fff' }}>{r.referred_name}</Body>
+        <View style={{ maxWidth: '58%', paddingVertical: 3.5, paddingHorizontal: 10, borderRadius: 12, backgroundColor: hexA(color, 0.14), borderWidth: 1, borderColor: hexA(color, 0.4) }}>
+          <Text style={{ fontFamily: F.bodyBold, fontSize: 10, color, textAlign: 'center' }}>{s.label}</Text>
+        </View>
+      </View>
+      <Body style={{ fontSize: 11.5, color: C.muted2, lineHeight: 16 }}>{parts.join(' · ')}</Body>
+      {s.key === 'converted' && r.converted_on ? <Body style={{ fontSize: 11.5, color: C.green }}>Converted on {referralDay(r.converted_on)}</Body> : null}
+      {r.note ? <Body style={{ fontSize: 12, color: C.muted2, lineHeight: 17 }}>{r.note}</Body> : null}
+    </View>
+  );
+}
+
+const newSaveId = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+  const n = Math.floor(Math.random() * 16);
+  return (c === 'x' ? n : (n & 0x3) | 0x8).toString(16);
+});
+
 /* ---------- add sheet ---------- */
 function AddReferralSheet({ visible, onClose, referrerId }: { visible: boolean; onClose: () => void; referrerId: string }) {
   const insets = useSafeAreaInsets();
@@ -90,11 +122,18 @@ function AddReferralSheet({ visible, onClose, referrerId }: { visible: boolean; 
   const [pickerOpen, setPickerOpen] = React.useState(false);
   const [clientQ, setClientQ] = React.useState('');
   const sentRef = React.useRef(false);
+  // New flow (21 Nov 2026): a phone number, and the referral goes straight to the leads team.
+  const staffM = useSubmitStaffReferral();
+  const [phone, setPhone] = React.useState('');
+  const saveIdRef = React.useRef(newSaveId());
+  const formProblem = STAFF_REFERRAL_FLOW_ON ? referralFormProblem({ name, phone }) : null;
+  const saving = STAFF_REFERRAL_FLOW_ON ? staffM.isPending : createM.isPending;
 
   React.useEffect(() => {
     if (visible) {
       setName(''); setSource(''); setNotes(''); setLinkedId(null);
       setPickerOpen(false); setClientQ(''); sentRef.current = false; createM.reset();
+      setPhone(''); saveIdRef.current = newSaveId(); staffM.reset();
     }
   }, [visible]);
 
@@ -102,12 +141,25 @@ function AddReferralSheet({ visible, onClose, referrerId }: { visible: boolean; 
   const linked = clients.find((c) => c.id === linkedId) ?? null;
   const q = clientQ.trim().toLowerCase();
   const shown = q ? clients.filter((c) => c.name.toLowerCase().includes(q)) : clients;
-  const canSave = !!name.trim() && !createM.isPending;
+  const canSave = STAFF_REFERRAL_FLOW_ON ? !formProblem && !staffM.isPending : !!name.trim() && !createM.isPending;
 
   const submit = () => {
     if (!canSave || sentRef.current) return;
     Keyboard.dismiss();
     sentRef.current = true;
+    if (STAFF_REFERRAL_FLOW_ON) {
+      staffM.mutate({ id: saveIdRef.current, name, phone, note: notes, clientId: linkedId, source }, {
+        onSuccess: (answer) => {
+          const res = referralSaveResult(answer);
+          if (!res.ok) { sentRef.current = false; Alert.alert('Referral not added', res.message); return; }
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+          onClose();
+          Alert.alert('Referral added', res.message);
+        },
+        onError: () => { sentRef.current = false; Alert.alert("Couldn't add the referral", REFERRAL_SAVE_ERROR); },
+      });
+      return;
+    }
     createM.mutate({ referrerId, name, source, linkedClientId: linkedId, notes }, {
       onSuccess: () => { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}); onClose(); },
       onError: (e: any) => { sentRef.current = false; Alert.alert("Couldn't add the referral", friendlyError(e, 'Check your connection and try again.')); },
@@ -136,7 +188,7 @@ function AddReferralSheet({ visible, onClose, referrerId }: { visible: boolean; 
             </Pressable>
           </View>
           <Body style={{ fontSize: 12, color: C.muted2, lineHeight: 17, marginBottom: 12 }}>
-            Admin reviews it. Once approved it counts towards your incentive.
+            {STAFF_REFERRAL_FLOW_ON ? 'Goes straight to the leads team. You are told when it converts.' : 'Admin reviews it. Once approved it counts towards your incentive.'}
           </Body>
 
           <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={{ flexShrink: 1 }} contentContainerStyle={{ gap: 13, paddingBottom: 8 }}>
@@ -145,6 +197,14 @@ function AddReferralSheet({ visible, onClose, referrerId }: { visible: boolean; 
               <TextInput value={name} onChangeText={setName} placeholder="Who did you refer?" placeholderTextColor={C.muted3}
                 accessibilityLabel="Referral name" style={field} />
             </View>
+
+            {STAFF_REFERRAL_FLOW_ON ? (
+              <View style={{ gap: 6 }}>
+                {label('PHONE *')}
+                <TextInput value={phone} onChangeText={setPhone} placeholder="98765 43210" placeholderTextColor={C.muted3}
+                  keyboardType="phone-pad" maxLength={20} accessibilityLabel="Referral phone number" style={field} />
+              </View>
+            ) : null}
 
             <View style={{ gap: 6 }}>
               {label('SOURCE')}
@@ -195,7 +255,7 @@ function AddReferralSheet({ visible, onClose, referrerId }: { visible: boolean; 
 
             <View style={{ gap: 6 }}>
               {label('NOTES')}
-              <TextInput value={notes} onChangeText={setNotes} placeholder="Anything admin should know (optional)" placeholderTextColor={C.muted3}
+              <TextInput value={notes} onChangeText={setNotes} placeholder={STAFF_REFERRAL_FLOW_ON ? 'Anything the leads team should know (optional)' : 'Anything admin should know (optional)'} placeholderTextColor={C.muted3}
                 multiline accessibilityLabel="Notes"
                 style={[field, { minHeight: 76, textAlignVertical: 'top' }]} />
             </View>
@@ -209,12 +269,14 @@ function AddReferralSheet({ visible, onClose, referrerId }: { visible: boolean; 
             <Pressable onPress={submit} disabled={!canSave} accessibilityRole="button" accessibilityLabel="Add referral"
               style={{ flex: 1.4, borderRadius: 12, overflow: 'hidden', opacity: canSave ? 1 : 0.5 }}>
               <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ minHeight: 46, alignItems: 'center', justifyContent: 'center' }}>
-                {createM.isPending ? <ActivityIndicator size="small" color="#fff" />
+                {saving ? <ActivityIndicator size="small" color="#fff" />
                   : <Text style={{ fontFamily: F.bodyBold, fontSize: 13, color: '#fff' }}>Add referral</Text>}
               </LinearGradient>
             </Pressable>
           </View>
-          {!name.trim() ? <Mono style={{ fontSize: 8.5, color: C.faint, textAlign: 'center', marginTop: 7 }}>A NAME IS ALL THAT IS REQUIRED</Mono> : null}
+          {STAFF_REFERRAL_FLOW_ON
+            ? (formProblem && (name.trim() || phone.trim()) ? <Body style={{ fontSize: 11, color: C.muted2, textAlign: 'center', marginTop: 7 }}>{formProblem}</Body> : null)
+            : (!name.trim() ? <Mono style={{ fontSize: 8.5, color: C.faint, textAlign: 'center', marginTop: 7 }}>A NAME IS ALL THAT IS REQUIRED</Mono> : null)}
         </View>
       </View>
     </Modal>
@@ -228,13 +290,55 @@ export function Referrals() {
      shared test account; doing that here would break both directions, since RLS
      is `referrer_id = auth.uid()` on read AND write. */
   const userId = session?.user?.id ?? null;
-  const q = useMyReferrals(userId);
+  const q = useMyReferrals(STAFF_REFERRAL_FLOW_ON ? null : userId);
+  const staffQ = useMyStaffReferrals(STAFF_REFERRAL_FLOW_ON ? userId : null);
   const [addOpen, setAddOpen] = React.useState(false);
 
   if (!session) return <AccessPending />;
 
   const rows = q.data ?? [];
   const n = (s: ReferralStatus) => rows.filter((r) => r.status === s).length;
+
+  // New flow (21 Nov 2026): the status of each referral follows its lead; nothing waits for an admin.
+  if (STAFF_REFERRAL_FLOW_ON) {
+    const mine = staffQ.data ?? [];
+    const counts = referralCounts(mine);
+    return (
+      <Page gap={16} pt={6}>
+        <TitleBlock title="My Referrals" sub="A referral goes straight to the leads team. You are told when it converts." />
+        <Pressable onPress={() => setAddOpen(true)} accessibilityRole="button" accessibilityLabel="Add a referral" style={{ borderRadius: 13, overflow: 'hidden' }}>
+          <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 13 }}>
+            <Icon name="userPlus" size={15} color="#fff" strokeWidth={2.4} />
+            <Text style={{ fontFamily: F.bodyBold, fontSize: 13.5, color: '#fff' }}>Add referral</Text>
+          </LinearGradient>
+        </Pressable>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <StatTile value={counts.converted} label="CONVERTED" color={C.green} />
+          <StatTile value={counts.inProgress} label="IN PROGRESS" color={C.gold} />
+          <StatTile value={counts.notConverted} label="NOT CONVERTED" color={C.ink3} />
+        </View>
+        {staffQ.isPending ? (
+          <View style={{ paddingVertical: 40, alignItems: 'center' }}><ActivityIndicator color={C.orange} /></View>
+        ) : staffQ.isError ? (
+          <Body style={{ fontSize: 12, color: C.red, textAlign: 'center', paddingVertical: 20 }}>{friendlyError(staffQ.error, 'Your referrals could not be loaded. Check your connection and try again.')}</Body>
+        ) : !mine.length ? (
+          <Card style={{ padding: 24, alignItems: 'center', gap: 10 }}>
+            <Icon name="userPlus" size={28} color={C.faint} strokeWidth={1.6} />
+            <Body style={{ fontSize: 12.5, color: C.muted2, textAlign: 'center' }}>Add your first referral: a name and a phone number. The leads team takes it from there.</Body>
+          </Card>
+        ) : (
+          <View style={{ gap: 10 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
+              <Mono style={{ fontSize: 8.5, letterSpacing: 1.2, color: C.muted3 }}>HISTORY</Mono>
+              <View style={{ flex: 1, height: 1, backgroundColor: 'rgba(255,255,255,0.07)' }} />
+            </View>
+            {mine.map((r) => <StaffReferralRow key={r.id} r={r} />)}
+          </View>
+        )}
+        {userId ? <AddReferralSheet visible={addOpen} onClose={() => setAddOpen(false)} referrerId={userId} /> : null}
+      </Page>
+    );
+  }
 
   return (
     <Page gap={16} pt={6}>
