@@ -24,7 +24,7 @@ const OUTBOX_KEY = 'outbox:v1';
 export type OutboxItem = {
   id: string;
   userId?: string;        // who queued it — items never drain (or show) under another account
-  kind: 'workout-log' | 'create-plan' | 'edit-plan' | 'chat-message' | 'location-log' | 'screenshot-log' | 'session-voice-note' | 'nav-track' | 'route-ended' | 'session-otp-verify' | 'summary-listen' | 'summary-listen-progress' | 'library-progress';
+  kind: 'workout-log' | 'create-plan' | 'edit-plan' | 'chat-message' | 'location-log' | 'screenshot-log' | 'session-voice-note' | 'nav-track' | 'route-ended' | 'session-otp-verify' | 'summary-listen' | 'summary-listen-progress' | 'library-progress' | 'crew-plan-message';
   label: string;          // human line for the pending-sync UI
   createdAt: string;      // ORIGINAL device timestamp at submit time
   status: 'pending' | 'syncing' | 'failed';
@@ -344,6 +344,15 @@ async function processItem(item: OutboxItem): Promise<{ linkPending?: boolean } 
     const { submitQueuedProgress } = require('./nucleusProgress');
     await submitQueuedProgress(item.payload);
     qcRef?.invalidateQueries({ queryKey: ['crew-listen-progress'] });
+  } else if (item.kind === 'crew-plan-message') {
+    // My Crew "Add session" (21 Nov 2026): the roster row was saved but its "Manager added ..." chat message
+    // could not be sent. My Crew draws the day from those messages, so the message is sent from here when the
+    // connection is back; it is never posted twice (crewPlanMessageSubmit.ts asks the chat first).
+    const { submitCrewPlanMessage } = require('./crewPlanMessageSubmit');
+    await submitCrewPlanMessage(item.payload);
+    qcRef?.invalidateQueries({ queryKey: ['manager-chat', item.payload?.teamId] });
+    qcRef?.invalidateQueries({ queryKey: ['hod-feed-msgs'] });
+    qcRef?.invalidateQueries({ queryKey: ['mgr-plan-sched'] });
   }
 }
 

@@ -31,7 +31,8 @@ import { listenChipShown } from '../lib/clientHealthSummary';
 import { useMyListenStatuses, prefetchClientHealthSummaries } from '../lib/clientHealthSummaryQueries';
 import { gateFromStatus, rosterPopupKind, nextRosterPopup, rosterPopupText, type RosterPopupKind } from '../lib/clientHealthSummary';
 import { useLocalListensMap } from '../lib/listenLocal';
-import { useIsOnline } from '../lib/offline';
+import { useIsOnline, enqueueOutbox, drainOutbox } from '../lib/offline';
+import { crewPlanMessageItem, crewPlanMessageLabel, crewAddQueuedText, crewAddNotQueuedText, CREW_ADD_SAVED_TITLE, type CrewPlanAddPayload } from '../lib/crewPlanMessage';
 import { friendlyError } from '../lib/friendlyError';
 import { shortNames, shortNameFor } from '../lib/crewNames';
 import { usePlanCover } from '../lib/managerChatQueries';
@@ -1764,6 +1765,8 @@ export function ManagerChat() {
   useManagerChatRealtime(team?.scoreId ?? null);
   const meName = team?.members.find((m) => m.id === meId)?.name ?? 'You';
   const sendM = useSendManagerTeamMessage(meId, meName, dbRole);
+  // A "Manager added" chat message that could not be sent earlier waits in the offline outbox: opening My Crew sends it.
+  React.useEffect(() => { drainOutbox(); }, []);
   // @mention support: match tokens against members' first names.
   const firstNames = React.useMemo(() => new Set((team?.members ?? []).map((m) => m.name.split(' ')[0].toLowerCase())), [team?.members]);
   const myFirst = meName.split(' ')[0].toLowerCase();
@@ -2138,19 +2141,32 @@ export function ManagerChat() {
         qc.invalidateQueries({ queryKey: ['doctor-roster'] });
         if (replaced) qc.invalidateQueries({ queryKey: ['crm-month-roster'] }); // the cancelled booking may sit on a CRM roster view
       } catch (err: any) { Alert.alert('Add failed', friendlyError(err)); return; }
+      // The roster row is saved. Now the chat message, which is what puts the session on the My Crew plan card.
+      const first = addFor.trainerName.split(' ')[0];
+      const addPayload: CrewPlanAddPayload = {
+        date: addFor.date, client_id: clientId, name: clientName, trainer_id: addFor.trainerId, time, modality, schedule_id: scheduleId,
+        ...(replaced ? { forced: true, replaced_schedule_id: replaced.schedule_id ?? null, replaced_trainer_id: replaced.trainer_id ?? null, replaced_trainer_name: replaced.trainer_name ?? null } : {}),
+      };
+      const addBody = `Manager added ${clientName} at ${fmt12h(time)}${modality ? ` · ${modality}` : ''} to ${first}'s plan (${istDayLabel(addFor.date)})${replaced ? ` · replaced ${replaced.trainer_name ?? 'another trainer'}'s booking at that time` : ''}`;
+      const teamId = addFor.scoreId;
+      let sent = false;
       try {
-        const first = addFor.trainerName.split(' ')[0];
-        await sendM.mutateAsync({
-          scoreId: addFor.scoreId, kind: 'plan_add',
-          payload: {
-            date: addFor.date, client_id: clientId, name: clientName, trainer_id: addFor.trainerId, time, modality, schedule_id: scheduleId,
-            ...(replaced ? { forced: true, replaced_schedule_id: replaced.schedule_id ?? null, replaced_trainer_id: replaced.trainer_id ?? null, replaced_trainer_name: replaced.trainer_name ?? null } : {}),
-          },
-          body: `Manager added ${clientName} at ${fmt12h(time)}${modality ? ` · ${modality}` : ''} to ${first}'s plan (${istDayLabel(addFor.date)})${replaced ? ` · replaced ${replaced.trainer_name ?? 'another trainer'}'s booking at that time` : ''}`,
-        });
-        setAddFor(null);
+        await sendM.mutateAsync({ scoreId: teamId, kind: 'plan_add', payload: addPayload, body: addBody });
+        sent = true;
+      } catch { /* handled just below: the message is kept on the phone */ }
+      // Whatever happened to the message, the session IS saved: the sheet closes (21 Nov 2026). Before, a failed
+      // message left the sheet open with no word, and a second tap answered "Already scheduled".
+      setAddFor(null);
+      if (sent) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      } catch { /* rollback visible */ }
+        return;
+      }
+      const queued = crewPlanMessageItem(teamId, meId, addPayload, addBody);
+      let kept = false;
+      if (queued) {
+        try { await enqueueOutbox('crew-plan-message', crewPlanMessageLabel(addPayload), queued); kept = true; } catch { kept = false; }
+      }
+      Alert.alert(CREW_ADD_SAVED_TITLE, kept ? crewAddQueuedText(clientName) : crewAddNotQueuedText(clientName));
     } finally { setAddBusy(false); }
   };
   // Physio HOD paths (SECURITY DEFINER RPCs post the team messages themselves).
