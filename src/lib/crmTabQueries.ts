@@ -114,11 +114,13 @@ export function useCrmLeaves() {
     queryFn: async (): Promise<LeaveRow[]> => {
       const { data, error } = await supabase
         .from('leave_request')
-        .select('id, trainer_id, start_date, start_time, end_date, end_time, reason, created_at, profiles:trainer_id(first_name, last_name)')
+        .select('id, trainer_id, start_date, start_time, end_date, end_time, reason, created_at, details, profiles:trainer_id(first_name, last_name)')
         .order('start_date', { ascending: false });
       if (error) throw new Error(error.message);
       const now = Date.now();
-      return ((data ?? []) as any[]).map((l) => {
+      // A CCM's leave request lives in the same table since 23 Nov 2026 (details.kind 'ccm', web screens of
+      // its own): this is the list of trainers' leaves, so it is left out (web useCRMLeaveRequests rule).
+      return ((data ?? []) as any[]).filter((l) => l?.details?.kind !== 'ccm').map((l) => {
         const start = new Date(`${l.start_date}T${l.start_time || '00:00:00'}+05:30`).getTime();
         const end = new Date(`${l.end_date}T${l.end_time || '23:59:59'}+05:30`).getTime();
         const status: LeaveRow['status'] = now > end ? 'completed' : now >= start ? 'active' : 'upcoming';
