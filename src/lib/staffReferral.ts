@@ -111,6 +111,22 @@ export interface ReferralForm {
 
 export type ReferralFormField = "name" | "phone" | "client" | "relation";
 
+/**
+ * Trainers and CRMs give the referral of one of their OWN clients only (owner, 24 Nov 2026); the server
+ * refuses any other client from them. Other departments have no clients of their own and pick any client by name.
+ */
+export function referralOwnClientsOnly(role: string | null | undefined): boolean {
+  const r = String(role ?? "").toLowerCase();
+  return r === "trainer" || r === "crm";
+}
+
+/** The words around the client box, by who is filling the form. */
+export function referralClientWords(ownOnly: boolean): { search: string; hint: string; emptyTyped: string; emptyIdle: string } {
+  return ownOnly
+    ? { search: "Search your clients", hint: "Only your own clients can be chosen.", emptyTyped: "None of your clients has that name.", emptyIdle: "You have no clients assigned yet, so a referral cannot be added from here." }
+    : { search: "Search a client by name", hint: "Your clients are listed. Type a name to search every client.", emptyTyped: "No client found with that name.", emptyIdle: "Type at least two letters of the client's name to search." };
+}
+
 /** The first thing missing on the form: which field, and the sentence to show. Null when it can be sent. */
 export function referralFormIssue(form: ReferralForm): { field: ReferralFormField; message: string } | null {
   const name = (form.name ?? "").replace(/\s+/g, " ").trim();
@@ -135,6 +151,7 @@ const REFUSED: Record<string, string> = {
   name: "Enter the person's name.",
   phone: "Enter a valid phone number.",
   client: "Choose the client whose referral this is.",
+  client_not_yours: "Choose one of your own clients.",
   relation: "Choose how this person is related to the client.",
   member: "This person is already a member, so a referral cannot be added.",
   limit: "You have added many referrals today. Try again tomorrow.",

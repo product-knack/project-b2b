@@ -15,8 +15,8 @@ import {
 } from '../lib/referralQueries';
 import { friendlyError } from '../lib/friendlyError';
 import {
-  STAFF_REFERRAL_FLOW_ON, REFERRAL_SAVE_ERROR, REFERRAL_RELATIONS, RELATION_OTHER, istDay, referralCounts, referralDay,
-  referralDuplicateLine, referralFormProblem, referralSaveResult, referralStatus, referralTracker, relationText,
+  STAFF_REFERRAL_FLOW_ON, REFERRAL_SAVE_ERROR, REFERRAL_RELATIONS, RELATION_OTHER, istDay, referralClientWords, referralCounts, referralDay,
+  referralDuplicateLine, referralFormProblem, referralOwnClientsOnly, referralSaveResult, referralStatus, referralTracker, relationText,
   MyReferral as StaffReferral, ReferralTone,
 } from '../lib/staffReferral';
 import { useMyStaffReferrals, useReferralClientChoices, useSubmitStaffReferral } from '../lib/staffReferralQueries';
@@ -155,6 +155,9 @@ const newSaveId = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, 
 /* ---------- add sheet ---------- */
 function AddReferralSheet({ visible, onClose, referrerId }: { visible: boolean; onClose: () => void; referrerId: string }) {
   const insets = useSafeAreaInsets();
+  // A trainer and a CRM pick among their own clients only (24 Nov 2026); the server refuses any other.
+  const { dbRole } = useAuth();
+  const clientWords = referralClientWords(referralOwnClientsOnly(dbRole));
   const kbH = useKeyboardHeight();
   const clientsQ = useMyReferralClients(visible && !STAFF_REFERRAL_FLOW_ON ? referrerId : null);
   const createM = useCreateReferral();
@@ -286,7 +289,7 @@ function AddReferralSheet({ visible, onClose, referrerId }: { visible: boolean; 
                 <View style={{ borderRadius: 11, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', backgroundColor: '#14100D' }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 9, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.06)' }}>
                     <Icon name="search" size={13} color={C.muted3} strokeWidth={2} />
-                    <TextInput value={clientQ} onChangeText={setClientQ} placeholder={STAFF_REFERRAL_FLOW_ON ? 'Search a client by name' : 'Search your clients'} placeholderTextColor={C.muted3}
+                    <TextInput value={clientQ} onChangeText={setClientQ} placeholder={STAFF_REFERRAL_FLOW_ON ? clientWords.search : 'Search your clients'} placeholderTextColor={C.muted3}
                       autoCorrect={false} accessibilityLabel="Search clients"
                       style={{ flex: 1, fontFamily: F.body, fontSize: 13.5, color: '#fff', padding: 0 }} />
                   </View>
@@ -297,7 +300,7 @@ function AddReferralSheet({ visible, onClose, referrerId }: { visible: boolean; 
                       <Body style={{ fontSize: 12, color: C.red, textAlign: 'center', paddingVertical: 16, paddingHorizontal: 12 }}>The client list did not load. Check your connection, then close and open this again.</Body>
                     ) : !shown.length ? (
                       <Body style={{ fontSize: 12, color: C.muted3, textAlign: 'center', paddingVertical: 16, paddingHorizontal: 12 }}>
-                        {STAFF_REFERRAL_FLOW_ON && q.length < 2 ? "Type at least two letters of the client's name to search." : 'No clients match.'}
+                        {STAFF_REFERRAL_FLOW_ON ? (q ? clientWords.emptyTyped : clientWords.emptyIdle) : 'No clients match.'}
                       </Body>
                     ) : shown.map((c: ReferralClientOption) => {
                       const on = c.id === linkedId;
