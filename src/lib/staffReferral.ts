@@ -5,6 +5,11 @@
  * lead, the member follows it in "My referrals" (get_my_referrals), and Ops decides the credit when more than
  * one person has a claim (get_referral_credit_queue / decide_referral_credit).
  *
+ * One standard for every department (24 Nov 2026): the name, the phone number, the client whose referral it
+ * is and the relation to that client are all required; the member follows four steps (Lead submitted, QHP
+ * booked, QHP done, Converted on the payment day); a number submitted more than once is one lead, marked
+ * Duplicate, with every submission's details kept for the leads team.
+ *
  * Pure functions only. The same file byte for byte on the web (src/lib/staffReferral.ts) and in the app
  * (odds-app/src/lib/staffReferral.ts).
  */
@@ -52,6 +57,16 @@ export interface MyReferral {
   converted_on: string | null;
   note: string | null;
   on_existing_lead: boolean;
+  /** The relation of the referred person to the client (24 Nov 2026). */
+  relation?: string | null;
+  /** The lead's stage as the leads team has it. */
+  lead_stage?: string | null;
+  /** YYYY-MM-DD: the day the QHP was booked, the day it was done, the day the payment was received. */
+  qhp_booked_on?: string | null;
+  qhp_done_on?: string | null;
+  paid_on?: string | null;
+  /** How many OTHER members referred the same person. */
+  others?: number | null;
 }
 
 /** The three numbers above the list. */
@@ -70,20 +85,48 @@ export function referralCounts(rows: Array<Pick<MyReferral, "status_key">> | nul
 
 export const digitsOf = (value: string | null | undefined): string => (value ?? "").replace(/[^0-9]/g, "");
 
+/** How the referred person is related to the client whose referral it is. "Other" asks for a few words. */
+export const REFERRAL_RELATIONS = ["Spouse / Partner", "Parent", "Child", "Sibling", "Relative", "Friend", "Colleague", "Neighbour", "Other"] as const;
+export const RELATION_OTHER = "Other";
+
+/** The relation as it is saved: the chosen one, or "Other: <the words typed>". "" while it is not complete. */
+export function relationText(choice: string | null | undefined, other?: string | null): string {
+  const c = (choice ?? "").trim();
+  if (!c) return "";
+  if (c !== RELATION_OTHER) return c;
+  const typed = (other ?? "").replace(/\s+/g, " ").trim();
+  return typed.length >= 2 ? `Other: ${typed}`.slice(0, 80) : "";
+}
+
 export interface ReferralForm {
   name: string;
   phone: string;
   note?: string;
+  /** The client whose referral this is. */
+  clientId?: string | null;
+  /** One of REFERRAL_RELATIONS, and the words typed when it is "Other". */
+  relation?: string | null;
+  relationOther?: string | null;
+}
+
+export type ReferralFormField = "name" | "phone" | "client" | "relation";
+
+/** The first thing missing on the form: which field, and the sentence to show. Null when it can be sent. */
+export function referralFormIssue(form: ReferralForm): { field: ReferralFormField; message: string } | null {
+  const name = (form.name ?? "").replace(/\s+/g, " ").trim();
+  if (name.length < 2) return { field: "name", message: "Enter the person's name." };
+  const digits = digitsOf(form.phone);
+  if (!digits) return { field: "phone", message: "Enter the person's phone number." };
+  if (digits.length < 8 || digits.length > 15) return { field: "phone", message: "Enter a valid phone number." };
+  if (!form.clientId) return { field: "client", message: "Choose the client whose referral this is." };
+  if (!(form.relation ?? "").trim()) return { field: "relation", message: "Choose how this person is related to the client." };
+  if (!relationText(form.relation, form.relationOther)) return { field: "relation", message: "Write how this person is related to the client." };
+  return null;
 }
 
 /** What is missing on the form, in plain words, or null when it can be sent. */
 export function referralFormProblem(form: ReferralForm): string | null {
-  const name = (form.name ?? "").replace(/\s+/g, " ").trim();
-  if (name.length < 2) return "Enter the person's name.";
-  const digits = digitsOf(form.phone);
-  if (!digits) return "Enter the person's phone number.";
-  if (digits.length < 8 || digits.length > 15) return "Enter a valid phone number.";
-  return null;
+  return referralFormIssue(form)?.message ?? null;
 }
 
 const REFUSED: Record<string, string> = {
@@ -91,6 +134,8 @@ const REFUSED: Record<string, string> = {
   not_staff: "Only team members can add a referral here.",
   name: "Enter the person's name.",
   phone: "Enter a valid phone number.",
+  client: "Choose the client whose referral this is.",
+  relation: "Choose how this person is related to the client.",
   member: "This person is already a member, so a referral cannot be added.",
   limit: "You have added many referrals today. Try again tomorrow.",
   not_saved: "The referral could not be saved. Try again.",
@@ -98,7 +143,7 @@ const REFUSED: Record<string, string> = {
 
 const SAVED: Record<string, string> = {
   new_lead: "Referral sent to the leads team.",
-  added_to_lead: "This person is already a lead. Your referral was added to it.",
+  added_to_lead: "This number is already with the leads team. Your referral was added to it and marked as a duplicate.",
   already_yours: "You have already referred this person.",
 };
 
@@ -124,7 +169,94 @@ export function referralErrorText(e: unknown, fallback: string = REFERRAL_SAVE_E
   return m ? m[1].trim() : fallback;
 }
 
+// ---------------------------------------------------------------- the member's tracker
+
+/** The day in India (YYYY-MM-DD) of a moment given as an ISO text; "" when it cannot be read. */
+export function istDay(iso: string | null | undefined): string {
+  const ms = Date.parse(String(iso ?? ""));
+  if (!Number.isFinite(ms)) return "";
+  return new Date(ms + 330 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+export type TrackerStepKey = "submitted" | "qhp_booked" | "qhp_done" | "converted";
+/** done = passed, now = where the referral stands, todo = not reached. */
+export type TrackerStepState = "done" | "now" | "todo";
+export interface TrackerStep { key: TrackerStepKey; label: string; state: TrackerStepState; /** "21 Nov 2026" or "". */ day: string }
+export interface ReferralTracker {
+  steps: TrackerStep[];
+  /** How many of the four steps are reached (1 to 4). */
+  reached: number;
+  /** The referral ended without converting. */
+  closed: boolean;
+  /** One line under the steps; "" when the steps say it all. */
+  note: string;
+}
+
+const TRACKER_LABELS: Array<[TrackerStepKey, string]> = [
+  ["submitted", "Lead submitted"], ["qhp_booked", "QHP booked"], ["qhp_done", "QHP done"], ["converted", "Converted"],
+];
+
+/**
+ * The four steps a member follows for one referral. The conversion day is the day the payment was received.
+ * A referral that ended without converting keeps the steps it had reached.
+ */
+export function referralTracker(r: MyReferral): ReferralTracker {
+  const s = referralStatus(r.status_key).key;
+  const convertedFamily = s === "converted" || s === "credit_deciding" || s === "credited_other" || s === "no_credit" || s === "approved";
+  const closed = s === "not_converted" || s === "rejected";
+  let reached = 1;
+  if (convertedFamily) reached = 4;
+  else if (s === "qhp_done" || s === "payment_awaited") reached = 3;
+  else if (s === "qhp_booked") reached = 2;
+  else if (closed) reached = r.qhp_done_on ? 3 : r.qhp_booked_on ? 2 : 1;
+  const days = [
+    referralDay(istDay(r.created_at)),
+    referralDay(r.qhp_booked_on),
+    referralDay(r.qhp_done_on),
+    convertedFamily ? referralDay(r.paid_on) || referralDay(r.converted_on) : "",
+  ];
+  const steps = TRACKER_LABELS.map(([key, label], i): TrackerStep => ({
+    key, label,
+    state: i < reached - 1 ? "done" : i === reached - 1 ? (closed ? "done" : "now") : "todo",
+    day: i < reached ? days[i] : "",
+  }));
+  let note = "";
+  if (s === "not_converted") note = "Not converted. The leads team closed this lead.";
+  else if (s === "rejected") note = "This referral was not accepted.";
+  else if (s === "payment_awaited") note = "Enrolled. Waiting for the payment.";
+  else if (s === "credit_deciding") note = "Converted. The referral credit is being decided.";
+  else if (s === "credited_other") note = "Converted. The referral credit went to another member.";
+  else if (s === "no_credit") note = "Converted. No referral credit was given.";
+  else if (s === "waiting_admin") note = "Waiting for the admin.";
+  else if (s === "in_progress" && r.lead_stage && r.lead_stage !== "New") note = `With the leads team: ${r.lead_stage}.`;
+  else if (s === "in_progress") note = "With the leads team.";
+  return { steps, reached, closed, note };
+}
+
+/** A referral of a person someone else also referred, or who was already a lead: the words for the tag, or "". */
+export function referralDuplicateLine(r: Pick<MyReferral, "others" | "on_existing_lead">): string {
+  const others = Number(r.others ?? 0);
+  if (others === 1) return "Also referred by 1 other member";
+  if (others > 1) return `Also referred by ${others} other members`;
+  return r.on_existing_lead ? "Already a lead when you referred" : "";
+}
+
 // ---------------------------------------------------------------- the Leads page tag
+
+/** One member's submission of a lead, as the leads team reads it. */
+export interface LeadReferralEntry {
+  /** "Raj Thakur (Trainer)". */
+  member: string;
+  /** The day it was submitted, "24 Nov 2026" ("" when not known). */
+  day: string;
+  /** The client whose referral it is, the relation to that client, the member's note, the name as submitted. */
+  client: string | null;
+  relation: string | null;
+  note: string | null;
+  referredName: string | null;
+  /** Submitted when the number was already a lead. */
+  duplicate: boolean;
+}
 
 export interface LeadReferralInfo {
   /** How many times team members referred this lead. */
@@ -133,6 +265,10 @@ export interface LeadReferralInfo {
   members: string[];
   /** The day of the latest referral on a lead that already existed (YYYY-MM-DD), or null. */
   lastReferredOn: string | null;
+  /** Every submission, first to last. */
+  entries: LeadReferralEntry[];
+  /** More than one submission, or a submission of a number that was already a lead. */
+  duplicate: boolean;
 }
 
 const roleLabel = (role: unknown): string => {
@@ -146,8 +282,9 @@ const roleLabel = (role: unknown): string => {
 
 /** Reads the staff referral entries out of a lead's remarks. */
 export function leadReferralInfo(remarks: unknown): LeadReferralInfo {
-  const out: LeadReferralInfo = { times: 0, members: [], lastReferredOn: null };
+  const out: LeadReferralInfo = { times: 0, members: [], lastReferredOn: null, entries: [], duplicate: false };
   if (!Array.isArray(remarks)) return out;
+  const text = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null);
   for (const e of remarks) {
     if (!e || typeof e !== "object" || (e as Record<string, unknown>).kind !== "staff_referral") continue;
     const entry = e as Record<string, unknown>;
@@ -156,7 +293,19 @@ export function leadReferralInfo(remarks: unknown): LeadReferralInfo {
     if (!out.members.includes(who)) out.members.push(who);
     const day = typeof entry.last_referred_on === "string" ? entry.last_referred_on : null;
     if (day && (!out.lastReferredOn || day > out.lastReferredOn)) out.lastReferredOn = day;
+    const duplicate = entry.duplicate === true || !!day;
+    out.entries.push({
+      member: who,
+      day: referralDay(istDay(text(entry.date))),
+      client: text(entry.through_client),
+      relation: text(entry.relation),
+      note: text(entry.note),
+      referredName: text(entry.referred_name),
+      duplicate,
+    });
+    if (duplicate) out.duplicate = true;
   }
+  if (out.times > 1) out.duplicate = true;
   return out;
 }
 
@@ -170,11 +319,11 @@ export function referralDay(ymd: string | null | undefined): string {
   return month ? `${Number(m[3])} ${month} ${m[1]}` : "";
 }
 
-/** The tag on a lead: "" when no member referred it. */
+/** The tag on a lead: "" when no member referred it; "Duplicate referral" when the number came in more than once. */
 export function leadReferredTag(info: LeadReferralInfo): string {
   if (info.times <= 0) return "";
-  if (info.lastReferredOn) return `Referred again ${referralDay(info.lastReferredOn)}`;
-  return info.times === 1 ? "Referred" : `Referred ${info.times} times`;
+  if (info.duplicate) return info.times > 1 ? `Duplicate referral (${info.times})` : "Duplicate referral";
+  return "Referred";
 }
 
 // ---------------------------------------------------------------- the Ops alert

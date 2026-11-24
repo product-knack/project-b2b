@@ -23,6 +23,27 @@ export function useMyStaffReferrals(userId: string | null) {
   });
 }
 
+export type ReferralClientChoice = { id: string; name: string; mine: boolean };
+
+/** The clients a member can pick as "the client whose referral this is" (24 Nov 2026). Nothing typed: the
+    member's own clients. Two letters or more: any client by name (names only), the member's own first. */
+export function useReferralClientChoices(userId: string | null, search: string) {
+  const q = search.replace(/\s+/g, ' ').trim();
+  const term = q.length >= 2 ? q : '';
+  return useQuery({
+    queryKey: ['staff-referrals', 'client-choices', userId, term],
+    enabled: !!userId,
+    staleTime: 60_000,
+    placeholderData: (previous: ReferralClientChoice[] | undefined) => previous,
+    queryFn: async (): Promise<ReferralClientChoice[]> => {
+      const { data, error } = await withTimeout<any>(
+        Promise.resolve(supabase.rpc('get_referral_client_choices', { p_q: term || null })) as Promise<any>, NET_MS, 'Clients');
+      if (error) throw new Error(error.message);
+      return ((data ?? []) as any[]).map((c) => ({ id: String(c.id), name: String(c.name ?? 'No name'), mine: c.mine === true }));
+    },
+  });
+}
+
 export type StaffReferralInput = {
   id: string; name: string; phone: string;
   note?: string | null; clientId?: string | null; source?: string | null;

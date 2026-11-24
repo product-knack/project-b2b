@@ -15,10 +15,11 @@ import {
 } from '../lib/referralQueries';
 import { friendlyError } from '../lib/friendlyError';
 import {
-  STAFF_REFERRAL_FLOW_ON, REFERRAL_SAVE_ERROR, referralCounts, referralDay, referralFormProblem, referralSaveResult, referralStatus,
+  STAFF_REFERRAL_FLOW_ON, REFERRAL_SAVE_ERROR, REFERRAL_RELATIONS, RELATION_OTHER, istDay, referralCounts, referralDay,
+  referralDuplicateLine, referralFormProblem, referralSaveResult, referralStatus, referralTracker, relationText,
   MyReferral as StaffReferral, ReferralTone,
 } from '../lib/staffReferral';
-import { useMyStaffReferrals, useSubmitStaffReferral } from '../lib/staffReferralQueries';
+import { useMyStaffReferrals, useReferralClientChoices, useSubmitStaffReferral } from '../lib/staffReferralQueries';
 
 /* ============ My Referrals — submit side ============
    Port of the web's TrainerReferrals / DoctorReferrals page (one screen, both
@@ -85,21 +86,63 @@ function ReferralRow({ r }: { r: MyReferral }) {
 /* ---------- new flow (21 Nov 2026): one row per referral, the status follows the lead ---------- */
 const TONE_COLOR: Record<ReferralTone, string> = { good: C.green, progress: C.blue, wait: C.gold, muted: C.muted2 };
 
+/* The four steps of one referral (24 Nov 2026): Lead submitted, QHP booked, QHP done, Converted (on the
+   payment day). The rules are referralTracker in staffReferral.ts, the same as the web. */
+function ReferralSteps({ r }: { r: StaffReferral }) {
+  const t = referralTracker(r);
+  const on = t.closed ? C.muted2 : C.green;
+  return (
+    <View style={{ gap: 7, marginTop: 3 }}>
+      <View style={{ flexDirection: 'row' }}>
+        {t.steps.map((s, i) => {
+          const reached = s.state !== 'todo';
+          const now = s.state === 'now' && i < t.steps.length - 1 && !t.closed;
+          const color = !reached ? 'rgba(255,255,255,0.22)' : now ? C.blue : on;
+          return (
+            <View key={s.key} style={{ flex: 1, alignItems: 'center' }}>
+              {i < t.steps.length - 1 ? (
+                <View style={{ position: 'absolute', top: 10, left: '50%', right: '-50%', height: 2, backgroundColor: i < t.reached - 1 ? hexA(on, 0.7) : 'rgba(255,255,255,0.1)' }} />
+              ) : null}
+              <View style={{ width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center', backgroundColor: reached ? color : C.sheetBg, borderWidth: reached ? 0 : 1.5, borderColor: color }}>
+                {reached ? <Icon name="checks" size={11} color="#fff" strokeWidth={2.8} /> : <Text style={{ fontFamily: F.bodyBold, fontSize: 9.5, color: C.muted3 }}>{i + 1}</Text>}
+              </View>
+              <Text style={{ fontFamily: reached ? F.bodySemi : F.body, fontSize: 9.5, color: reached ? '#fff' : C.muted3, textAlign: 'center', marginTop: 5 }}>{s.label}</Text>
+              <Text style={{ fontFamily: F.body, fontSize: 8.5, color: C.muted2, textAlign: 'center', marginTop: 1, minHeight: 11 }}>{s.day}</Text>
+            </View>
+          );
+        })}
+      </View>
+      {t.note ? <Body style={{ fontSize: 11.5, color: t.closed ? '#E0A090' : C.muted2, lineHeight: 16 }}>{t.note}</Body> : null}
+    </View>
+  );
+}
+
 function StaffReferralRow({ r }: { r: StaffReferral }) {
   const s = referralStatus(r.status_key);
   const color = TONE_COLOR[s.tone];
-  const parts = [r.referred_phone, `Added ${fmtDay(r.created_at)}`, r.through_client ? `through ${r.through_client}` : null, r.on_existing_lead ? 'already a lead when you referred' : null].filter(Boolean);
+  const added = referralDay(istDay(r.created_at));
+  const duplicate = referralDuplicateLine(r);
+  const parts = [r.referred_phone, added ? `Added ${added}` : null].filter(Boolean);
+  const whose = [r.through_client ? `Referral of ${r.through_client}` : null, r.relation ? `Relation: ${r.relation}` : null].filter(Boolean);
   return (
-    <View style={{ padding: 13, borderRadius: 15, backgroundColor: 'rgba(0,0,0,0.22)', borderWidth: 1, borderColor: hexA(color, 0.26), gap: 7 }}>
+    <View style={{ padding: 13, borderRadius: 15, backgroundColor: 'rgba(0,0,0,0.22)', borderWidth: 1, borderColor: hexA(color, 0.26), gap: 6 }}>
       <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 9 }}>
-        <Body numberOfLines={1} style={{ flex: 1, fontSize: 15, fontFamily: F.bodySemi, color: '#fff' }}>{r.referred_name}</Body>
-        <View style={{ maxWidth: '58%', paddingVertical: 3.5, paddingHorizontal: 10, borderRadius: 12, backgroundColor: hexA(color, 0.14), borderWidth: 1, borderColor: hexA(color, 0.4) }}>
+        <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
+          <Body numberOfLines={1} style={{ flexShrink: 1, fontSize: 15, fontFamily: F.bodySemi, color: '#fff' }}>{r.referred_name}</Body>
+          {duplicate ? (
+            <View style={{ paddingVertical: 2, paddingHorizontal: 7, borderRadius: 999, backgroundColor: C.gold }}>
+              <Text style={{ fontFamily: F.bodyBold, fontSize: 8.5, letterSpacing: 0.4, color: '#1a1206' }}>DUPLICATE</Text>
+            </View>
+          ) : null}
+        </View>
+        <View style={{ maxWidth: '50%', paddingVertical: 3.5, paddingHorizontal: 10, borderRadius: 12, backgroundColor: hexA(color, 0.14), borderWidth: 1, borderColor: hexA(color, 0.4) }}>
           <Text style={{ fontFamily: F.bodyBold, fontSize: 10, color, textAlign: 'center' }}>{s.label}</Text>
         </View>
       </View>
-      <Body style={{ fontSize: 11.5, color: C.muted2, lineHeight: 16 }}>{parts.join(' · ')}</Body>
-      {s.key === 'converted' && r.converted_on ? <Body style={{ fontSize: 11.5, color: C.green }}>Converted on {referralDay(r.converted_on)}</Body> : null}
-      {r.note ? <Body style={{ fontSize: 12, color: C.muted2, lineHeight: 17 }}>{r.note}</Body> : null}
+      {parts.length ? <Body style={{ fontSize: 11.5, color: C.muted2, lineHeight: 16 }}>{parts.join(' · ')}</Body> : null}
+      {whose.length ? <Body style={{ fontSize: 11.5, color: C.muted2, lineHeight: 16 }}>{whose.join(' · ')}</Body> : null}
+      {duplicate ? <Body style={{ fontSize: 11.5, color: C.gold, lineHeight: 16 }}>{duplicate}</Body> : null}
+      <ReferralSteps r={r} />
     </View>
   );
 }
@@ -113,7 +156,7 @@ const newSaveId = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, 
 function AddReferralSheet({ visible, onClose, referrerId }: { visible: boolean; onClose: () => void; referrerId: string }) {
   const insets = useSafeAreaInsets();
   const kbH = useKeyboardHeight();
-  const clientsQ = useMyReferralClients(visible ? referrerId : null);
+  const clientsQ = useMyReferralClients(visible && !STAFF_REFERRAL_FLOW_ON ? referrerId : null);
   const createM = useCreateReferral();
   const [name, setName] = React.useState('');
   const [source, setSource] = React.useState('');
@@ -126,7 +169,16 @@ function AddReferralSheet({ visible, onClose, referrerId }: { visible: boolean; 
   const staffM = useSubmitStaffReferral();
   const [phone, setPhone] = React.useState('');
   const saveIdRef = React.useRef(newSaveId());
-  const formProblem = STAFF_REFERRAL_FLOW_ON ? referralFormProblem({ name, phone }) : null;
+  // One standard for every department (24 Nov 2026): the client whose referral it is and the relation to
+  // that client are required too. The client is picked from the member's own clients, or from every client
+  // by name once two letters are typed.
+  const [linkedName, setLinkedName] = React.useState('');
+  const [relation, setRelation] = React.useState('');
+  const [relationOther, setRelationOther] = React.useState('');
+  const [clientTerm, setClientTerm] = React.useState('');
+  React.useEffect(() => { const t = setTimeout(() => setClientTerm(clientQ), 250); return () => clearTimeout(t); }, [clientQ]);
+  const choicesQ = useReferralClientChoices(visible && STAFF_REFERRAL_FLOW_ON ? referrerId : null, clientTerm);
+  const formProblem = STAFF_REFERRAL_FLOW_ON ? referralFormProblem({ name, phone, clientId: linkedId, relation, relationOther }) : null;
   const saving = STAFF_REFERRAL_FLOW_ON ? staffM.isPending : createM.isPending;
 
   React.useEffect(() => {
@@ -134,11 +186,15 @@ function AddReferralSheet({ visible, onClose, referrerId }: { visible: boolean; 
       setName(''); setSource(''); setNotes(''); setLinkedId(null);
       setPickerOpen(false); setClientQ(''); sentRef.current = false; createM.reset();
       setPhone(''); saveIdRef.current = newSaveId(); staffM.reset();
+      setLinkedName(''); setRelation(''); setRelationOther(''); setClientTerm('');
     }
   }, [visible]);
 
-  const clients = clientsQ.data ?? [];
-  const linked = clients.find((c) => c.id === linkedId) ?? null;
+  const clients: ReferralClientOption[] = STAFF_REFERRAL_FLOW_ON ? (choicesQ.data ?? []) : (clientsQ.data ?? []);
+  const listQ = STAFF_REFERRAL_FLOW_ON ? choicesQ : clientsQ;
+  const linked = STAFF_REFERRAL_FLOW_ON
+    ? (linkedId ? { id: linkedId, name: linkedName } : null)
+    : clients.find((c) => c.id === linkedId) ?? null;
   const q = clientQ.trim().toLowerCase();
   const shown = q ? clients.filter((c) => c.name.toLowerCase().includes(q)) : clients;
   const canSave = STAFF_REFERRAL_FLOW_ON ? !formProblem && !staffM.isPending : !!name.trim() && !createM.isPending;
@@ -148,7 +204,7 @@ function AddReferralSheet({ visible, onClose, referrerId }: { visible: boolean; 
     Keyboard.dismiss();
     sentRef.current = true;
     if (STAFF_REFERRAL_FLOW_ON) {
-      staffM.mutate({ id: saveIdRef.current, name, phone, note: notes, clientId: linkedId, source }, {
+      staffM.mutate({ id: saveIdRef.current, name, phone, note: notes, clientId: linkedId, source: relationText(relation, relationOther) }, {
         onSuccess: (answer) => {
           const res = referralSaveResult(answer);
           if (!res.ok) { sentRef.current = false; Alert.alert('Referral not added', res.message); return; }
@@ -206,19 +262,21 @@ function AddReferralSheet({ visible, onClose, referrerId }: { visible: boolean; 
               </View>
             ) : null}
 
-            <View style={{ gap: 6 }}>
-              {label('SOURCE')}
-              <TextInput value={source} onChangeText={setSource} placeholder="How did you find them? (optional)" placeholderTextColor={C.muted3}
-                accessibilityLabel="Source" style={field} />
-            </View>
+            {STAFF_REFERRAL_FLOW_ON ? null : (
+              <View style={{ gap: 6 }}>
+                {label('SOURCE')}
+                <TextInput value={source} onChangeText={setSource} placeholder="How did you find them? (optional)" placeholderTextColor={C.muted3}
+                  accessibilityLabel="Source" style={field} />
+              </View>
+            )}
 
             <View style={{ gap: 6 }}>
-              {label('INTRODUCED BY A CLIENT')}
+              {label(STAFF_REFERRAL_FLOW_ON ? 'WHOSE REFERRAL IS THIS *' : 'INTRODUCED BY A CLIENT')}
               <Pressable onPress={() => setPickerOpen((v) => !v)} accessibilityRole="button" accessibilityLabel="Pick the client who introduced them"
                 style={[field, { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 46 }]}>
-                <Body style={{ flex: 1, fontSize: 14, color: linked ? '#fff' : C.muted3 }}>{linked ? linked.name : 'None'}</Body>
+                <Body style={{ flex: 1, fontSize: 14, color: linked ? '#fff' : C.muted3 }}>{linked ? linked.name : STAFF_REFERRAL_FLOW_ON ? 'Choose the client who referred them' : 'None'}</Body>
                 {linked ? (
-                  <Pressable onPress={() => setLinkedId(null)} hitSlop={10} accessibilityRole="button" accessibilityLabel="Clear">
+                  <Pressable onPress={() => { setLinkedId(null); setLinkedName(''); }} hitSlop={10} accessibilityRole="button" accessibilityLabel="Clear">
                     <Icon name="close" size={13} color={C.muted2} strokeWidth={2.2} />
                   </Pressable>
                 ) : null}
@@ -228,19 +286,23 @@ function AddReferralSheet({ visible, onClose, referrerId }: { visible: boolean; 
                 <View style={{ borderRadius: 11, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', backgroundColor: '#14100D' }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 9, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.06)' }}>
                     <Icon name="search" size={13} color={C.muted3} strokeWidth={2} />
-                    <TextInput value={clientQ} onChangeText={setClientQ} placeholder="Search your clients" placeholderTextColor={C.muted3}
+                    <TextInput value={clientQ} onChangeText={setClientQ} placeholder={STAFF_REFERRAL_FLOW_ON ? 'Search a client by name' : 'Search your clients'} placeholderTextColor={C.muted3}
                       autoCorrect={false} accessibilityLabel="Search clients"
                       style={{ flex: 1, fontFamily: F.body, fontSize: 13.5, color: '#fff', padding: 0 }} />
                   </View>
                   <ScrollView keyboardShouldPersistTaps="handled" nestedScrollEnabled style={{ maxHeight: 200 }}>
-                    {clientsQ.isPending ? (
+                    {listQ.isPending ? (
                       <View style={{ paddingVertical: 16, alignItems: 'center' }}><ActivityIndicator color={C.orange} /></View>
+                    ) : listQ.isError ? (
+                      <Body style={{ fontSize: 12, color: C.red, textAlign: 'center', paddingVertical: 16, paddingHorizontal: 12 }}>The client list did not load. Check your connection, then close and open this again.</Body>
                     ) : !shown.length ? (
-                      <Body style={{ fontSize: 12, color: C.muted3, textAlign: 'center', paddingVertical: 16 }}>No clients match.</Body>
+                      <Body style={{ fontSize: 12, color: C.muted3, textAlign: 'center', paddingVertical: 16, paddingHorizontal: 12 }}>
+                        {STAFF_REFERRAL_FLOW_ON && q.length < 2 ? "Type at least two letters of the client's name to search." : 'No clients match.'}
+                      </Body>
                     ) : shown.map((c: ReferralClientOption) => {
                       const on = c.id === linkedId;
                       return (
-                        <Pressable key={c.id} onPress={() => { setLinkedId(c.id); setPickerOpen(false); setClientQ(''); }}
+                        <Pressable key={c.id} onPress={() => { setLinkedId(c.id); setLinkedName(c.name); setPickerOpen(false); setClientQ(''); }}
                           accessibilityRole="button" accessibilityState={{ selected: on }}
                           style={{ minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 11, paddingHorizontal: 12, backgroundColor: on ? hexA(C.orange, 0.12) : 'transparent' }}>
                           <Text style={{ flex: 1, fontFamily: on ? F.bodyBold : F.body, fontSize: 13.5, color: on ? C.orange : C.ink }}>{c.name}</Text>
@@ -252,6 +314,27 @@ function AddReferralSheet({ visible, onClose, referrerId }: { visible: boolean; 
                 </View>
               ) : null}
             </View>
+
+            {STAFF_REFERRAL_FLOW_ON ? (
+              <View style={{ gap: 8 }}>
+                {label('RELATION WITH THE CLIENT *')}
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}>
+                  {REFERRAL_RELATIONS.map((rel) => {
+                    const on = relation === rel;
+                    return (
+                      <Pressable key={rel} onPress={() => setRelation(rel)} hitSlop={4} accessibilityRole="radio" accessibilityState={{ selected: on }} accessibilityLabel={rel}
+                        style={{ minHeight: 36, justifyContent: 'center', paddingVertical: 7, paddingHorizontal: 13, borderRadius: 999, backgroundColor: on ? C.orange : 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: on ? C.orange : 'rgba(255,255,255,0.14)' }}>
+                        <Text style={{ fontFamily: on ? F.bodyBold : F.body, fontSize: 12.5, color: on ? '#fff' : C.ink }}>{rel}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                {relation === RELATION_OTHER ? (
+                  <TextInput value={relationOther} onChangeText={setRelationOther} placeholder="Write the relation, for example gym friend" placeholderTextColor={C.muted3}
+                    maxLength={60} accessibilityLabel="The relation in your words" style={field} />
+                ) : null}
+              </View>
+            ) : null}
 
             <View style={{ gap: 6 }}>
               {label('NOTES')}
@@ -275,7 +358,7 @@ function AddReferralSheet({ visible, onClose, referrerId }: { visible: boolean; 
             </Pressable>
           </View>
           {STAFF_REFERRAL_FLOW_ON
-            ? (formProblem && (name.trim() || phone.trim()) ? <Body style={{ fontSize: 11, color: C.muted2, textAlign: 'center', marginTop: 7 }}>{formProblem}</Body> : null)
+            ? (formProblem ? <Body style={{ fontSize: 11, color: C.muted2, textAlign: 'center', marginTop: 7 }}>{formProblem}</Body> : null)
             : (!name.trim() ? <Mono style={{ fontSize: 8.5, color: C.faint, textAlign: 'center', marginTop: 7 }}>A NAME IS ALL THAT IS REQUIRED</Mono> : null)}
         </View>
       </View>
@@ -305,7 +388,7 @@ export function Referrals() {
     const counts = referralCounts(mine);
     return (
       <Page gap={16} pt={6}>
-        <TitleBlock title="My Referrals" sub="A referral goes straight to the leads team. You are told when it converts." />
+        <TitleBlock title="My Referrals" sub="A referral goes straight to the leads team. Follow each one here, step by step." />
         <Pressable onPress={() => setAddOpen(true)} accessibilityRole="button" accessibilityLabel="Add a referral" style={{ borderRadius: 13, overflow: 'hidden' }}>
           <LinearGradient colors={ORANGE_GRAD} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 13 }}>
             <Icon name="userPlus" size={15} color="#fff" strokeWidth={2.4} />
@@ -324,7 +407,7 @@ export function Referrals() {
         ) : !mine.length ? (
           <Card style={{ padding: 24, alignItems: 'center', gap: 10 }}>
             <Icon name="userPlus" size={28} color={C.faint} strokeWidth={1.6} />
-            <Body style={{ fontSize: 12.5, color: C.muted2, textAlign: 'center' }}>Add your first referral: a name and a phone number. The leads team takes it from there.</Body>
+            <Body style={{ fontSize: 12.5, color: C.muted2, textAlign: 'center' }}>Add your first referral: the person's name and number, and the client who referred them. The leads team takes it from there.</Body>
           </Card>
         ) : (
           <View style={{ gap: 10 }}>
