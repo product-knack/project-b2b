@@ -6,7 +6,8 @@
  * one person has a claim (get_referral_credit_queue / decide_referral_credit).
  *
  * One standard for every department (24 Nov 2026): the name, the phone number, the client whose referral it
- * is and the relation to that client are all required; the member follows four steps (Lead submitted, QHP
+ * is and the relation to that client are all required ON THE SCREENS (the database refuses nothing new, so an
+ * app version that does not ask for them keeps working); the member follows four steps (Lead submitted, QHP
  * booked, QHP done, Converted on the payment day); a number submitted more than once is one lead, marked
  * Duplicate, with every submission's details kept for the leads team.
  *
@@ -112,12 +113,31 @@ export interface ReferralForm {
 export type ReferralFormField = "name" | "phone" | "client" | "relation";
 
 /**
- * Trainers and CRMs give the referral of one of their OWN clients only (owner, 24 Nov 2026); the server
- * refuses any other client from them. Other departments have no clients of their own and pick any client by name.
+ * Trainers and CRMs give the referral of one of their OWN clients only (owner, 24 Nov 2026): the list on the
+ * screen offers them no other client. Other departments have no clients of their own and pick any client by name.
  */
 export function referralOwnClientsOnly(role: string | null | undefined): boolean {
   const r = String(role ?? "").toLowerCase();
   return r === "trainer" || r === "crm";
+}
+
+/**
+ * The member's own clients as choices, from rows of trainer_clients joined to clients (used when the list
+ * function is not on the database yet). No repeats, by name, narrowed by the typed letters.
+ */
+export function ownClientChoices(rows: unknown, typed?: string | null): Array<{ id: string; name: string; mine: boolean }> {
+  if (!Array.isArray(rows)) return [];
+  const term = (typed ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+  const seen = new Map<string, { id: string; name: string; mine: boolean }>();
+  for (const row of rows) {
+    const joined = row && typeof row === "object" ? (row as Record<string, unknown>).clients : null;
+    const c = (Array.isArray(joined) ? joined[0] : joined) as Record<string, unknown> | null | undefined;
+    if (!c || typeof c.id !== "string" || seen.has(c.id)) continue;
+    const name = `${String(c.first_name ?? "").trim()} ${String(c.last_name ?? "").trim()}`.trim() || "No name";
+    if (term && !name.toLowerCase().includes(term)) continue;
+    seen.set(c.id, { id: c.id, name, mine: true });
+  }
+  return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /** The words around the client box, by who is filling the form. */

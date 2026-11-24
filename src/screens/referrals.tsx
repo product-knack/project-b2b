@@ -155,7 +155,7 @@ const newSaveId = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, 
 /* ---------- add sheet ---------- */
 function AddReferralSheet({ visible, onClose, referrerId }: { visible: boolean; onClose: () => void; referrerId: string }) {
   const insets = useSafeAreaInsets();
-  // A trainer and a CRM pick among their own clients only (24 Nov 2026); the server refuses any other.
+  // A trainer and a CRM pick among their own clients only (24 Nov 2026): the list offers them no other.
   const { dbRole } = useAuth();
   const clientWords = referralClientWords(referralOwnClientsOnly(dbRole));
   const kbH = useKeyboardHeight();
@@ -173,7 +173,7 @@ function AddReferralSheet({ visible, onClose, referrerId }: { visible: boolean; 
   const [phone, setPhone] = React.useState('');
   const saveIdRef = React.useRef(newSaveId());
   // One standard for every department (24 Nov 2026): the client whose referral it is and the relation to
-  // that client are required too. The client is picked from the member's own clients, or from every client
+  // that client are required too, here on the screen (the database refuses nothing new). The client is picked from the member's own clients, or from every client
   // by name once two letters are typed.
   const [linkedName, setLinkedName] = React.useState('');
   const [relation, setRelation] = React.useState('');
