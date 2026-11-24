@@ -16,6 +16,7 @@ import { useMyCapabilities } from '../lib/capabilities';
 import { useMyAcademyLink } from '../lib/academyAttendanceQueries';
 import { canUseTechDesk, useTechDeskBadge } from '../lib/techDeskQueries';
 import { useCanSeeWhatsApp } from '../lib/whatsappQueries';
+import { REFERRAL_SCREENS_ON } from '../lib/staffReferralSwitch';
 
 /* A consultant doctor's workspace is the web's light indigo look; the header
    and the drawer follow it (user request, 23 Sep 2026) while every other role
@@ -209,6 +210,9 @@ export function Drawer() {
     // WhatsApp inbox: whoever one of our numbers belongs to (20 Nov 2026; the clinic number: ops, admin, super admin;
     // a CRM's own business number: that CRM), the same rule as the database
     if (it.route === 'ops-whatsapp') return canSeeWhatsAppNow;
+    // My Referrals for the CRM and Ops (24 Nov 2026): shown with the new referral screens. The trainer's and the doctor's
+    // own 'Referrals' entry is not touched.
+    if (it.route === 'referrals' && it.label === 'My Referrals') return REFERRAL_SCREENS_ON;
     if (it.route === 'client-complaints') return caps.data.isManager || caps.data.isPhysioHod || dbRole === 'admin' || dbRole === 'super_admin' || session?.user?.id === '30df5c2b-0f40-4736-9f41-7cbc830a191a';
     if (it.label === 'Trainers Tracker') return caps.data.isTrainerManager;
     if (it.route === 'crm-esc') return caps.data.isCrmManager; // web: crm_manager spec only

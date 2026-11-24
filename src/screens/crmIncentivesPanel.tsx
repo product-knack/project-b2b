@@ -14,6 +14,8 @@ import {
 } from '../lib/incentiveQueries';
 import { SheetShell } from './reportDetail';
 import { friendlyError } from '../lib/friendlyError';
+import { useStore } from '../store';
+import { REFERRAL_SCREENS_ON } from '../lib/staffReferralSwitch';
 
 /* ============ Incentives panel — mirrors the web CRMIncentivesTab:
    My Incentives / Pending Requests / Leaderboard + Raise Request. ============ */
@@ -34,6 +36,7 @@ export function IncentivesPanel({ crmId, overview }: {
 }) {
   const [tab, setTab] = React.useState<'mine' | 'pending' | 'board'>('mine');
   const [raiseOpen, setRaiseOpen] = React.useState(false);
+  const { go } = useStore();
   const mineQ = useMyIncentives(tab === 'mine' ? crmId : crmId); // shared cache; always warm
   const pendingQ = useMyIncentiveRequests(crmId);
   const [period, setPeriod] = React.useState<'month' | 'all'>('month');
@@ -57,6 +60,16 @@ export function IncentivesPanel({ crmId, overview }: {
           </View>
         ))}
       </View>
+
+      {/* Referrals use the one standard form (24 Nov 2026): the name, the number, the client whose referral it is and the
+          relation. It goes straight to the leads team; My Referrals shows each one step by step. */}
+      {REFERRAL_SCREENS_ON ? (
+        <Pressable onPress={() => go('referrals')} accessibilityRole="button" accessibilityLabel="Add a referral"
+          style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, minHeight: 46, borderRadius: 12, backgroundColor: hexA(C.green, 0.12), borderWidth: 1, borderColor: hexA(C.green, 0.5) }}>
+          <Icon name="userPlus" size={14} color={C.green} strokeWidth={2.4} />
+          <Text style={{ fontFamily: F.bodyBold, fontSize: 13.5, color: C.green }}>Add referral</Text>
+        </Pressable>
+      ) : null}
 
       {/* Raise request */}
       <Pressable onPress={() => setRaiseOpen(true)}>
@@ -168,7 +181,7 @@ export function IncentivesPanel({ crmId, overview }: {
 function RaiseRequestSheet({ visible, onClose, crmId }: { visible: boolean; onClose: () => void; crmId: string | null }) {
   const raiseM = useRaiseIncentiveRequest();
   const clientsQ = useCrmClientList(visible ? crmId : null, 'active');
-  const [kind, setKind] = React.useState<'referral' | 'subscription_upgrade' | 'cross_sell' | 'package_upgrade'>('referral');
+  const [kind, setKind] = React.useState<'referral' | 'subscription_upgrade' | 'cross_sell' | 'package_upgrade'>(REFERRAL_SCREENS_ON ? 'subscription_upgrade' : 'referral');
   const [client, setClient] = React.useState<{ id: string; name: string; subscription: string | null; package: string | null } | null>(null);
   const [clientQ, setClientQ] = React.useState('');
   const [f, setF] = React.useState<Record<string, string>>({});
@@ -178,7 +191,7 @@ function RaiseRequestSheet({ visible, onClose, crmId }: { visible: boolean; onCl
   const [date, setDate] = React.useState(todayDateValue());
 
   React.useEffect(() => {
-    if (visible) { setKind('referral'); setClient(null); setClientQ(''); setF({}); setMonth(currentIncentiveMonthValue()); setDate(todayDateValue()); }
+    if (visible) { setKind(REFERRAL_SCREENS_ON ? 'subscription_upgrade' : 'referral'); setClient(null); setClientQ(''); setF({}); setMonth(currentIncentiveMonthValue()); setDate(todayDateValue()); }
   }, [visible]);
   React.useEffect(() => { setClient(null); }, [kind]);
   const monthOk = /^\d{4}-(0[1-9]|1[0-2])$/.test(month.trim());
@@ -210,7 +223,7 @@ function RaiseRequestSheet({ visible, onClose, crmId }: { visible: boolean; onCl
     <SheetShell visible={visible} onClose={onClose} accent={C.purple} icon="gift" title="Raise Request" subtitle="INCENTIVE REQUEST — GOES FOR APPROVAL">
       <Mono style={{ fontSize: 8.5, letterSpacing: 0.7, color: C.muted3 }}>REQUEST TYPE</Mono>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-        {(Object.entries(EVENT_META) as [typeof kind, typeof EVENT_META[string]][]).map(([id, meta]) => {
+        {(Object.entries(EVENT_META) as [typeof kind, typeof EVENT_META[string]][]).filter(([id]) => !(REFERRAL_SCREENS_ON && id === 'referral')).map(([id, meta]) => {
           const active = kind === id;
           return (
             <AnimChip key={id} active={active} onPress={() => setKind(id)} style={{ paddingVertical: 8, paddingHorizontal: 12, borderRadius: 999, backgroundColor: active ? hexA(meta.color, 0.16) : 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: active ? hexA(meta.color, 0.55) : 'rgba(255,255,255,0.09)' }}>

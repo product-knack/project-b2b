@@ -15,11 +15,13 @@ import {
 } from '../lib/referralQueries';
 import { friendlyError } from '../lib/friendlyError';
 import {
-  STAFF_REFERRAL_FLOW_ON, REFERRAL_SAVE_ERROR, REFERRAL_RELATIONS, RELATION_OTHER, istDay, referralClientWords, referralCounts, referralDay,
+  REFERRAL_SAVE_ERROR, REFERRAL_RELATIONS, RELATION_OTHER, istDay, referralClientWords, referralCounts, referralDay,
   referralDuplicateLine, referralFormProblem, referralOwnClientsOnly, referralSaveResult, referralStatus, referralTracker, relationText,
   MyReferral as StaffReferral, ReferralTone,
 } from '../lib/staffReferral';
 import { useMyStaffReferrals, useReferralClientChoices, useSubmitStaffReferral } from '../lib/staffReferralQueries';
+// The new flow shows with the release switch, or on a development run so it can be tried before the release.
+import { REFERRAL_SCREENS_ON } from '../lib/staffReferralSwitch';
 
 /* ============ My Referrals — submit side ============
    Port of the web's TrainerReferrals / DoctorReferrals page (one screen, both
@@ -159,7 +161,7 @@ function AddReferralSheet({ visible, onClose, referrerId }: { visible: boolean; 
   const { dbRole } = useAuth();
   const clientWords = referralClientWords(referralOwnClientsOnly(dbRole));
   const kbH = useKeyboardHeight();
-  const clientsQ = useMyReferralClients(visible && !STAFF_REFERRAL_FLOW_ON ? referrerId : null);
+  const clientsQ = useMyReferralClients(visible && !REFERRAL_SCREENS_ON ? referrerId : null);
   const createM = useCreateReferral();
   const [name, setName] = React.useState('');
   const [source, setSource] = React.useState('');
@@ -180,9 +182,9 @@ function AddReferralSheet({ visible, onClose, referrerId }: { visible: boolean; 
   const [relationOther, setRelationOther] = React.useState('');
   const [clientTerm, setClientTerm] = React.useState('');
   React.useEffect(() => { const t = setTimeout(() => setClientTerm(clientQ), 250); return () => clearTimeout(t); }, [clientQ]);
-  const choicesQ = useReferralClientChoices(visible && STAFF_REFERRAL_FLOW_ON ? referrerId : null, clientTerm);
-  const formProblem = STAFF_REFERRAL_FLOW_ON ? referralFormProblem({ name, phone, clientId: linkedId, relation, relationOther }) : null;
-  const saving = STAFF_REFERRAL_FLOW_ON ? staffM.isPending : createM.isPending;
+  const choicesQ = useReferralClientChoices(visible && REFERRAL_SCREENS_ON ? referrerId : null, clientTerm);
+  const formProblem = REFERRAL_SCREENS_ON ? referralFormProblem({ name, phone, clientId: linkedId, relation, relationOther }) : null;
+  const saving = REFERRAL_SCREENS_ON ? staffM.isPending : createM.isPending;
 
   React.useEffect(() => {
     if (visible) {
@@ -193,20 +195,20 @@ function AddReferralSheet({ visible, onClose, referrerId }: { visible: boolean; 
     }
   }, [visible]);
 
-  const clients: ReferralClientOption[] = STAFF_REFERRAL_FLOW_ON ? (choicesQ.data ?? []) : (clientsQ.data ?? []);
-  const listQ = STAFF_REFERRAL_FLOW_ON ? choicesQ : clientsQ;
-  const linked = STAFF_REFERRAL_FLOW_ON
+  const clients: ReferralClientOption[] = REFERRAL_SCREENS_ON ? (choicesQ.data ?? []) : (clientsQ.data ?? []);
+  const listQ = REFERRAL_SCREENS_ON ? choicesQ : clientsQ;
+  const linked = REFERRAL_SCREENS_ON
     ? (linkedId ? { id: linkedId, name: linkedName } : null)
     : clients.find((c) => c.id === linkedId) ?? null;
   const q = clientQ.trim().toLowerCase();
   const shown = q ? clients.filter((c) => c.name.toLowerCase().includes(q)) : clients;
-  const canSave = STAFF_REFERRAL_FLOW_ON ? !formProblem && !staffM.isPending : !!name.trim() && !createM.isPending;
+  const canSave = REFERRAL_SCREENS_ON ? !formProblem && !staffM.isPending : !!name.trim() && !createM.isPending;
 
   const submit = () => {
     if (!canSave || sentRef.current) return;
     Keyboard.dismiss();
     sentRef.current = true;
-    if (STAFF_REFERRAL_FLOW_ON) {
+    if (REFERRAL_SCREENS_ON) {
       staffM.mutate({ id: saveIdRef.current, name, phone, note: notes, clientId: linkedId, source: relationText(relation, relationOther) }, {
         onSuccess: (answer) => {
           const res = referralSaveResult(answer);
@@ -247,7 +249,7 @@ function AddReferralSheet({ visible, onClose, referrerId }: { visible: boolean; 
             </Pressable>
           </View>
           <Body style={{ fontSize: 12, color: C.muted2, lineHeight: 17, marginBottom: 12 }}>
-            {STAFF_REFERRAL_FLOW_ON ? 'Goes straight to the leads team. You are told when it converts.' : 'Admin reviews it. Once approved it counts towards your incentive.'}
+            {REFERRAL_SCREENS_ON ? 'Goes straight to the leads team. You are told when it converts.' : 'Admin reviews it. Once approved it counts towards your incentive.'}
           </Body>
 
           <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} style={{ flexShrink: 1 }} contentContainerStyle={{ gap: 13, paddingBottom: 8 }}>
@@ -257,7 +259,7 @@ function AddReferralSheet({ visible, onClose, referrerId }: { visible: boolean; 
                 accessibilityLabel="Referral name" style={field} />
             </View>
 
-            {STAFF_REFERRAL_FLOW_ON ? (
+            {REFERRAL_SCREENS_ON ? (
               <View style={{ gap: 6 }}>
                 {label('PHONE *')}
                 <TextInput value={phone} onChangeText={setPhone} placeholder="98765 43210" placeholderTextColor={C.muted3}
@@ -265,7 +267,7 @@ function AddReferralSheet({ visible, onClose, referrerId }: { visible: boolean; 
               </View>
             ) : null}
 
-            {STAFF_REFERRAL_FLOW_ON ? null : (
+            {REFERRAL_SCREENS_ON ? null : (
               <View style={{ gap: 6 }}>
                 {label('SOURCE')}
                 <TextInput value={source} onChangeText={setSource} placeholder="How did you find them? (optional)" placeholderTextColor={C.muted3}
@@ -274,10 +276,10 @@ function AddReferralSheet({ visible, onClose, referrerId }: { visible: boolean; 
             )}
 
             <View style={{ gap: 6 }}>
-              {label(STAFF_REFERRAL_FLOW_ON ? 'WHOSE REFERRAL IS THIS *' : 'INTRODUCED BY A CLIENT')}
+              {label(REFERRAL_SCREENS_ON ? 'WHOSE REFERRAL IS THIS *' : 'INTRODUCED BY A CLIENT')}
               <Pressable onPress={() => setPickerOpen((v) => !v)} accessibilityRole="button" accessibilityLabel="Pick the client who introduced them"
                 style={[field, { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 46 }]}>
-                <Body style={{ flex: 1, fontSize: 14, color: linked ? '#fff' : C.muted3 }}>{linked ? linked.name : STAFF_REFERRAL_FLOW_ON ? 'Choose the client who referred them' : 'None'}</Body>
+                <Body style={{ flex: 1, fontSize: 14, color: linked ? '#fff' : C.muted3 }}>{linked ? linked.name : REFERRAL_SCREENS_ON ? 'Choose the client who referred them' : 'None'}</Body>
                 {linked ? (
                   <Pressable onPress={() => { setLinkedId(null); setLinkedName(''); }} hitSlop={10} accessibilityRole="button" accessibilityLabel="Clear">
                     <Icon name="close" size={13} color={C.muted2} strokeWidth={2.2} />
@@ -289,7 +291,7 @@ function AddReferralSheet({ visible, onClose, referrerId }: { visible: boolean; 
                 <View style={{ borderRadius: 11, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', backgroundColor: '#14100D' }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 9, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.06)' }}>
                     <Icon name="search" size={13} color={C.muted3} strokeWidth={2} />
-                    <TextInput value={clientQ} onChangeText={setClientQ} placeholder={STAFF_REFERRAL_FLOW_ON ? clientWords.search : 'Search your clients'} placeholderTextColor={C.muted3}
+                    <TextInput value={clientQ} onChangeText={setClientQ} placeholder={REFERRAL_SCREENS_ON ? clientWords.search : 'Search your clients'} placeholderTextColor={C.muted3}
                       autoCorrect={false} accessibilityLabel="Search clients"
                       style={{ flex: 1, fontFamily: F.body, fontSize: 13.5, color: '#fff', padding: 0 }} />
                   </View>
@@ -300,7 +302,7 @@ function AddReferralSheet({ visible, onClose, referrerId }: { visible: boolean; 
                       <Body style={{ fontSize: 12, color: C.red, textAlign: 'center', paddingVertical: 16, paddingHorizontal: 12 }}>The client list did not load. Check your connection, then close and open this again.</Body>
                     ) : !shown.length ? (
                       <Body style={{ fontSize: 12, color: C.muted3, textAlign: 'center', paddingVertical: 16, paddingHorizontal: 12 }}>
-                        {STAFF_REFERRAL_FLOW_ON ? (q ? clientWords.emptyTyped : clientWords.emptyIdle) : 'No clients match.'}
+                        {REFERRAL_SCREENS_ON ? (q ? clientWords.emptyTyped : clientWords.emptyIdle) : 'No clients match.'}
                       </Body>
                     ) : shown.map((c: ReferralClientOption) => {
                       const on = c.id === linkedId;
@@ -318,7 +320,7 @@ function AddReferralSheet({ visible, onClose, referrerId }: { visible: boolean; 
               ) : null}
             </View>
 
-            {STAFF_REFERRAL_FLOW_ON ? (
+            {REFERRAL_SCREENS_ON ? (
               <View style={{ gap: 8 }}>
                 {label('RELATION WITH THE CLIENT *')}
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 7 }}>
@@ -341,7 +343,7 @@ function AddReferralSheet({ visible, onClose, referrerId }: { visible: boolean; 
 
             <View style={{ gap: 6 }}>
               {label('NOTES')}
-              <TextInput value={notes} onChangeText={setNotes} placeholder={STAFF_REFERRAL_FLOW_ON ? 'Anything the leads team should know (optional)' : 'Anything admin should know (optional)'} placeholderTextColor={C.muted3}
+              <TextInput value={notes} onChangeText={setNotes} placeholder={REFERRAL_SCREENS_ON ? 'Anything the leads team should know (optional)' : 'Anything admin should know (optional)'} placeholderTextColor={C.muted3}
                 multiline accessibilityLabel="Notes"
                 style={[field, { minHeight: 76, textAlignVertical: 'top' }]} />
             </View>
@@ -360,7 +362,7 @@ function AddReferralSheet({ visible, onClose, referrerId }: { visible: boolean; 
               </LinearGradient>
             </Pressable>
           </View>
-          {STAFF_REFERRAL_FLOW_ON
+          {REFERRAL_SCREENS_ON
             ? (formProblem ? <Body style={{ fontSize: 11, color: C.muted2, textAlign: 'center', marginTop: 7 }}>{formProblem}</Body> : null)
             : (!name.trim() ? <Mono style={{ fontSize: 8.5, color: C.faint, textAlign: 'center', marginTop: 7 }}>A NAME IS ALL THAT IS REQUIRED</Mono> : null)}
         </View>
@@ -376,8 +378,8 @@ export function Referrals() {
      shared test account; doing that here would break both directions, since RLS
      is `referrer_id = auth.uid()` on read AND write. */
   const userId = session?.user?.id ?? null;
-  const q = useMyReferrals(STAFF_REFERRAL_FLOW_ON ? null : userId);
-  const staffQ = useMyStaffReferrals(STAFF_REFERRAL_FLOW_ON ? userId : null);
+  const q = useMyReferrals(REFERRAL_SCREENS_ON ? null : userId);
+  const staffQ = useMyStaffReferrals(REFERRAL_SCREENS_ON ? userId : null);
   const [addOpen, setAddOpen] = React.useState(false);
 
   if (!session) return <AccessPending />;
@@ -386,7 +388,7 @@ export function Referrals() {
   const n = (s: ReferralStatus) => rows.filter((r) => r.status === s).length;
 
   // New flow (21 Nov 2026): the status of each referral follows its lead; nothing waits for an admin.
-  if (STAFF_REFERRAL_FLOW_ON) {
+  if (REFERRAL_SCREENS_ON) {
     const mine = staffQ.data ?? [];
     const counts = referralCounts(mine);
     return (

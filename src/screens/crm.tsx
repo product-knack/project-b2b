@@ -1,6 +1,7 @@
 import { CrmRevenueForecastBanner } from './crmRevenueForecast';
 import { ConsultFollowUpBanner } from '../components/consultCrmUi';
 import { OpsWhatsAppCard } from './opsWhatsApp';
+import { ClientReferralCelebration } from '../components/referralLeadBits';
 import React from 'react';
 import { View, Text, Pressable, ScrollView, TextInput, Alert, Animated, Easing, Modal, ActivityIndicator } from 'react-native';
 import { useKeyboardHeight } from '../lib/useKeyboardHeight';
@@ -331,6 +332,8 @@ export function CrmDashboard() {
       />
       {/* Priority renewals alert (web CRMRevenueForecastBanner) */}
       <CrmRevenueForecastBanner />
+      {/* A client's referral has joined Odds (24 Nov 2026): a celebration, shown only when there is one */}
+      <ClientReferralCelebration />
       <FeatureTour visible={tourOpen} steps={CRM_TOUR} tourName='crm' onClose={() => setTourOpen(false)} />
       {/* Longevity unread — the 2-minute reply commitment, front and centre */}
       <LongevityUnreadAlert crmId={crmId} />

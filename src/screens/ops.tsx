@@ -9,6 +9,9 @@ import { Page, TitleBlock, GreetingHeader, Badge, HScroll, BackLink } from './co
 import { FeatureTour, OPS_TOUR, TourLauncher } from '../components/featureTour';
 import { ClientThreadsUnreadBanner } from '../components/clientThreadsCard';
 import { OpsWhatsAppCard } from './opsWhatsApp';
+import { ReferralCreditAlert } from '../components/referralLeadBits';
+import { useHotReferralLeads } from '../lib/referralLeadQueries';
+import { hotFlashSub, hotFlashTitle, hotWhenShort } from '../lib/referralLeadView';
 import { useStore } from '../store';
 import { useSidebarProfile } from '../lib/navQueries';
 import { useLeadStats, useColdLeads, useOpsFollowUpReminders, useMyOpsProfile } from '../lib/opsLeadQueries';
@@ -189,6 +192,8 @@ export function OpsDashboard() {
   const first = (prof.fullName || 'Ops').split(' ')[0];
   const monthName = new Date().toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', month: 'long' }).toUpperCase();
   const goLeads = (quick?: string) => { set({ crmSection: quick ?? null }); go('ops-leads'); };
+  // Hot leads (24 Nov 2026): leads a team member referred again in the last 7 days. The banner opens them on the Leads screen.
+  const hotLeads = useHotReferralLeads().data ?? [];
 
   // Attention section states — the rows below render dueToday/holds/pending, so the
   // gate must match exactly; overdue follow-ups are covered by the red banner above.
@@ -216,6 +221,19 @@ export function OpsDashboard() {
 
       {/* WhatsApp inbox (19 Nov 2026): the clinic number's chats, unread count, opens the page */}
       <OpsWhatsAppCard />
+
+      {/* Hot leads: a number the team referred again (24 Nov 2026). Nothing is drawn when there is none. */}
+      {hotLeads.length > 0 ? (
+        <OpsAlertBanner
+          color="#EF4444" tint="#F3B0A4" icon="flame"
+          title={hotFlashTitle(hotLeads.length)}
+          sub={hotFlashSub(hotLeads.length)}
+          rows={hotLeads.slice(0, 3).map((l) => ({ key: l.id, main: l.name, meta: hotWhenShort(l) }))}
+          cta="View" onPress={() => goLeads('hot')}
+        />
+      ) : null}
+      {/* Whose referral is this? A converted lead more than one member has a claim on (behind the release switch). */}
+      <ReferralCreditAlert />
 
       {/* Urgent banners — animated, with previews */}
       {overdueFollowUps.length > 0 ? (

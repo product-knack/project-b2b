@@ -347,6 +347,8 @@ export const crmNav: NavGroup[] = [
     // WhatsApp (20 Nov 2026): only for a CRM whose own business number is connected (chrome.tsx hides it otherwise)
     { label: 'WhatsApp', icon: 'bubble', route: 'ops-whatsapp' },
     { label: 'Revenue Forecast', icon: 'rupee', route: 'crm-revenue-forecast' },
+    // My Referrals (24 Nov 2026): the one referral form and tracker for every department (chrome.tsx shows it with the referral screens)
+    { label: 'My Referrals', icon: 'userPlus', route: 'referrals' },
     { label: 'Wallet', icon: 'rupee', route: 'wallet' },
     { label: 'Client complaints', icon: 'alert', route: 'client-complaints' },
     { label: 'Messenger', icon: 'chat', route: 'messenger' },
@@ -414,6 +416,8 @@ export const opsNav: NavGroup[] = [
     { label: 'Dashboard', icon: 'grid', route: 'ops-dashboard' },
     { label: 'Leads', icon: 'users', route: 'ops-leads' },
     { label: 'Clients', icon: 'layers', route: 'ops-clients' },
+    // My Referrals (24 Nov 2026): the one referral form and tracker for every department (chrome.tsx shows it with the referral screens)
+    { label: 'My Referrals', icon: 'userPlus', route: 'referrals' },
     // WhatsApp inbox (19 Nov 2026): the clinic number's chats, as on the web /ops/whatsapp
     { label: 'WhatsApp', icon: 'bubble', route: 'ops-whatsapp' },
     { label: 'Wallet', icon: 'rupee', route: 'wallet' },

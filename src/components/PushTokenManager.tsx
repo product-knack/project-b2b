@@ -86,7 +86,7 @@ export function PushTokenManager() {
     if (t === 'qhp_location_missing') { go(dbRoleRef.current === 'ops' ? 'ops-leads' : 'qhp-manager'); return; }
     if (t === 'qhp_location_added') { go(dbRoleRef.current === 'trainer' ? 'qhp' : homeRouteFor(roleRef.current)); return; }
     // Staff referral converted (21 Nov 2026): trainers and doctors land on My Referrals, anyone else on home.
-    if (t === 'referral_converted') { go(dbRoleRef.current === 'trainer' || dbRoleRef.current === 'doctor' ? 'referrals' : homeRouteFor(roleRef.current)); return; }
+    if (t === 'referral_converted') { go(['trainer', 'doctor', 'crm', 'ops'].includes(dbRoleRef.current ?? '') ? 'referrals' : homeRouteFor(roleRef.current)); return; }
     // Team Wallet (2 Nov 2026): the top-up receipt opens the Wallet screen.
     if (t === 'wallet_topup' || data.route === 'wallet') { go('wallet'); return; }
     if (t === 'client_complaint' || data.route === 'client-complaints') { go('client-complaints'); return; } // a flagged log or a client report (3 Nov 2026)

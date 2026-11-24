@@ -19,6 +19,9 @@ import {
   type Lead, type LeadFilters, type RemarkEntry, type FollowUpEntry, type FollowUpReminder, type CallAttemptEntry,
 } from '../lib/opsLeadQueries';
 import { friendlyError } from '../lib/friendlyError';
+import { HotLeadTag, HotReferralFlash, LeadReferralDetails, LeadReferredTag, isHotLead } from '../components/referralLeadBits';
+import { useHotReferralLeads } from '../lib/referralLeadQueries';
+import { leadReferralInfo } from '../lib/staffReferral';
 
 /* ============ OPS — Leads pipeline (web /ops/leads) ============ */
 
@@ -599,6 +602,8 @@ function LeadSheet({ leadId, rows, profile, partnerName, onClose }: { leadId: st
   const editable = canEditLead(profile, lead);
   const spamAllowed = canMarkLeadSpam(profile);
   const isPotential = !!lead.potential?.marked;
+  // Staff referral (24 Nov 2026): a lead a team member referred carries a tag, and the sheet lists every submission.
+  const referred = leadReferralInfo(lead.remarks).times > 0;
   const remarks: RemarkEntry[] = Array.isArray(lead.remarks) ? [...lead.remarks].reverse() : lead.remark ? [{ text: lead.remark, date: '' }] : [];
   const followUps: FollowUpEntry[] = Array.isArray(lead.follow_ups) ? [...lead.follow_ups].reverse() : [];
   const pendingFu = followUps.find((f) => f.status === 'pending');
@@ -639,8 +644,10 @@ function LeadSheet({ leadId, rows, profile, partnerName, onClose }: { leadId: st
       badge={<Badge text={lead.stage} color={stageColor(lead.stage)} />}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingBottom: 12 }}>
         {/* status chips */}
-        {isPotential || lead.is_dump || lead.lead_type === 'influencer' || lead.qhp_details?.type || lead.partner_lead_id ? (
+        {referred || isPotential || lead.is_dump || lead.lead_type === 'influencer' || lead.qhp_details?.type || lead.partner_lead_id ? (
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+            <HotLeadTag remarks={lead.remarks} stage={lead.stage} />
+            <LeadReferredTag remarks={lead.remarks} />
             {isPotential ? <Badge text="Potential" color={AMBER} /> : null}
             {lead.is_dump ? <Badge text="Dump" color={C.muted2} /> : null}
             {lead.lead_type === 'influencer' ? <Badge text="Influencer" color={PINK} /> : null}
@@ -648,6 +655,9 @@ function LeadSheet({ leadId, rows, profile, partnerName, onClose }: { leadId: st
             {lead.partner_lead_id ? <Badge text={`Couple · ${partnerName ?? '…'}`} color={C.blue} /> : null}
           </View>
         ) : null}
+
+        {/* who referred this lead, and every time it was referred (24 Nov 2026) */}
+        <LeadReferralDetails remarks={lead.remarks} stage={lead.stage} />
 
         {/* contact + actions */}
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
@@ -950,7 +960,7 @@ function FollowUpReminderPanel({ profile }: { profile: any }) {
 }
 
 /* ---------------- Main screen ---------------- */
-type QuickFilter = 'all' | 'week' | 'pipeline' | 'cold' | 'dump' | 'potential' | 'converted';
+type QuickFilter = 'all' | 'week' | 'pipeline' | 'cold' | 'dump' | 'potential' | 'converted' | 'hot';
 export function OpsLeads() {
   const { crmSection, set } = useStore();
   const profQ = useMyOpsProfile();
@@ -969,10 +979,15 @@ export function OpsLeads() {
   const [openLeadId, setOpenLeadId] = React.useState<string | null>(null);
   const [addOpen, setAddOpen] = React.useState(false);
   const profile = profQ.data;
+  // Hot leads (24 Nov 2026): leads a team member referred AGAIN in the last 7 days and that are still open.
+  // The server moved each one to the day of the referral; the flash card on top and the Hot lead tag make it stand out.
+  const hotQ = useHotReferralLeads();
+  const hotLeads = hotQ.data ?? [];
+  const hotIds = hotLeads.map((l) => l.id).join(',');
 
   // Deep-link from the dashboard tiles (crmSection carries the quick filter).
   React.useEffect(() => {
-    if (crmSection && ['week', 'pipeline', 'cold', 'dump', 'potential', 'converted'].includes(crmSection)) { setQuick(crmSection as QuickFilter); set({ crmSection: null }); }
+    if (crmSection && ['week', 'pipeline', 'cold', 'dump', 'potential', 'converted', 'hot'].includes(crmSection)) { setQuick(crmSection as QuickFilter); set({ crmSection: null }); }
   }, [crmSection]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const filters: LeadFilters = React.useMemo(() => {
@@ -985,8 +1000,11 @@ export function OpsLeads() {
     else if (quick === 'cold') { f.stages = ['Not Picked']; f.onlyIds = coldQ.data?.ids ?? []; f.sortBy = 'lead_date'; f.sortDir = 'asc'; }
     else if (quick === 'dump') { f.dumpOnly = true; f.sortBy = 'updated_at'; f.sortDir = 'desc'; }
     else if (quick === 'potential') f.potentialOnly = true;
+    else if (quick === 'hot') { f.onlyIds = hotIds ? hotIds.split(',') : []; f.sortBy = 'updated_at'; f.sortDir = 'desc'; }
     return f;
-  }, [search, page, tab, spamOnly, quick, stageFilter, coldQ.data?.ids]);
+  }, [search, page, tab, spamOnly, quick, stageFilter, coldQ.data?.ids, hotIds]);
+  // The hot view ends by itself when no hot lead is left (the last one converted, closed, or its 7 days passed).
+  React.useEffect(() => { if (quick === 'hot' && hotQ.isSuccess && !hotIds) setQuick('all'); }, [quick, hotQ.isSuccess, hotIds]);
   const q = useLeadsList(filters);
   const s = statsQ.data;
   const rows = q.data?.rows ?? [];
@@ -1048,6 +1066,16 @@ export function OpsLeads() {
       {/* Follow-up reminders — expandable, web OpsFollowUpNotificationBanner */}
       <FollowUpReminderPanel profile={profQ.data} />
 
+      {/* Hot leads: referred again by the team (24 Nov 2026). The flash card; one line with Clear while its view is on. */}
+      {tab === 'leads' && !spamOnly ? (
+        <HotReferralFlash
+          leads={hotLeads}
+          active={quick === 'hot' && !stageFilter}
+          onView={() => { setQuick('hot'); setStageFilter(null); setSearch(''); setPage(1); }}
+          onClear={() => { setQuick('all'); setPage(1); }}
+        />
+      ) : null}
+
       {/* quick-filter stat strip (web StatsCards: Month / Week / Pipeline / Cold / Dump / Potential / Converted) */}
       {s ? (
         <HScroll gap={8}>
@@ -1108,8 +1136,10 @@ export function OpsLeads() {
             const assignee = assigneeFirstName(l.assigned_to);
             const pName = partnerName(l.partner_lead_id);
             const showAttempt = quick === 'cold' && !stageFilter && !l.applicant_lead;
+            const hot = isHotLead(l);
+            const referred = leadReferralInfo(l.remarks).times > 0;
             return (
-              <Card key={l.id} onPress={() => setOpenLeadId(l.id)} colors={['rgba(46,28,18,0.4)', 'rgba(18,14,14,0.5)']} border={hexA(isPotential ? AMBER : col, 0.18)} radius={14} style={{ padding: 12, borderLeftWidth: 3, borderLeftColor: isPotential ? AMBER : col, gap: 6 }}>
+              <Card key={l.id} onPress={() => setOpenLeadId(l.id)} colors={hot ? ['rgba(92,24,18,0.5)', 'rgba(26,12,12,0.55)'] : ['rgba(46,28,18,0.4)', 'rgba(18,14,14,0.5)']} border={hexA(hot ? '#EF4444' : isPotential ? AMBER : col, hot ? 0.5 : 0.18)} radius={14} style={{ padding: 12, borderLeftWidth: 3, borderLeftColor: hot ? '#EF4444' : isPotential ? AMBER : col, gap: 6 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                   {/* monthly serial — avatar slot (web LeadCard #N, restarts every month) */}
                   {serial != null ? (
@@ -1122,8 +1152,10 @@ export function OpsLeads() {
                   {l.applicant_lead?.candidate_type ? <Badge text={l.applicant_lead.candidate_type} color={C.purple} /> : null}
                   <Badge text={l.stage} color={col} />
                 </View>
-                {isPotential || l.is_dump || l.lead_type === 'influencer' || l.qhp_details?.type || pName || assignee ? (
+                {hot || referred || isPotential || l.is_dump || l.lead_type === 'influencer' || l.qhp_details?.type || pName || assignee ? (
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                    <HotLeadTag remarks={l.remarks} stage={l.stage} />
+                    <LeadReferredTag remarks={l.remarks} />
                     {isPotential ? <Badge text="Potential" color={AMBER} /> : null}
                     {l.is_dump ? <Badge text="Dump" color={C.muted2} /> : null}
                     {l.lead_type === 'influencer' ? <Badge text="Influencer" color={PINK} /> : null}
