@@ -180,7 +180,7 @@ const REFUSED: Record<string, string> = {
 
 const SAVED: Record<string, string> = {
   new_lead: "Referral sent to the leads team.",
-  added_to_lead: "This number is already with the leads team. Your referral was added to it and marked as a duplicate.",
+  added_to_lead: "This number is already with the leads team. Your referral was added to it and marked as a duplicate, and the leads team sees it as a hot lead today.",
   already_yours: "You have already referred this person.",
 };
 
@@ -293,6 +293,14 @@ export interface LeadReferralEntry {
   referredName: string | null;
   /** Submitted when the number was already a lead. */
   duplicate: boolean;
+  /** The day of this submission (YYYY-MM-DD) when it was a duplicate, else null. */
+  on: string | null;
+  /** For a duplicate: the lead's date before this referral moved it to the day of the referral (YYYY-MM-DD). */
+  previousLeadDate: string | null;
+  /** The day the lead FIRST came (YYYY-MM-DD), and its stage and source before this referral. */
+  firstLeadDate: string | null;
+  previousStage: string | null;
+  previousSource: string | null;
 }
 
 export interface LeadReferralInfo {
@@ -322,6 +330,7 @@ export function leadReferralInfo(remarks: unknown): LeadReferralInfo {
   const out: LeadReferralInfo = { times: 0, members: [], lastReferredOn: null, entries: [], duplicate: false };
   if (!Array.isArray(remarks)) return out;
   const text = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null);
+  const ymd = (v: unknown): string | null => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10) : null);
   for (const e of remarks) {
     if (!e || typeof e !== "object" || (e as Record<string, unknown>).kind !== "staff_referral") continue;
     const entry = e as Record<string, unknown>;
@@ -339,6 +348,11 @@ export function leadReferralInfo(remarks: unknown): LeadReferralInfo {
       note: text(entry.note),
       referredName: text(entry.referred_name),
       duplicate,
+      on: duplicate ? day : null,
+      previousLeadDate: ymd(entry.previous_lead_date),
+      firstLeadDate: ymd(entry.first_lead_date) ?? ymd(entry.previous_lead_date),
+      previousStage: text(entry.previous_stage),
+      previousSource: text(entry.previous_source),
     });
     if (duplicate) out.duplicate = true;
   }
@@ -361,6 +375,52 @@ export function leadReferredTag(info: LeadReferralInfo): string {
   if (info.times <= 0) return "";
   if (info.duplicate) return info.times > 1 ? `Duplicate referral (${info.times})` : "Duplicate referral";
   return "Referred";
+}
+
+// ---------------------------------------------------------------- the hot lead (a lead referred again)
+
+/** A lead a team member referred AGAIN is hot for this many days from that referral (the day itself is day 0). */
+export const HOT_REFERRAL_DAYS = 7;
+
+const dayNumber = (ymd: string | null | undefined): number | null => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(ymd ?? ""));
+  return m ? Math.floor(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) / 86400000) : null;
+};
+
+export interface HotReferral {
+  /** Show the Hot lead tag and the flash card. */
+  hot: boolean;
+  /** The latest duplicate submission, when there is one. */
+  latest: LeadReferralEntry | null;
+  /** "today", "yesterday" or "on 21 Nov 2026". */
+  when: string;
+}
+
+/**
+ * Whether a lead is a hot lead: a team member referred a number that was ALREADY a lead (we had this person
+ * before and they did not convert), within the last HOT_REFERRAL_DAYS days, and the lead is still open.
+ * `today` is the India day, YYYY-MM-DD.
+ */
+export function leadHotReferral(remarks: unknown, stage: string | null | undefined, today: string): HotReferral {
+  const info = leadReferralInfo(remarks);
+  let latest: LeadReferralEntry | null = null;
+  for (const e of info.entries) if (e.duplicate && e.on && (!latest || e.on >= (latest.on ?? ""))) latest = e;
+  const a = dayNumber(latest?.on), b = dayNumber(today);
+  const closed = stage === "Converted" || stage === "Lost" || stage === "Refunded";
+  if (!latest || a === null || b === null) return { hot: false, latest, when: "" };
+  const age = b - a;
+  const when = age === 0 ? "today" : age === 1 ? "yesterday" : `on ${referralDay(latest.on)}`;
+  return { hot: !closed && age >= 0 && age < HOT_REFERRAL_DAYS, latest, when };
+}
+
+/** The line on the flash card: who referred the lead again, whose referral it is, and when it first came. */
+export function hotReferralLine(h: HotReferral): string {
+  const e = h.latest;
+  if (!e) return "";
+  const who = `Referred again ${h.when} by ${e.member}`;
+  const client = e.client ? `, referral of ${e.client}${e.relation ? ` (${e.relation})` : ""}` : "";
+  const first = e.firstLeadDate ? ` First came on ${referralDay(e.firstLeadDate)}${e.previousSource ? `, source ${e.previousSource}` : ""}.` : "";
+  return `${who}${client}.${first}`;
 }
 
 // ---------------------------------------------------------------- the Ops alert
