@@ -74,6 +74,14 @@ export async function dropLocalListen(clientId: string, which: Which, generatedA
   if (store[key] && store[key].generatedAt === generatedAt) { delete store[key]; await persist(); listeners.forEach((l) => l()); }
 }
 
+/** The signed-in user's records the server has not confirmed yet: heard, or partly heard, on this phone only
+    (25 Nov 2026). listenSync sends them again until the server has them. */
+export async function getUnsyncedLocalListens(): Promise<LocalListen[]> {
+  await load();
+  const prefix = `${uid ?? '-'}|`;
+  return Object.keys(store).filter((key) => key.startsWith(prefix)).map((key) => store[key]).filter((r) => !!r && !r.synced && r.percent > 0);
+}
+
 /** React: the phone's records for one client (re-rendered on every write). */
 export function useLocalListens(clientId: string | null | undefined): LocalListens {
   const [, tick] = React.useReducer((n: number) => n + 1, 0);

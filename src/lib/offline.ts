@@ -359,6 +359,11 @@ async function processItem(item: OutboxItem): Promise<{ linkPending?: boolean } 
 export async function drainOutbox() {
   await load();
   if (draining || !online) return;
+  // Spoken-summary listens the server has not confirmed (25 Nov 2026): a listen heard on a weak or missing
+  // connection is queued again here, so it is marked heard on the server and never asked for a second time.
+  // Lazy require: listenSync imports this module. It never throws and never blocks the drain.
+  try { await require('./listenSync').queueUnsyncedListens(); } catch { /* the drain goes on */ }
+  if (draining || !online) return;
   const pending = items.filter((i) => i.status === 'pending' && mine(i));
   if (!pending.length) return;
   draining = true;

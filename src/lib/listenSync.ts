@@ -3,13 +3,19 @@
    (log_summary_listen / log_summary_listen_progress with the real time and the briefing day), through the outbox
    when offline (kinds summary-listen / summary-listen-progress, drained with the workout logs, one queued progress
    per client, kind and build with the highest percent). A stale answer (the summary was rebuilt) drops the phone's
-   record for that build. Nothing here blocks the voice: a failed write is logged and retried by the drain. */
+   record for that build. Nothing here blocks the voice: a failed write is logged and retried by the drain.
+
+   25 Nov 2026 (owner: a summary heard on a weak or missing connection must be marked heard on the server, not
+   asked again): a write that fails for ANY reason other than the server's final refusal is queued (before, only
+   a connection error was; an expired sign-in or a server error lost the mark), and every outbox drain first
+   queues again each record of the phone the server has not confirmed (queueUnsyncedListens): the app closed
+   while the write was on its way, or a queued write the server turned down, is sent again. */
 import React from 'react';
 import { Platform } from 'react-native';
 import { supabase } from './supabase';
 import { withTimeout, NET_MS } from './withTimeout';
 import { enqueueOutbox, getIsOnline, getOutboxMine, updateOutboxItem } from './offline';
-import { recordLocalListen, markLocalListenSynced, dropLocalListen } from './listenLocal';
+import { recordLocalListen, markLocalListenSynced, dropLocalListen, getUnsyncedLocalListens } from './listenLocal';
 import { generatedAtOf, summaryOf, type ClientHealthSummaryRow, type Which } from './clientHealthSummary';
 
 export type ListenPlayPayload = { clientId: string; which: Which; version: number | null; generatedAt: string | null; briefingDate: string | null; at: string };
@@ -42,12 +48,25 @@ export async function submitQueuedListen(kind: 'summary-listen' | 'summary-liste
     if (kind === 'summary-listen') await submitSummaryListen(payload as ListenPlayPayload);
     else await submitSummaryListenProgress(payload as ListenProgressPayload);
   } catch (e: any) {
-    if (/LISTEN_TOO_OLD|No summary on file|Not allowed to listen/.test(String(e?.message ?? ''))) return; // final: drop the item
+    if (isFinalRefusal(e)) {
+      // final: drop the item, and stop offering the phone's record again (the server will never take it)
+      if (kind === 'summary-listen-progress') await markLocalListenSynced(payload?.clientId, payload?.which, payload?.generatedAt ?? null);
+      return;
+    }
     throw e;
   }
 }
 
 const isNetworkError = (e: any) => /network|fetch|timeout|took too long|ECONN|ENOTFOUND/i.test(String(e?.message ?? e?.name ?? ''));
+/** The server's own "no": the listen is older than its 7-day window, there is no summary, or this person may not listen. */
+const isFinalRefusal = (e: any) => /LISTEN_TOO_OLD|No summary on file|Not allowed to listen/.test(String(e?.message ?? ''));
+
+/* A write that is on its way right now (client | kind | build): the sweep below leaves it alone. */
+const inFlight = new Set<string>();
+const flightKey = (clientId: string, which: Which, generatedAt: string | null) => `${clientId}|${which}|${generatedAt ?? ''}`;
+const progressLabel = (which: Which, percent: number) => `Listened ${Math.round(percent)} percent · ${which === 'weekly' ? "This week's training" : 'Health context'}`;
+/** A queued listen the server turned down is offered again this many times in all, then left for review. */
+export const LISTEN_RETRY_MAX = 8;
 
 /** Play: the phone's record (percent 0 for this build) and the server entry, queued when offline. */
 export async function writeListenPlay(row: ClientHealthSummaryRow | null | undefined, clientId: string, which: Which): Promise<void> {
@@ -67,7 +86,14 @@ export async function writeListenProgress(row: ClientHealthSummaryRow | null | u
   const rec = await recordLocalListen({ clientId, which, version: summaryOf(row, which)?.version ?? null, generatedAt, briefingDate: row?.briefing_date ?? null, percent });
   const p: ListenProgressPayload = { clientId, which, version: rec.version, generatedAt, briefingDate: rec.briefingDate, at: rec.heardAt ?? rec.at, percent: rec.percent };
   if (getIsOnline()) {
-    try { await submitSummaryListenProgress(p); return; } catch (e) { if (!isNetworkError(e)) { console.warn('[listen] progress not written:', String((e as Error)?.message)); return; } }
+    const fk = flightKey(clientId, which, generatedAt);
+    inFlight.add(fk);
+    try { await submitSummaryListenProgress(p); return; } catch (e) {
+      // The server's final "no": nothing to send again. Anything else (no connection, a slow request, an expired
+      // sign-in, a server error) is queued below, so the heard mark is not lost.
+      if (isFinalRefusal(e)) { await markLocalListenSynced(clientId, which, generatedAt); return; }
+      if (!isNetworkError(e)) console.warn('[listen] progress queued after:', String((e as Error)?.message));
+    } finally { inFlight.delete(fk); }
   }
   const existing = getOutboxMine().find((i) => i.kind === 'summary-listen-progress' && i.status !== 'syncing'
     && i.payload?.clientId === clientId && i.payload?.which === which && i.payload?.generatedAt === generatedAt);
@@ -75,7 +101,44 @@ export async function writeListenProgress(row: ClientHealthSummaryRow | null | u
     if ((existing.payload?.percent ?? 0) < p.percent) await updateOutboxItem(existing.id, { payload: { ...existing.payload, percent: p.percent, at: p.at } });
     return;
   }
-  await enqueueOutbox('summary-listen-progress', `Listened ${Math.round(p.percent)} percent · ${which === 'weekly' ? "This week's training" : 'Health context'}`, p, { autoDrain: false });
+  await enqueueOutbox('summary-listen-progress', progressLabel(which, p.percent), p, { autoDrain: false });
+}
+
+/**
+ * Every record on this phone the server has not confirmed is queued again (25 Nov 2026). Called at the start of
+ * each outbox drain (app start, the connection coming back, sign-in, opening the dashboard or My Crew), so a
+ * listen heard on a weak or missing connection reaches the server by itself:
+ *  - no queued item for it (the app was closed while the write was on its way): one is queued;
+ *  - a queued item the server turned down: it is offered again, LISTEN_RETRY_MAX times in all;
+ *  - a queued item with a lower percent: it takes the phone's percent.
+ * Returns how many items it queued or woke up. Never throws.
+ */
+let sweeping: Promise<number> | null = null;
+export function queueUnsyncedListens(): Promise<number> {
+  if (sweeping) return sweeping;
+  sweeping = (async () => {
+    let n = 0;
+    try {
+      for (const r of await getUnsyncedLocalListens()) {
+        if (inFlight.has(flightKey(r.clientId, r.which, r.generatedAt))) continue;
+        const p: ListenProgressPayload = { clientId: r.clientId, which: r.which, version: r.version, generatedAt: r.generatedAt, briefingDate: r.briefingDate, at: r.heardAt ?? r.at, percent: r.percent };
+        const item = getOutboxMine().find((i) => i.kind === 'summary-listen-progress'
+          && i.payload?.clientId === r.clientId && i.payload?.which === r.which && i.payload?.generatedAt === r.generatedAt);
+        if (!item) { await enqueueOutbox('summary-listen-progress', progressLabel(r.which, r.percent), p, { autoDrain: false }); n++; continue; }
+        if (item.status === 'syncing') continue;
+        const better = (item.payload?.percent ?? 0) < p.percent;
+        const wake = item.status === 'failed' && item.attempts < LISTEN_RETRY_MAX;
+        if (better || wake) {
+          await updateOutboxItem(item.id, { payload: better ? { ...item.payload, percent: p.percent, at: p.at } : item.payload });
+          n++;
+        }
+      }
+    } catch (e) {
+      console.warn('[listen] unsent listens not queued:', String((e as Error)?.message));
+    }
+    return n;
+  })().finally(() => { sweeping = null; });
+  return sweeping;
 }
 
 /* Milestones: the server is told at 25, 50, 75 and the threshold / 100, and the final percent when the run stops.
