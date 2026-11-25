@@ -378,6 +378,37 @@ export function leadReferredTag(info: LeadReferralInfo): string {
   return "Referred";
 }
 
+// ---------------------------------------------------------------- the name a referral gave
+
+const nameWords = (v: string | null | undefined): string[] =>
+  String(v ?? "").toLowerCase().replace(/[^a-z0-9\u0900-\u097f ]+/g, " ").split(" ").filter(Boolean);
+
+/**
+ * Whether two names are one person's name written two ways: the same words, or one a shortened form of the
+ * other ("Rohan M" and "Rohan Mehta", "Rohan" and "Rohan Mehta"). Empty names are never the same.
+ */
+export function sameReferredName(a: string | null | undefined, b: string | null | undefined): boolean {
+  const x = nameWords(a), y = nameWords(b);
+  if (x.length === 0 || y.length === 0) return false;
+  const [short, long] = x.length <= y.length ? [x, y] : [y, x];
+  return short.every((w, i) => long[i] !== undefined && long[i].startsWith(w));
+}
+
+/**
+ * A referral is matched to a lead by the phone number, so it can land on a lead that carries ANOTHER name (the
+ * member referred "Anjana", the number is already the lead "Vashist Dev"). This returns the name the latest
+ * such referral gave, so the Leads page can show it beside the lead's own name; null when every referral gave
+ * the lead's own name.
+ */
+export function referredAsName(remarks: unknown, leadName: string | null | undefined): string | null {
+  const entries = leadReferralInfo(remarks).entries;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const given = entries[i].referredName;
+    if (given && !sameReferredName(given, leadName)) return given;
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------- the hot lead (a lead referred again)
 
 /** A lead a team member referred AGAIN is hot for this many days from that referral (the day itself is day 0). */
