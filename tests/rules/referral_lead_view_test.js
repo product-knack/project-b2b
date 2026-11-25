@@ -92,8 +92,8 @@ eq('the words on the card', [W.winHeadline(wins[0]), W.winLine(wins[0]), W.winAs
 eq("the rules file is the web's, line for line", read('/src/lib/referralWins.ts').includes('get_my_client_referral_wins') && !read('/src/lib/referralWins.ts').includes('\r'), true);
 
 // ---- the screens switch: the release switch, or a development run
-eq('THE RELEASE SWITCH IS OFF', R.STAFF_REFERRAL_FLOW_ON, false);
-eq('the new screens are off in a build people install, on in a development run', [load('staffReferralSwitch').REFERRAL_SCREENS_ON, load('staffReferralSwitch', { __DEV__: false }).REFERRAL_SCREENS_ON, load('staffReferralSwitch', { __DEV__: true }).REFERRAL_SCREENS_ON], [false, false, true]);
+eq('THE RELEASE SWITCH IS ON (released 25 Nov 2026)', R.STAFF_REFERRAL_FLOW_ON, true);
+eq('released: the new screens are on in a build people install and in a development run', [load('staffReferralSwitch').REFERRAL_SCREENS_ON, load('staffReferralSwitch', { __DEV__: false }).REFERRAL_SCREENS_ON, load('staffReferralSwitch', { __DEV__: true }).REFERRAL_SCREENS_ON], [true, true, true]);
 
 // ---- the wiring
 const leads = read('/src/screens/opsLeads.tsx');

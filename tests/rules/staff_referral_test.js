@@ -13,7 +13,7 @@ let fails = 0;
 const eq = (name, got, want) => { const ok = JSON.stringify(got) === JSON.stringify(want); if (!ok) fails++; console.log(ok ? 'PASS' : 'FAIL', name, ok ? '' : `got ${JSON.stringify(got)} want ${JSON.stringify(want)}`); };
 const read = (rel) => fs.readFileSync(ROOT + rel, 'utf8');
 
-eq('THE RELEASE SWITCH IS OFF', P.STAFF_REFERRAL_FLOW_ON, false);
+eq('THE RELEASE SWITCH IS ON (released 25 Nov 2026)', P.STAFF_REFERRAL_FLOW_ON, true);
 eq('status words', ['in_progress', 'qhp_booked', 'qhp_done', 'payment_awaited', 'credit_deciding', 'converted', 'credited_other', 'no_credit', 'not_converted', 'waiting_admin', 'approved', 'rejected'].map((k) => P.referralStatus(k).label),
   ['In progress', 'QHP booked', 'QHP done', 'Enrolled, payment awaited', 'Converted, credit being decided', 'Converted', 'Converted, credited to another member', 'Converted, no referral credit', 'Not converted', 'Waiting for admin', 'Approved', 'Rejected']);
 eq('an unknown status reads as In progress', [P.referralStatus('new_one').label, P.referralStatus(null).key], ['In progress', 'in_progress']);

@@ -3,9 +3,9 @@ import { STAFF_REFERRAL_FLOW_ON } from './staffReferral';
 /**
  * Whether the new referral screens are shown in the app (24 Nov 2026). The web has the same file.
  *
- * In a build people install, the release switch alone decides (STAFF_REFERRAL_FLOW_ON, still off: the owner
- * holds the release). On a development run (Expo, with the code on the owner's computer) they are shown as
- * well, so the whole flow can be tried on a phone before it is released. Nothing else reads this: the admin's
+ * In a build people install, the release switch alone decides (STAFF_REFERRAL_FLOW_ON, ON since 25 Nov 2026,
+ * the owner: "release it"; it reaches people with the next build). On a development run (Expo, with the code
+ * on the owner's computer) they are shown whatever the switch says. Nothing else reads this: the admin's
  * approval list and the incentive counts keep to the release switch itself.
  *
  * NOT behind this switch, as on the web: the Hot lead tag, the flash card and the Referred / Duplicate tag on

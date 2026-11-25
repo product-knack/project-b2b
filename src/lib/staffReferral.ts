@@ -16,10 +16,11 @@
  */
 
 /**
- * THE RELEASE SWITCH. While false the old screens work exactly as before (admin approval), and nothing of the
- * new flow is shown. The owner holds the release until the incentive rule is confirmed with the policy owner.
+ * THE RELEASE SWITCH. ON since 25 Nov 2026 (the owner: "release it"): the one standard referral form, the
+ * tracker and the rest of the new flow are what every department sees. While false the old screens work
+ * exactly as before (admin approval), and nothing of the new flow is shown.
  */
-export const STAFF_REFERRAL_FLOW_ON = false;
+export const STAFF_REFERRAL_FLOW_ON = true;
 
 export type ReferralStatusKey =
   | "in_progress" | "qhp_booked" | "qhp_done" | "payment_awaited" | "credit_deciding" | "converted"
